@@ -1,0 +1,28 @@
+import { existsSync } from "node:fs";
+import { defineConfig, devices } from "@playwright/test";
+
+if (existsSync(".env")) process.loadEnvFile(".env");
+
+const PORT = 3000;
+const baseURL = `http://localhost:${PORT}`;
+
+export default defineConfig({
+  testDir: "./tests/e2e",
+  fullyParallel: false,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
+  use: {
+    baseURL,
+    trace: "retain-on-failure",
+    timezoneId: "Asia/Manila",
+    locale: "en-PH",
+  },
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  webServer: {
+    command: "npm run dev",
+    url: baseURL,
+    reuseExistingServer: !process.env.CI,
+    timeout: 180_000,
+  },
+});

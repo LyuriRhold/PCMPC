@@ -3,12 +3,12 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 00
+**Current phase:** 01
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
 |---|---|---|---|---|
-| 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | ⬜ | | |
+| 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | 🟡 awaiting review | phase-00-foundation | |
 | 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ⬜ | | |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ⬜ | | |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ⬜ | | |
@@ -31,20 +31,20 @@
 ## Checklists
 
 ### Phase 00 — Foundation & Loop Gate
-- [ ] T0.1 `git init`, .gitignore, .editorconfig, .nvmrc, README
-- [ ] T0.2 Scaffold Next.js (App Router, TypeScript, Tailwind, ESLint, `src/`, alias `@/*`, npm)
-- [ ] T0.3 shadcn/ui init
-- [ ] T0.4 `docker-compose.yml` with Postgres (latest stable major), creating DBs `pcmpc` and `pcmpc_test`
-- [ ] T0.5 Drizzle setup: `pg` client, config, `db:*` scripts, test-DB lifecycle
-- [ ] T0.6 `src/lib/money.ts` (bigint centavos, HALF-UP, allocate)
-- [ ] T0.7 `src/lib/dates.ts` (Asia/Manila business date, addMonths, daysBetween)
-- [ ] T0.8 Test harness (Vitest projects, Playwright, placeholder scanner, package scripts)
-- [ ] T0.9 Loop files exactly as in `LOOP.md §2`
-- [ ] T0.10 `/health` page (version, DB, business date)
-- [ ] T0.11 CI workflow `.github/workflows/ci.yml`
-- [ ] T0.12 Prove the gate (`LOOP.md §2.6`) and record the result in the Phase 00 summary
-- [ ] Acceptance tests written first (tests/acceptance/phase-00.test.ts)
-- [ ] Exit checks passed
+- [x] T0.1 `git init`, .gitignore, .editorconfig, .nvmrc, README
+- [x] T0.2 Scaffold Next.js (App Router, TypeScript, Tailwind, ESLint, `src/`, alias `@/*`, npm)
+- [x] T0.3 shadcn/ui init, staff layout (sidebar, business-date top bar), `<Peso>` UI helper
+- [x] T0.4 Local Postgres 18 (portable binaries; `db:up`/`db:down` via `scripts/db.mjs`, no docker-compose) creating DBs `pcmpc` and `pcmpc_test`
+- [x] T0.5 Drizzle setup: `pg` client, config, `db:*` scripts, test-DB lifecycle
+- [x] T0.6 `src/lib/money.ts` (bigint centavos, HALF-UP, allocate)
+- [x] T0.7 `src/lib/dates.ts` (Asia/Manila business date, addMonths, daysBetween)
+- [x] T0.8 Test harness (Vitest projects, Playwright, placeholder scanner, package scripts)
+- [x] T0.9 Loop files exactly as in `LOOP.md §2`
+- [x] T0.10 `/health` page (version, DB, business date)
+- [x] T0.11 CI workflow `.github/workflows/ci.yml`
+- [x] T0.12 Prove the gate (`LOOP.md §2.6`) and record the result in the Phase 00 summary
+- [x] Acceptance tests written first (tests/acceptance/phase-00.test.ts)
+- [x] Exit checks passed
 
 ### Phase 01 — Auth, Roles, Audit Trail & Coop Settings
 - [ ] T1.1 Choose Better Auth vs Auth.js, record the decision, install & configure
@@ -254,6 +254,8 @@
 - 2026-10-07 · plan · Money stored as bigint centavos; HALF-UP rounding at defined points only · accounting accuracy
 - 2026-10-07 · plan v1.1 · Water service billing (member + non-member connections) is the core module, built right after the platform (Phases 05–07) · main purpose of the MIS
 - 2026-10-07 · plan v1.1 · Cashiering is a pluggable registry (Phase 04); every module registers its own receipt items · one counter, one receipt
+- 2026-10-07 · phase 00 · Local DB is PostgreSQL 18.6 portable binaries (no Docker, no admin), managed by `scripts/db.mjs`; T0.4 adapted (no docker-compose) · Docker and native Postgres not installed; user chose portable over SQL Server so dev matches Neon (Postgres)
+- 2026-10-07 · phase 00 · Pinned stable versions: Node 24 LTS, Next.js 16.4.0 (Cache Components + Partial Prefetching on), React 19.3, TypeScript 5, Tailwind 4, shadcn 4 (base-nova), drizzle-orm 0.45.3 + drizzle-kit 0.31.11, pg 8.23, Vitest 5.0.3, Playwright 1.63, zod 4.6, decimal.js 10.6, date-fns 4.4 + @date-fns/tz 1.5, PostgreSQL 18.6 · PLAN §4 asks to record them
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)
@@ -268,3 +270,34 @@
 ## Phase summaries
 <!-- Claude appends "### Phase XX summary" here at the end of each phase:
 Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate proof / test counts -->
+
+### Phase 00 summary
+**Built**
+- Next.js 16.4 (App Router, TS `strict` + `noUncheckedIndexedAccess`, Tailwind 4, shadcn/ui), with a staff layout: a sidebar driven by `src/components/layout/nav.ts` (only built modules are listed), a top bar with the Manila business date, and a `<Peso>` display helper.
+- Local PostgreSQL 18.6 with `scripts/db.mjs` (`db:up`, `db:down`, `db:reset`, `db:status`), which creates `pcmpc` and `pcmpc_test`. Drizzle client (`pg` Pool), `withTx`, migrate/seed scripts with a baseline migration, and a `SEED_STEPS` registry that later phases add to.
+- `src/lib/money.ts`: bigint centavos, `parse`/`format`, `add`/`sub`/`sum`, `mulRate` (HALF_UP default, plus HALF_EVEN/DOWN/UP), and `allocate` (largest remainder). No floats.
+- `src/lib/dates.ts`: `businessToday(now | clock)`, `setClock`, `addMonths` (clamped to month end), `addDays`, `daysBetween`, `monthEnd`, `quarterOf`, `formatDate`.
+- Test harness: Vitest projects (unit / integration / acceptance). DB projects migrate once and truncate `public` before each test, refuse any DB not named `*_test`, and run with TZ=UTC. Playwright starts the dev server with the Asia/Manila timezone.
+- `scripts/scan-placeholders.mjs` (with fixtures and its own unit tests), and the loop files copied verbatim from LOOP.md §2 (`.claude/settings.json` Stop hook, `scripts/gate.mjs`, the `reviewer` agent).
+- `/health` page (version, `SELECT 1`, business date, environment) and `.github/workflows/ci.yml` (postgres:18 service → npm ci → db:up → migrate → seed → gate → build → e2e).
+
+**Decisions**
+- Portable PostgreSQL in `%LOCALAPPDATA%\pcmpc-pg`: Docker and native Postgres weren't installed, the user has no admin rights, and they chose this over SQL Server so dev matches Neon.
+- An ESLint `no-restricted-syntax` rule bans `new Date()` and `Date.now()` in `src/**` except `src/lib/dates.ts`, so the business-date rule is checked mechanically.
+- Next.js and shadcn create-app defaults kept: Cache Components, Partial Prefetching and the `base-nova` style. Request-time data, such as the business date, uses `connection()` inside `<Suspense>`.
+
+**Deviations from spec (with reason)**
+- T0.4: no `docker-compose.yml`. `scripts/db.mjs` supports portable/service/external modes instead, because Docker isn't available (user-approved). CI uses `PG_MODE=external` with a Postgres service container.
+- LOOP §2.4 `typecheck` is `next typegen && tsc --noEmit`, not just `tsc --noEmit`. Next 16 generates route types such as `LayoutProps`, so a fresh clone fails typecheck without typegen.
+- The acceptance tests were committed after T0.5, not before T0.1, because they need the Vitest harness and test DB from T0.5. They were confirmed red, failing on missing `@/lib/money` and `@/lib/dates` modules, before T0.6/T0.7 were written.
+- `db:migrate` and `db:seed` scripts are `.mts` files run with `tsx`, because the package is CommonJS-typed and the scripts use top-level await.
+
+**Gate proof (T0.12)**: on branch `scratch/gate-proof`, `mulRate`'s default was changed from HALF_UP to DOWN, and Claude tried to stop. The Stop hook **blocked** (attempt 1/8): A0.2 (1833n ≠ 1834n), A0.3 (12n ≠ 13n) and 2 unit tests failed. Claude restored HALF_UP and the gate went green (100 tests). The scratch branch was deleted. The hook then allows the stop when green, which is the normal end of this turn.
+
+**Exit checks**: `npm run gate` green (6 test files, 100 tests: unit 85, integration 5, acceptance 10). `npm run build` green. `npm run e2e` green (A0.10). Fresh `db:reset → db:migrate → db:seed` OK. Fresh clone → `npm ci → db:up → db:migrate → next dev` → `/health` shows `DB: OK` and `Oct 07, 2026`.
+
+**Follow-ups**
+- CI has never actually run: nothing was pushed (pushing isn't allowed). Check the first run after Rhold pushes.
+- `npm audit` reports advisories in the scaffold's dependency tree. Review them in Phase 18 (T18.2).
+- The portable Postgres doesn't start with Windows: run `npm run db:up` after each reboot.
+- The parent folder `C:\Users\rldejoya\source\repos` is itself a git repo, and it lists `PCMPC/` as untracked. Consider adding it to the parent's `.gitignore`.

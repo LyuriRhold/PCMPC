@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)", "Bash(npm install:*)", "Bash(npx drizzle-kit:*)", "Bash(npx playwright:*)",
+      "Bash(npx shadcn@latest:*)", "Bash(git status)", "Bash(git diff:*)", "Bash(git add:*)",
+      "Bash(git commit:*)", "Bash(git checkout:*)", "Bash(git log:*)", "Bash(docker compose:*)",
+      "Bash(node scripts/*)"
+    ],
+    "deny": ["Bash(git push:*)", "Bash(vercel:*)", "Read(.env.production*)"]
+  },
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "node scripts/gate.mjs", "timeout": 900 } ] }
+    ]
+  }
+}

@@ -33,11 +33,11 @@
 ### Phase 00 — Foundation & Loop Gate
 - [x] T0.1 `git init`, .gitignore, .editorconfig, .nvmrc, README
 - [x] T0.2 Scaffold Next.js (App Router, TypeScript, Tailwind, ESLint, `src/`, alias `@/*`, npm)
-- [ ] T0.3 shadcn/ui init
+- [x] T0.3 shadcn/ui init, staff layout (sidebar, business-date top bar), `<Peso>` UI helper
 - [x] T0.4 Local Postgres 18 (portable binaries; `db:up`/`db:down` via `scripts/db.mjs`, no docker-compose) creating DBs `pcmpc` and `pcmpc_test`
 - [x] T0.5 Drizzle setup: `pg` client, config, `db:*` scripts, test-DB lifecycle
 - [x] T0.6 `src/lib/money.ts` (bigint centavos, HALF-UP, allocate)
-- [ ] T0.7 `src/lib/dates.ts` (Asia/Manila business date, addMonths, daysBetween)
+- [x] T0.7 `src/lib/dates.ts` (Asia/Manila business date, addMonths, daysBetween)
 - [ ] T0.8 Test harness (Vitest projects, Playwright, placeholder scanner, package scripts)
 - [ ] T0.9 Loop files exactly as in `LOOP.md §2`
 - [ ] T0.10 `/health` page (version, DB, business date)

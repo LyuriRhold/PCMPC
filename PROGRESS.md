@@ -43,7 +43,7 @@
 - [ ] T0.10 `/health` page (version, DB, business date)
 - [ ] T0.11 CI workflow `.github/workflows/ci.yml`
 - [ ] T0.12 Prove the gate (`LOOP.md §2.6`) and record the result in the Phase 00 summary
-- [ ] Acceptance tests written first (tests/acceptance/phase-00.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-00.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 01 — Auth, Roles, Audit Trail & Coop Settings

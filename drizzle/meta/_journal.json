@@ -8,6 +8,20 @@
       "when": 1791345912153,
       "tag": "0000_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791357681539,
+      "tag": "0001_auth_audit_settings_numbering",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791357700232,
+      "tag": "0002_audit_log_immutable",
+      "breakpoints": true
     }
   ]
 }

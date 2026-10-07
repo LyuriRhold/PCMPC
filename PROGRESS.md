@@ -48,7 +48,7 @@
 
 ### Phase 01 — Auth, Roles, Audit Trail & Coop Settings
 - [ ] T1.1 Choose Better Auth vs Auth.js, record the decision, install & configure
-- [ ] T1.2 Schema + migrations: users, roles, permissions, audit_log (+ trigger), settings, number_series
+- [x] T1.2 Schema + migrations: users, roles, permissions, audit_log (+ trigger), settings, number_series
 - [ ] T1.3 Seed: roles, permission matrix, settings defaults, number series, first admin
 - [ ] T1.4 `src/lib/auth-guard.ts` (requirePermission, assertNotSameUser)
 - [ ] T1.5 `src/lib/audit.ts` audit() + audit log viewer

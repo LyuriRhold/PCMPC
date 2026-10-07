@@ -1,3 +1,5 @@
-// Drizzle schema barrel. Each module's tables live in src/modules/<module>/schema.ts
-// and are re-exported here as the module is built (Phase 01 onward).
-export {};
+// Drizzle schema barrel: every module's tables, for the client and drizzle-kit.
+export * from "@/modules/auth/schema";
+export * from "@/modules/audit/schema";
+export * from "@/modules/settings/schema";
+export * from "@/modules/numbering/schema";

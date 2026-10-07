@@ -36,7 +36,7 @@
 - [ ] T0.3 shadcn/ui init
 - [x] T0.4 Local Postgres 18 (portable binaries; `db:up`/`db:down` via `scripts/db.mjs`, no docker-compose) creating DBs `pcmpc` and `pcmpc_test`
 - [x] T0.5 Drizzle setup: `pg` client, config, `db:*` scripts, test-DB lifecycle
-- [ ] T0.6 `src/lib/money.ts` (bigint centavos, HALF-UP, allocate)
+- [x] T0.6 `src/lib/money.ts` (bigint centavos, HALF-UP, allocate)
 - [ ] T0.7 `src/lib/dates.ts` (Asia/Manila business date, addMonths, daysBetween)
 - [ ] T0.8 Test harness (Vitest projects, Playwright, placeholder scanner, package scripts)
 - [ ] T0.9 Loop files exactly as in `LOOP.md §2`

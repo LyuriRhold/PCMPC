@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Local PostgreSQL lifecycle for development: `node scripts/db.mjs up|down|status`.
+// Local PostgreSQL lifecycle for development: `node scripts/db.mjs up|down|reset|status`.
 //
 // Three setups are supported (PG_MODE in .env, auto-detected when unset):
 //   portable  PostgreSQL zip binaries under PG_HOME (default %LOCALAPPDATA%\pcmpc-pg).
@@ -152,13 +152,33 @@ async function down() {
   console.log(`mode ${mode}: the server is managed outside this project; nothing to stop.`);
 }
 
+/** Drops and recreates the dev database (DATABASE_URL). Local hosts only; never in production. */
+async function reset() {
+  const host = target.hostname;
+  if (process.env.APP_ENV === "production" || !["localhost", "127.0.0.1", "::1", "[::1]"].includes(host)) {
+    console.error(`refusing to reset a non-local or production database (${host})`);
+    process.exit(1);
+  }
+  const name = decodeURIComponent(target.pathname.slice(1));
+  const quoted = `"${name.replaceAll('"', '""')}"`;
+  const client = new pg.Client({ connectionString: adminUrl() });
+  await client.connect();
+  try {
+    await client.query(`DROP DATABASE IF EXISTS ${quoted} WITH (FORCE)`);
+    await client.query(`CREATE DATABASE ${quoted}`);
+  } finally {
+    await client.end();
+  }
+  console.log(`database ${name} dropped and recreated; run db:migrate and db:seed next`);
+}
+
 async function status() {
   const ok = await reachable();
   console.log(`mode: ${mode} · ${target.host} · ${ok ? "reachable" : "NOT reachable"}`);
   process.exit(ok ? 0 : 1);
 }
 
-const actions = { up, down, status };
+const actions = { up, down, reset, status };
 if (!(cmd in actions)) {
   console.error(`usage: node scripts/db.mjs ${Object.keys(actions).join("|")}`);
   process.exit(1);

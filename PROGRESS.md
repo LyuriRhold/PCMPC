@@ -8,7 +8,7 @@
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
 |---|---|---|---|---|
-| 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | ⬜ | | |
+| 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | 🔨 | phase-00-foundation | |
 | 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ⬜ | | |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ⬜ | | |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ⬜ | | |
@@ -31,8 +31,8 @@
 ## Checklists
 
 ### Phase 00 — Foundation & Loop Gate
-- [ ] T0.1 `git init`, .gitignore, .editorconfig, .nvmrc, README
-- [ ] T0.2 Scaffold Next.js (App Router, TypeScript, Tailwind, ESLint, `src/`, alias `@/*`, npm)
+- [x] T0.1 `git init`, .gitignore, .editorconfig, .nvmrc, README
+- [x] T0.2 Scaffold Next.js (App Router, TypeScript, Tailwind, ESLint, `src/`, alias `@/*`, npm)
 - [ ] T0.3 shadcn/ui init
 - [ ] T0.4 `docker-compose.yml` with Postgres (latest stable major), creating DBs `pcmpc` and `pcmpc_test`
 - [ ] T0.5 Drizzle setup: `pg` client, config, `db:*` scripts, test-DB lifecycle

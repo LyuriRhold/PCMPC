@@ -57,7 +57,7 @@
 - [ ] T1.8 Settings service (`getSetting<T>(key)` with zod-typed keys) and the settings UI
 - [ ] T1.9 `src/lib/numbering.ts` `next(code, tx, date)`
 - [ ] Acceptance tests written first (tests/acceptance/phase-01.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 02 — Members Registry
 - [ ] T2.1 Schema + migrations + name normalization helper
@@ -67,7 +67,7 @@
 - [ ] T2.5 UI: list/search, application form (zod shared), approval queue, profile tabs
 - [ ] T2.6 Seed fixture: 6 sample members (dev only)
 - [ ] Acceptance tests written first (tests/acceptance/phase-02.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 03 — Accounting Core (GL engine)
 - [ ] T3.1 Schema, migrations, immutability trigger, CHECK constraints
@@ -77,7 +77,7 @@
 - [ ] T3.5 Reports: TB, GL, journal books, subsidiary ledger + Excel export
 - [ ] T3.6 COA management UI (add/edit/deactivate; can't deactivate an account with a balance)
 - [ ] Acceptance tests written first (tests/acceptance/phase-03.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 04 — Cashiering Core (Teller) & Daily Cash Position
 - [ ] T4.1 Schema + migrations
@@ -88,7 +88,7 @@
 - [ ] T4.6 Teller UI (payor search → dues cart → slip print, cash count, verification)
 - [ ] T4.7 Daily cash position report + Excel export
 - [ ] Acceptance tests written first (tests/acceptance/phase-04.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 05 — Water: Customers, Service Connections, Meters & Rates
 - [ ] T5.1 Schema + migrations (incl. `journal_lines.customer_id`) + seeds (zones, tariff, fees)
@@ -100,7 +100,7 @@
 - [ ] T5.7 Senior-citizen eligibility records
 - [ ] T5.8 UI: customers, applications, account profile, routes/sequence, tariff admin, meters
 - [ ] Acceptance tests written first (tests/acceptance/phase-05.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 06 — Water: Meter Reading & Billing
 - [ ] T6.1 `job_runs` + `runOnce`; schema for periods, readings, bills, lines, memos
@@ -112,7 +112,7 @@
 - [ ] T6.7 Credit/debit memos with SoD
 - [ ] T6.8 Final reading + final bill on account closure (deposit refund handled in Phase 07)
 - [ ] Acceptance tests written first (tests/acceptance/phase-06.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 07 — Water: Collections, Penalties, Disconnection & Water Reports
 - [ ] T7.1 Schema + migrations
@@ -123,7 +123,7 @@
 - [ ] T7.6 Customer ledger/SOA
 - [ ] T7.7 Water reports + dashboard tiles (+ optional NRW)
 - [ ] Acceptance tests written first (tests/acceptance/phase-07.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 08 — Share Capital & CBU
 - [ ] T8.1 Schema, migrations, view, mappings check
@@ -132,7 +132,7 @@
 - [ ] T8.4 Actions, UI tab/forms, teller registrations (fee, share payment, withdrawal)
 - [ ] T8.5 Member share ledger report (per member, date range) + Excel export
 - [ ] Acceptance tests written first (tests/acceptance/phase-08.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 09 — Savings & Time Deposits
 - [ ] T9.1 Schema + migrations
@@ -142,7 +142,7 @@
 - [ ] T9.5 Dormancy job + teller registrations (`SAVINGS_DEPOSIT`, `SAVINGS_WITHDRAWAL`)
 - [ ] T9.6 UI + actions + permissions + audit
 - [ ] Acceptance tests written first (tests/acceptance/phase-09.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 10 — Loan Products, Amortization Engine & Applications
 - [ ] T10.1 Schema, migrations, product + deduction seed (DOMAIN sample products, flagged CONFIRM)
@@ -152,7 +152,7 @@
 - [ ] T10.5 Application service + approval matrix + SoD
 - [ ] T10.6 UI: product admin, loan calculator, application form, approval queue, disclosure print
 - [ ] Acceptance tests written first (tests/acceptance/phase-10.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 11 — Loan Release, Collections, Penalties & Aging
 - [ ] T11.1 Schema + migrations
@@ -164,7 +164,7 @@
 - [ ] T11.7 UI: release screen, loan ledger card, delinquency/aging reports, PAR tile
 - [ ] T11.8 Teller registrations (`LOAN_PAYMENT`, `LOAN_PROCEEDS`) + cross-module receipt test
 - [ ] Acceptance tests written first (tests/acceptance/phase-11.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 12 — Store: Inventory & Purchasing
 - [ ] T12.1 Schema + migrations
@@ -174,7 +174,7 @@
 - [ ] T12.5 Stock count + approval + adjustment posting
 - [ ] T12.6 Reports: stock card per product, valuation, reorder list, AP aging per supplier
 - [ ] Acceptance tests written first (tests/acceptance/phase-12.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 13 — Store: POS, Charge-to-Member & Store Patronage
 - [ ] T13.1 Schema + migrations
@@ -185,7 +185,7 @@
 - [ ] T13.6 POS UI (keyboard/barcode-first) and the slip print
 - [ ] T13.7 Store reports (sales, margin, top items, slow movers)
 - [ ] Acceptance tests written first (tests/acceptance/phase-13.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 14 — Financial Statements, Period Close & Fixed Assets
 - [ ] T14.1 Schema + migrations + FS line seed (PFRF-for-Coops layout; mark it CONFIRM)
@@ -195,7 +195,7 @@
 - [ ] T14.5 Month close checklist + lock/reopen; year-end close + new FY opening
 - [ ] T14.6 UI + Excel (exceljs) and PDF exports
 - [ ] Acceptance tests written first (tests/acceptance/phase-14.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 15 — Net Surplus Allocation, Interest on Share Capital & Patronage Refund
 - [ ] T15.1 Schema + migrations
@@ -205,7 +205,7 @@
 - [ ] T15.5 CETF payable report + remittance via DV
 - [ ] T15.6 UI + reports (allocation summary, per-member list for GA, Excel export)
 - [ ] Acceptance tests written first (tests/acceptance/phase-15.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 16 — Reports: CDA, Management Dashboard & Member Statements
 - [ ] T16.1 Officers/committees/trainings module
@@ -215,7 +215,7 @@
 - [ ] T16.5 Member SOA (print CSS + PDF)
 - [ ] T16.6 Performance fixture (50,000 journal lines, 1,000 members) + query tuning/indexes
 - [ ] Acceptance tests written first (tests/acceptance/phase-16.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 17 — Data Migration & Opening Balances
 - [ ] T17.1 Schema + migrations
@@ -226,7 +226,7 @@
 - [ ] T17.6 Rollback + audit
 - [ ] T17.7 Cut-over runbook in `docs/CUTOVER.md` (steps, owners, timing, freeze, sign-off)
 - [ ] Acceptance tests written first (tests/acceptance/phase-17.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ### Phase 18 — Hardening, Vercel Deployment, Backups, UAT & Go-Live
 - [ ] T18.1 Authorization sweep test (every action calls requirePermission)
@@ -243,7 +243,7 @@
 - [ ] T18.12 BIR track (`docs/BIR.md`)
 - [ ] T18.13 Water compliance doc (`docs/WATER-COMPLIANCE.md`)
 - [ ] Acceptance tests written first (tests/acceptance/phase-18.test.ts)
-- [x] Exit checks passed
+- [ ] Exit checks passed
 
 ## Questions (Claude → Rhold / PCMPC)
 <!-- Format: - [ ] Q-XX.n (phase XX) question… | default used: … | answer: … -->

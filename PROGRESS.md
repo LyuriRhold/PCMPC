@@ -41,7 +41,7 @@
 - [x] T0.8 Test harness (Vitest projects, Playwright, placeholder scanner, package scripts)
 - [x] T0.9 Loop files exactly as in `LOOP.md §2`
 - [x] T0.10 `/health` page (version, DB, business date)
-- [ ] T0.11 CI workflow `.github/workflows/ci.yml`
+- [x] T0.11 CI workflow `.github/workflows/ci.yml`
 - [ ] T0.12 Prove the gate (`LOOP.md §2.6`) and record the result in the Phase 00 summary
 - [x] Acceptance tests written first (tests/acceptance/phase-00.test.ts)
 - [ ] Exit checks passed

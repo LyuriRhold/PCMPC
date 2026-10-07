@@ -26,6 +26,14 @@ export function setClock(clock: Clock | null): void {
   activeClock = clock ?? systemClock;
 }
 
+/**
+ * The current instant from the active clock. Use it for timestamps (lockouts, audit `at`,
+ * session checks); use `businessToday()` for business dates.
+ */
+export function now(): Date {
+  return activeClock();
+}
+
 export function businessTimeZone(): string {
   return process.env.APP_TZ || "Asia/Manila";
 }
@@ -100,6 +108,18 @@ export function addDays(date: BusinessDate, days: number): BusinessDate {
 /** Whole days from `from` to `to` (negative when `to` is earlier): Jan 1 → Apr 1, 2026 = 90. */
 export function daysBetween(from: BusinessDate, to: BusinessDate): number {
   return dayNumber(to) - dayNumber(from);
+}
+
+/** The instant a business day starts (00:00 in the business time zone): `"2026-10-07"` → 2026-10-06T16:00:00Z. */
+export function startOfBusinessDay(date: BusinessDate): Date {
+  const { y, m, d } = toYmd(date);
+  return new Date(new TZDate(y, m - 1, d, 0, 0, 0, businessTimeZone()).getTime());
+}
+
+/** Displays an instant in the business time zone: `"Oct 07, 2026 09:30"`. */
+export function formatDateTime(instant: Date): string {
+  const local = new TZDate(instant.getTime(), businessTimeZone());
+  return `${formatDate(formatFns(local, "yyyy-MM-dd"))} ${formatFns(local, "HH:mm")}`;
 }
 
 /** Last day of the date's month: `monthEnd("2028-02-10")` → `"2028-02-29"`. */

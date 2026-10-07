@@ -39,7 +39,7 @@
 - [x] T0.6 `src/lib/money.ts` (bigint centavos, HALF-UP, allocate)
 - [x] T0.7 `src/lib/dates.ts` (Asia/Manila business date, addMonths, daysBetween)
 - [x] T0.8 Test harness (Vitest projects, Playwright, placeholder scanner, package scripts)
-- [ ] T0.9 Loop files exactly as in `LOOP.md §2`
+- [x] T0.9 Loop files exactly as in `LOOP.md §2`
 - [ ] T0.10 `/health` page (version, DB, business date)
 - [ ] T0.11 CI workflow `.github/workflows/ci.yml`
 - [ ] T0.12 Prove the gate (`LOOP.md §2.6`) and record the result in the Phase 00 summary

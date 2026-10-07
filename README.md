@@ -33,3 +33,27 @@ npm run dev                 # http://localhost:3000
 | `npm run e2e` | Playwright E2E |
 | `npm run scan` | Placeholder/cheat scanner |
 | `npm run gate` | typecheck → lint → test → scan (the loop gate) |
+
+## Database on Windows
+The project expects PostgreSQL 18 on `localhost:5432` with the credentials in `.env`.
+`npm run db:up` creates the `pcmpc` and `pcmpc_test` databases if they are missing.
+`scripts/db.mjs` supports three setups (set `PG_MODE` in `.env`, or let it auto-detect):
+
+| Mode | Use when | `db:up` / `db:down` |
+|---|---|---|
+| `portable` (default when found) | No admin rights. PostgreSQL zip binaries in `%LOCALAPPDATA%\pcmpc-pg` | `initdb` on first run, then `pg_ctl start` / `pg_ctl stop` |
+| `service` | Native install from the EDB installer (`PG_SERVICE=postgresql-x64-18`) | Checks that the Windows service is running |
+| `external` | CI service container, Docker, Linux/macOS | Checks that the server is reachable |
+
+**Portable setup (one time, no admin):**
+1. Download the *Windows x86-64 binaries* zip for PostgreSQL 18 from
+   https://www.enterprisedb.com/download-postgresql-binaries.
+2. Extract it so that `%LOCALAPPDATA%\pcmpc-pg\pgsql\bin\pg_ctl.exe` exists. You can delete `pgsql\pgAdmin 4`,
+   `pgsql\StackBuilder` and `pgsql\doc`.
+3. Run `npm run db:up`. The first run initializes `%LOCALAPPDATA%\pcmpc-pg\data`, using the user and
+   password from `DATABASE_URL`. The server log is `%LOCALAPPDATA%\pcmpc-pg\postgres.log`.
+
+The portable server doesn't start with Windows. Run `npm run db:up` after each reboot.
+
+**Native install:** run the EDB installer as admin, then set `PG_MODE=service` and `PG_SERVICE` in `.env`.
+**Docker Desktop:** run any `postgres:18` container on port 5432, then set `PG_MODE=external`.

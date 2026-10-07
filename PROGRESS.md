@@ -34,7 +34,7 @@
 - [x] T0.1 `git init`, .gitignore, .editorconfig, .nvmrc, README
 - [x] T0.2 Scaffold Next.js (App Router, TypeScript, Tailwind, ESLint, `src/`, alias `@/*`, npm)
 - [ ] T0.3 shadcn/ui init
-- [ ] T0.4 `docker-compose.yml` with Postgres (latest stable major), creating DBs `pcmpc` and `pcmpc_test`
+- [x] T0.4 Local Postgres 18 (portable binaries; `db:up`/`db:down` via `scripts/db.mjs`, no docker-compose) creating DBs `pcmpc` and `pcmpc_test`
 - [ ] T0.5 Drizzle setup: `pg` client, config, `db:*` scripts, test-DB lifecycle
 - [ ] T0.6 `src/lib/money.ts` (bigint centavos, HALF-UP, allocate)
 - [ ] T0.7 `src/lib/dates.ts` (Asia/Manila business date, addMonths, daysBetween)
@@ -254,6 +254,7 @@
 - 2026-10-07 · plan · Money stored as bigint centavos; HALF-UP rounding at defined points only · accounting accuracy
 - 2026-10-07 · plan v1.1 · Water service billing (member + non-member connections) is the core module, built right after the platform (Phases 05–07) · main purpose of the MIS
 - 2026-10-07 · plan v1.1 · Cashiering is a pluggable registry (Phase 04); every module registers its own receipt items · one counter, one receipt
+- 2026-10-07 · phase 00 · Local DB is PostgreSQL 18.6 portable binaries (no Docker, no admin), managed by `scripts/db.mjs`; T0.4 adapted (no docker-compose) · Docker and native Postgres not installed; user chose portable over SQL Server so dev matches Neon (Postgres)
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)

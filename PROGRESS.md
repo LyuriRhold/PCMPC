@@ -40,7 +40,7 @@
 - [x] T0.7 `src/lib/dates.ts` (Asia/Manila business date, addMonths, daysBetween)
 - [x] T0.8 Test harness (Vitest projects, Playwright, placeholder scanner, package scripts)
 - [x] T0.9 Loop files exactly as in `LOOP.md §2`
-- [ ] T0.10 `/health` page (version, DB, business date)
+- [x] T0.10 `/health` page (version, DB, business date)
 - [ ] T0.11 CI workflow `.github/workflows/ci.yml`
 - [ ] T0.12 Prove the gate (`LOOP.md §2.6`) and record the result in the Phase 00 summary
 - [x] Acceptance tests written first (tests/acceptance/phase-00.test.ts)

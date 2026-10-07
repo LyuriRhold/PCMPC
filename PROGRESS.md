@@ -51,10 +51,10 @@
 - [x] T1.2 Schema + migrations: users, roles, permissions, audit_log (+ trigger), settings, number_series
 - [x] T1.3 Seed: roles, permission matrix, settings defaults, number series, first admin
 - [x] T1.4 `src/lib/auth-guard.ts` (requirePermission, assertNotSameUser)
-- [ ] T1.5 `src/lib/audit.ts` audit() + audit log viewer
+- [x] T1.5 `src/lib/audit.ts` audit() + audit log viewer
 - [x] T1.6 Login/logout pages, lockout logic, and protected `(staff)` layout redirect
 - [x] T1.7 Users admin UI and actions
-- [ ] T1.8 Settings service (`getSetting<T>(key)` with zod-typed keys) and the settings UI
+- [x] T1.8 Settings service (`getSetting<T>(key)` with zod-typed keys) and the settings UI
 - [x] T1.9 `src/lib/numbering.ts` `next(code, tx, date)`
 - [x] Acceptance tests written first (tests/acceptance/phase-01.test.ts)
 - [ ] Exit checks passed

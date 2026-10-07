@@ -9,7 +9,7 @@
 | # | Phase | Status | Branch / tag | Reviewed by / date |
 |---|---|---|---|---|
 | 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | ✅ | phase-00-foundation · tag `phase-00` | rldejoya (reviewer agent: no must-fix) · 2026-10-07 |
-| 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ⬜ | | |
+| 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | 🔨 | phase-01-auth-roles-audit | |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ⬜ | | |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ⬜ | | |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ⬜ | | |
@@ -56,7 +56,7 @@
 - [ ] T1.7 Users admin UI and actions
 - [ ] T1.8 Settings service (`getSetting<T>(key)` with zod-typed keys) and the settings UI
 - [ ] T1.9 `src/lib/numbering.ts` `next(code, tx, date)`
-- [ ] Acceptance tests written first (tests/acceptance/phase-01.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-01.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 02 — Members Registry
@@ -256,6 +256,7 @@
 - 2026-10-07 · plan v1.1 · Cashiering is a pluggable registry (Phase 04); every module registers its own receipt items · one counter, one receipt
 - 2026-10-07 · phase 00 · Local DB is PostgreSQL 18.6 portable binaries (no Docker, no admin), managed by `scripts/db.mjs`; T0.4 adapted (no docker-compose) · Docker and native Postgres not installed; user chose portable over SQL Server so dev matches Neon (Postgres)
 - 2026-10-07 · phase 00 · Pinned stable versions: Node 24 LTS, Next.js 16.4.0 (Cache Components + Partial Prefetching on), React 19.3, TypeScript 5, Tailwind 4, shadcn 4 (base-nova), drizzle-orm 0.45.3 + drizzle-kit 0.31.11, pg 8.23, Vitest 5.0.3, Playwright 1.63, zod 4.6, decimal.js 10.6, date-fns 4.4 + @date-fns/tz 1.5, PostgreSQL 18.6 · PLAN §4 asks to record them
+- 2026-10-07 · phase 01 · Auth library: **Better Auth 1.7.7** (username plugin, Drizzle adapter, DB sessions in Postgres, uuid ids), not Auth.js · Auth.js v5 never shipped a stable release (`next-auth` latest is 4.x) and its credentials provider only supports JWT sessions, while the spec requires sessions stored in Postgres. Better Auth's username sign-in needs no email (spec: email optional), and its before/after hooks let lockout and inactive checks run on every sign-in path. Users, roles and permissions stay in our own tables (Better Auth's admin/RBAC plugin is not used)
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)

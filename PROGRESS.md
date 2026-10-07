@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 00
+**Current phase:** 01
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |

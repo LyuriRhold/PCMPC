@@ -29,11 +29,11 @@ async function HealthDetails() {
 
 export default function HealthPage() {
   return (
-    <div className="flex flex-col gap-4">
+    <main className="flex flex-col gap-4 p-6">
       <h1 className="text-2xl font-semibold">System health</h1>
       <Suspense fallback={<p className="text-sm text-muted-foreground">Checking…</p>}>
         <HealthDetails />
       </Suspense>
-    </div>
+    </main>
   );
 }

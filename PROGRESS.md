@@ -8,7 +8,7 @@
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
 |---|---|---|---|---|
-| 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | 🔨 | phase-00-foundation | |
+| 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | 🟡 awaiting review | phase-00-foundation | |
 | 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ⬜ | | |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ⬜ | | |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ⬜ | | |

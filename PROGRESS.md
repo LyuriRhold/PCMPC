@@ -38,7 +38,7 @@
 - [x] T0.5 Drizzle setup: `pg` client, config, `db:*` scripts, test-DB lifecycle
 - [x] T0.6 `src/lib/money.ts` (bigint centavos, HALF-UP, allocate)
 - [x] T0.7 `src/lib/dates.ts` (Asia/Manila business date, addMonths, daysBetween)
-- [ ] T0.8 Test harness (Vitest projects, Playwright, placeholder scanner, package scripts)
+- [x] T0.8 Test harness (Vitest projects, Playwright, placeholder scanner, package scripts)
 - [ ] T0.9 Loop files exactly as in `LOOP.md §2`
 - [ ] T0.10 `/health` page (version, DB, business date)
 - [ ] T0.11 CI workflow `.github/workflows/ci.yml`

@@ -80,7 +80,7 @@
 - [x] Exit checks passed
 
 ### Phase 04 — Cashiering Core (Teller) & Daily Cash Position
-- [ ] T4.1 Schema + migrations
+- [x] T4.1 Schema + migrations
 - [ ] T4.2 Registry (receipt items, cash-outs, payor types) + built-ins
 - [ ] T4.3 Session service (open, close with count, verify with variance posting)
 - [ ] T4.4 Receipt service (registered items in one transaction) + cancellation

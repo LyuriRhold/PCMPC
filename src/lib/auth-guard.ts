@@ -44,9 +44,15 @@ async function sessionUserId(): Promise<string | null> {
   try {
     const { headers } = await import("next/headers");
     requestHeaders = await headers();
-  } catch {
+  } catch (e) {
+    // Let Next.js handle its own signals (e.g. "this part is dynamic" during prerendering).
+    const { unstable_rethrow } = await import("next/navigation");
+    unstable_rethrow(e);
     return null; // not inside a request (scripts, tests without runAs)
   }
+  // A session check is always request-time work (Better Auth reads the clock), never prerendered.
+  const { connection } = await import("next/server");
+  await connection();
   const session = await getAuth().api.getSession({ headers: requestHeaders });
   return session?.user.id ?? null;
 }

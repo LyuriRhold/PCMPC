@@ -5,7 +5,7 @@ import { audit } from "@/lib/audit";
 import { getAuth } from "@/lib/auth";
 import { now } from "@/lib/dates";
 import { getSetting } from "@/modules/settings/service";
-import { accounts, rolePermissions, roles, sessions, users, type User } from "./schema";
+import { authAccounts, rolePermissions, roles, sessions, users, type User } from "./schema";
 import { ROLE_PERMISSIONS, ROLES, isRoleCode } from "./permissions";
 
 export class SignInBlockedError extends Error {
@@ -117,7 +117,7 @@ export async function createUser(tx: Tx, input: CreateUserInput, actorId: string
     .returning();
   if (!user) throw new Error("user insert returned no row");
 
-  await tx.insert(accounts).values({
+  await tx.insert(authAccounts).values({
     accountId: user.id,
     providerId: "credential",
     userId: user.id,
@@ -184,12 +184,12 @@ export async function resetPassword(tx: Tx, userId: string, password: string, ac
   const before = await loadForUpdate(tx, userId);
   const at = now();
   const updated = await tx
-    .update(accounts)
+    .update(authAccounts)
     .set({ password: await hashPassword(password), updatedAt: at })
-    .where(sql`${accounts.userId} = ${userId} AND ${accounts.providerId} = 'credential'`)
-    .returning({ id: accounts.id });
+    .where(sql`${authAccounts.userId} = ${userId} AND ${authAccounts.providerId} = 'credential'`)
+    .returning({ id: authAccounts.id });
   if (updated.length === 0) {
-    await tx.insert(accounts).values({ accountId: userId, providerId: "credential", userId, password: await hashPassword(password), createdAt: at, updatedAt: at });
+    await tx.insert(authAccounts).values({ accountId: userId, providerId: "credential", userId, password: await hashPassword(password), createdAt: at, updatedAt: at });
   }
   await tx.update(users).set({ failedAttempts: 0, lockedUntil: null, updatedAt: at }).where(eq(users.id, userId));
   await tx.delete(sessions).where(eq(sessions.userId, userId));

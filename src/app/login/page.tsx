@@ -19,7 +19,8 @@ export default function LoginPage(props: PageProps<"/login">) {
           <CardDescription>Pipindan Community Multi-Purpose Cooperative. Sign in with your staff account.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Suspense fallback={<LoginForm />}>
+          {/* The fallback must not be a working form: input typed into it would be lost when the real form streams in. */}
+          <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
             <LoginFormWithNext searchParams={props.searchParams} />
           </Suspense>
         </CardContent>

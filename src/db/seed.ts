@@ -1,5 +1,7 @@
 import type { Tx } from "./client";
 import { seedAdmin, seedRoles } from "@/modules/auth/service";
+import { seedCoa } from "@/modules/ledger/coa";
+import { seedCurrentFiscalYear } from "@/modules/ledger/periods";
 import { seedNumberSeries } from "@/modules/numbering/series";
 import { seedSettings } from "@/modules/settings/service";
 
@@ -16,6 +18,8 @@ export const SEED_STEPS: SeedStep[] = [
   { name: "roles & permission matrix", run: seedRoles },
   { name: "settings defaults (DOMAIN §2)", run: seedSettings },
   { name: "number series (DOMAIN §5)", run: seedNumberSeries },
+  { name: "chart of accounts + account mappings (DOMAIN §6)", run: seedCoa },
+  { name: "fiscal year and periods", run: seedCurrentFiscalYear },
 ];
 
 /** The first admin, from SEED_ADMIN_USERNAME / SEED_ADMIN_PASSWORD. */

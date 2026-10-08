@@ -4,3 +4,4 @@ export * from "@/modules/audit/schema";
 export * from "@/modules/settings/schema";
 export * from "@/modules/numbering/schema";
 export * from "@/modules/members/schema";
+export * from "@/modules/ledger/schema";

@@ -1,0 +1,64 @@
+code,name,type,normal_balance,parent_code,postable,sca_code,mapping_keys
+1,ASSETS,ASSET,DR,,false,,
+11000,Cash and Cash Equivalents,ASSET,DR,1,false,,
+11110,Cash on Hand,ASSET,DR,11000,true,,cash_on_hand
+11130,Cash in Bank,ASSET,DR,11000,true,,cash_in_bank
+11200,Loans and Receivables,ASSET,DR,1,false,,
+11210,Loans Receivable - Regular,ASSET,DR,11200,true,,loans_receivable_REG
+11220,Loans Receivable - Emergency,ASSET,DR,11200,true,,loans_receivable_EMR
+11230,Loans Receivable - Productive,ASSET,DR,11200,true,,loans_receivable_PRD
+11250,Accounts Receivable - Members,ASSET,DR,11200,true,,accounts_receivable_members
+11260,Accounts Receivable - Water,ASSET,DR,11200,true,,ar_water
+11270,Subscription Receivable - Common,ASSET,DR,11200,true,,subscription_receivable_common
+11290,Allowance for Probable Losses,ASSET,CR,11200,true,,allowance_probable_losses
+11300,Inventories,ASSET,DR,1,false,,
+11310,Merchandise Inventory,ASSET,DR,11300,true,,merchandise_inventory
+2,LIABILITIES,LIABILITY,CR,,false,,
+21000,Deposit Liabilities,LIABILITY,CR,2,false,,
+21110,Savings Deposits,LIABILITY,CR,21000,true,,savings_deposits
+21120,Time Deposits,LIABILITY,CR,21000,true,,time_deposits
+21200,Payables,LIABILITY,CR,2,false,,
+21210,Accounts Payable - Trade,LIABILITY,CR,21200,true,,accounts_payable_trade
+21220,Customers' Deposits - Water,LIABILITY,CR,21200,true,,customers_deposits
+21230,Customers' Advances - Water,LIABILITY,CR,21200,true,,customers_advances
+21240,LPP Insurance Payable,LIABILITY,CR,21200,true,,lpp_insurance_payable
+21250,Withholding Tax Payable,LIABILITY,CR,21200,true,,withholding_tax_payable
+21260,CETF Payable,LIABILITY,CR,21200,true,,cetf_payable
+21270,Interest on Share Capital Payable,LIABILITY,CR,21200,true,,isc_payable
+21280,Patronage Refund Payable,LIABILITY,CR,21200,true,,patronage_refund_payable
+3,EQUITY,EQUITY,CR,,false,,
+31000,Share Capital,EQUITY,CR,3,false,,
+31110,Subscribed Share Capital - Common,EQUITY,CR,31000,true,,subscribed_share_capital_common
+32000,Undivided Net Surplus and Statutory Funds,EQUITY,CR,3,false,,
+32100,Undivided Net Surplus,EQUITY,CR,32000,true,,undivided_net_surplus
+32200,Reserve Fund,EQUITY,CR,32000,true,,reserve_fund
+32300,Education and Training Fund (Local),EQUITY,CR,32000,true,,education_training_fund
+32400,Community Development Fund,EQUITY,CR,32000,true,,community_development_fund
+32500,Optional Fund,EQUITY,CR,32000,true,,optional_fund
+4,REVENUES,REVENUE,CR,,false,,
+41000,Income from Credit Operations,REVENUE,CR,4,false,,
+41110,Interest Income - Loans,REVENUE,CR,41000,true,,interest_income_loans
+41120,Service Fee Income,REVENUE,CR,41000,true,,service_fee_income
+41130,Fines and Penalties Income,REVENUE,CR,41000,true,,fines_penalties_income
+41140,Notarial Fee Income,REVENUE,CR,41000,true,,notarial_fee_income
+42000,Income from Water Service,REVENUE,CR,4,false,,
+42110,Water Revenue - Members,REVENUE,CR,42000,true,,water_revenue_members
+42120,Water Revenue - Non-members,REVENUE,CR,42000,true,,water_revenue_nonmembers
+42130,Water Connection Fee Income,REVENUE,CR,42000,true,,water_connection_fee_income
+42140,Penalty Income - Water,REVENUE,CR,42000,true,,penalty_income_water
+42150,Water Revenue Adjustments,REVENUE,DR,42000,true,,water_revenue_adjustments
+42160,Senior Citizen Discounts - Water,REVENUE,DR,42000,true,,senior_citizen_discounts
+43000,Income from Store,REVENUE,CR,4,false,,
+43110,Sales,REVENUE,CR,43000,true,,sales
+43120,Sales Returns and Allowances,REVENUE,DR,43000,true,,sales_returns
+44000,Other Income,REVENUE,CR,4,false,,
+44110,Membership Fee Income,REVENUE,CR,44000,true,,membership_fee_income
+5,EXPENSES,EXPENSE,DR,,false,,
+51000,Cost of Sales,EXPENSE,DR,5,false,,
+51110,Cost of Sales - Store,EXPENSE,DR,51000,true,,cost_of_sales
+52000,Financing Cost,EXPENSE,DR,5,false,,
+52110,Interest Expense on Deposits,EXPENSE,DR,52000,true,,interest_expense_deposits
+53000,Operating Expenses,EXPENSE,DR,5,false,,
+53110,Depreciation Expense,EXPENSE,DR,53000,true,,depreciation_expense
+53120,Inventory Losses,EXPENSE,DR,53000,true,,inventory_losses
+53130,Cash Short / Over,EXPENSE,DR,53000,true,,cash_short_over

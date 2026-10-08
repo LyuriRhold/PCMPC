@@ -10,6 +10,8 @@ export default defineConfig({
   testDir: "./tests/e2e",
   globalSetup: "./tests/e2e/global-setup.ts",
   fullyParallel: false,
+  // One worker: specs share the dev database and one dev server that compiles routes on first use.
+  workers: 1,
   // The dev server compiles each route on first use (Better Auth alone takes several seconds cold).
   expect: { timeout: 15_000 },
   // Multi-step flows (sign in as two users, several first-time compiles) need more than the 30 s default.

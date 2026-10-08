@@ -49,6 +49,7 @@ export const PERMISSIONS = [
   "gl.jv_approve",
   "gl.close",
   "gl.reopen",
+  "gl.coa",
   "reports.read",
   "reports.cda",
   "admin.users",
@@ -106,7 +107,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, Permission[]> = {
     "reports.cda",
     "audit.read",
   ],
-  BOOKKEEPER: [...READ_ALL, "gl.jv_prepare", "gl.close", "cash.dv_prepare", "savings.run_interest", "reports.cda"],
+  BOOKKEEPER: [...READ_ALL, "gl.jv_prepare", "gl.jv_approve", "gl.coa", "gl.close", "cash.dv_prepare", "savings.run_interest", "reports.cda"],
   BILLING_CLERK: [
     "members.read",
     "water.customers",

@@ -92,12 +92,12 @@
 
 ### Phase 05 — Water: Customers, Service Connections, Meters & Rates
 - [x] T5.1 Schema + migrations (incl. `journal_lines.customer_id`) + seeds (zones, tariff, fees)
-- [ ] T5.2 Customer service (member/non-member) + payor type `WATER_CUSTOMER`
-- [ ] T5.3 Application → approval → installation → activation workflow + transfers
-- [ ] T5.4 Meter inventory, installation and replacement service
-- [ ] T5.5 Versioned rate schedules + pure rate engine + fee schedule
-- [ ] T5.6 Teller items `WATER_CONNECTION_FEE`, `METER_DEPOSIT`, `WATER_OTHER_FEE`
-- [ ] T5.7 Senior-citizen eligibility records
+- [x] T5.2 Customer service (member/non-member) + payor type `WATER_CUSTOMER`
+- [x] T5.3 Application → approval → installation → activation workflow + transfers
+- [x] T5.4 Meter inventory, installation and replacement service
+- [x] T5.5 Versioned rate schedules + pure rate engine + fee schedule
+- [x] T5.6 Teller items `WATER_CONNECTION_FEE`, `METER_DEPOSIT`, `WATER_OTHER_FEE`
+- [x] T5.7 Senior-citizen eligibility records
 - [ ] T5.8 UI: customers, applications, account profile, routes/sequence, tariff admin, meters
 - [x] Acceptance tests written first (tests/acceptance/phase-05.test.ts)
 - [ ] Exit checks passed

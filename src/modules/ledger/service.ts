@@ -1,7 +1,7 @@
 import { and, asc, eq, gte, inArray, lt, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
-import { assertNotSameUser } from "@/lib/auth-guard";
+import { assertNotSameUser, SodError } from "@/lib/auth-guard";
 import { now, type BusinessDate } from "@/lib/dates";
 import { format, type Money } from "@/lib/money";
 import { next as nextNumber } from "@/lib/numbering";
@@ -182,6 +182,22 @@ export async function reverseJournal(tx: Tx, jeId: string, date: BusinessDate, r
   await tx.update(journalEntries).set({ status: "REVERSED", reversedById: rev.id }).where(eq(journalEntries.id, orig.id));
   await audit(tx, { action: "je.reverse", entity: "journal_entry", entityId: orig.id, after: { jeNo: orig.jeNo, reversalJeNo: rev.jeNo, reason }, userId: actorId });
   return rev;
+}
+
+/**
+ * A reversal requested by a person (Journal vouchers screen): same as reverseJournal, but the
+ * user who prepared the entry can't reverse it (segregation of duties, reviewer follow-up).
+ */
+export async function reverseEntryByUser(tx: Tx, jeId: string, date: BusinessDate, reason: string, userId: string): Promise<JournalEntry> {
+  const [je] = await tx
+    .select({ preparedBy: journalEntries.preparedBy, status: journalEntries.status, reversalOfId: journalEntries.reversalOfId })
+    .from(journalEntries)
+    .where(eq(journalEntries.id, jeId));
+  // Entries that can't be reversed at all get reverseJournal's specific message first.
+  if (je?.status === "POSTED" && !je.reversalOfId && je.preparedBy === userId) {
+    throw new SodError("Segregation of duties: the preparer of an entry can't reverse it");
+  }
+  return reverseJournal(tx, jeId, date, reason, userId);
 }
 
 // ── Manual journal vouchers (draft → approve → post) ─────────────────────────────────────────

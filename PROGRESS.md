@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 03
+**Current phase:** 04
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -11,7 +11,7 @@
 | 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | ✅ | phase-00-foundation · tag `phase-00` | rldejoya (reviewer agent: no must-fix) · 2026-10-07 |
 | 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ✅ | phase-01-auth-roles-audit · tag `phase-01` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ✅ | phase-02-members · tag `phase-02` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
-| 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | 🟡 awaiting review | phase-03-accounting-core | |
+| 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ✅ | phase-03-accounting-core · tag `phase-03` | rldejoya (reviewer agent: no blockers; follow-ups fixed) · 2026-10-08 |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ⬜ | | |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ⬜ | | |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ⬜ | | |
@@ -287,6 +287,7 @@
 - Payroll-deduction integration
 - 2FA for staff logins
 - Self-service password change for staff (v1: the admin resets passwords; Better Auth's /change-password is disabled)
+- Revoke TRUNCATE on audit_log, journal_entries and journal_lines from the app's DB role (Phase 18)
 - Editable role → permission matrix in the UI (v1: read-only grid, changed via seed)
 - Photo / signature capture (Vercel Blob); meter photo on reading
 - Smart/IoT meters
@@ -412,6 +413,12 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - **COA management (T3.6):** /accounting/coa: add under headers, rename, activate/deactivate. Deactivation is blocked when the account has a balance, a posting key, or active sub-accounts.
 - **Dev fixture:** `db:seed:dev` also posts 5 sample entries for the sample members, and its trial balance balances (₱18,150.00 = ₱18,150.00).
 - **Sidebar:** Journal vouchers, Ledger & trial balance, and Chart of accounts are Live.
+
+- **Review follow-ups (approved by Rhold 2026-10-08):**
+  - Migration `0006` makes a journal line's entry link unchangeable, and re-runs the deferred balance check after line updates. Before this, raw SQL could move a draft line into a posted entry.
+  - The person who prepared an entry can't reverse it (`reverseEntryByUser`, used by the Journal vouchers screen). The base `reverseJournal` stays unrestricted for module flows.
+  - Regression tests cover both.
+  - TRUNCATE on the ledger tables is left for Phase 18 (revoke it from the app's database login), as for the audit log.
 
 **Decisions** (also in the Decisions log and Questions)
 - BOOKKEEPER now holds `gl.jv_approve` (Q-03.2), and SoD stops self-approval.

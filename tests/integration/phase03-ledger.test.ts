@@ -197,3 +197,52 @@ describe("T3.4 account picker", () => {
     expect(list.some((a) => a.code === "11000")).toBe(false);
   });
 });
+
+describe("Review follow-ups", () => {
+  it("a draft line can't be moved into a posted entry, and line updates can't unbalance an entry", async () => {
+    const { sql } = await import("drizzle-orm");
+    const book1 = await makeUser("BOOKKEEPER", "book1");
+    const [cashId, feeId] = await Promise.all([acct("cash_on_hand"), acct("membership_fee_income")]);
+    const posted = await post(await feeEntry());
+    const draft = await runAs(book1.id, () =>
+      createJvDraftAction({
+        date: "2026-10-07",
+        particulars: "Draft",
+        lines: [
+          { accountId: cashId, debit: "5.00", credit: "", memberNo: "", memo: "" },
+          { accountId: feeId, debit: "", credit: "5.00", memberNo: "", memo: "" },
+        ],
+      }),
+    );
+    if (!draft.ok) throw new Error(draft.error);
+    await expect(
+      getDb().execute(sql`UPDATE journal_lines SET je_id = ${posted.id}, line_no = 9 WHERE je_id = ${draft.data.id} AND line_no = 1`),
+    ).rejects.toThrow();
+    // Updating a draft line is fine while the entry stays a draft.
+    await getDb().execute(sql`UPDATE journal_lines SET debit = 600 WHERE je_id = ${draft.data.id} AND line_no = 1`);
+    const lines = await getDb().execute<{ n: string }>(sql`SELECT count(*) AS n FROM journal_lines WHERE je_id = ${posted.id}`);
+    expect(lines.rows[0]?.n).toBe("2");
+  });
+
+  it("the preparer of an entry can't reverse it; another approver can", async () => {
+    const book1 = await makeUser("BOOKKEEPER", "book1");
+    const [cashId, feeId] = await Promise.all([acct("cash_on_hand"), acct("membership_fee_income")]);
+    const mgr = await makeUser("MANAGER", "mgr1");
+    const draft = await runAs(book1.id, () =>
+      createJvDraftAction({
+        date: "2026-10-07",
+        particulars: "To reverse",
+        lines: [
+          { accountId: cashId, debit: "100", credit: "", memberNo: "", memo: "" },
+          { accountId: feeId, debit: "", credit: "100", memberNo: "", memo: "" },
+        ],
+      }),
+    );
+    if (!draft.ok) throw new Error(draft.error);
+    await runAs(mgr.id, () => approveJvAction({ jeId: draft.data.id }));
+    await expect(runAs(book1.id, () => reverseJvAction({ jeId: draft.data.id, reason: "mine" }))).rejects.toThrow(
+      "Segregation of duties: the preparer of an entry can't reverse it",
+    );
+    expect(await runAs(mgr.id, () => reverseJvAction({ jeId: draft.data.id, reason: "wrong account" }))).toMatchObject({ ok: true });
+  });
+});

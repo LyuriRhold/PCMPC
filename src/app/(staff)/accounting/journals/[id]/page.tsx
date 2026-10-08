@@ -118,7 +118,11 @@ async function EntryContent(props: PageProps<"/accounting/journals/[id]">) {
         </section>
       ) : null}
 
-      {je.status === "POSTED" && !je.reversalOfId && can(access.user, "gl.jv_approve") ? (
+      {je.status === "POSTED" && !je.reversalOfId && can(access.user, "gl.jv_approve") && isPreparer ? (
+        <p className="text-sm text-muted-foreground">You prepared this entry. Another user with approval rights must reverse it.</p>
+      ) : null}
+
+      {je.status === "POSTED" && !je.reversalOfId && can(access.user, "gl.jv_approve") && !isPreparer ? (
         <section className="flex flex-col gap-3 rounded-lg border p-4">
           <h2 className="text-sm font-semibold">Reverse this entry</h2>
           <p className="text-xs text-muted-foreground">

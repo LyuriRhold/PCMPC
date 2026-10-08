@@ -10,7 +10,7 @@ import { parse as parseMoney } from "@/lib/money";
 import { members } from "@/modules/members/schema";
 import { CoaError } from "./coa";
 import { createAccount, setAccountActive, updateAccount } from "./coa-admin";
-import { approveJv, createJvDraft, discardJvDraft, LedgerError, reverseJournal, type LineInput } from "./service";
+import { approveJv, createJvDraft, discardJvDraft, LedgerError, reverseEntryByUser, type LineInput } from "./service";
 
 const businessDate = z.string().refine(isBusinessDate, "Enter a valid date (YYYY-MM-DD)");
 const amount = z.string().trim().max(20);
@@ -85,11 +85,12 @@ export async function approveJvAction(input: z.input<typeof jeIdSchema>): Promis
   }
 }
 
+/** Reverses a posted entry. Throws (not returns) when the user prepared it: segregation of duties. */
 export async function reverseJvAction(input: z.input<typeof reverseSchema>): Promise<ActionResult<{ jeNo: string }>> {
   const actor = await requirePermission("gl.jv_approve");
   try {
     const data = reverseSchema.parse(input);
-    const rev = await withTx((tx) => reverseJournal(tx, data.jeId, data.date ?? businessToday(), data.reason, actor.id));
+    const rev = await withTx((tx) => reverseEntryByUser(tx, data.jeId, data.date ?? businessToday(), data.reason, actor.id));
     return ok({ jeNo: rev.jeNo ?? "" });
   } catch (e) {
     return failFrom(e, [LedgerError]);

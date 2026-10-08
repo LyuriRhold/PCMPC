@@ -369,7 +369,7 @@ export const NAV_SECTIONS: NavSection[] = [
     title: "Accounting",
     icon: BookOpen,
     items: [
-      { href: "/accounting/journals", label: "Journal vouchers", icon: BookOpen, status: "soon", phase: "03", summary: "Draft, approve, post and reverse journal vouchers." },
+      { href: "/accounting/journals", label: "Journal vouchers", icon: BookOpen, status: "live", phase: "03", permission: "gl.read", summary: "Draft, approve, post and reverse journal vouchers." },
       { href: "/accounting/ledger", label: "Ledger & trial balance", icon: Scale, status: "soon", phase: "03", summary: "General ledger, trial balance and books of account." },
       { href: "/accounting/coa", label: "Chart of accounts", icon: ClipboardList, status: "soon", phase: "03", summary: "CDA standard chart of accounts." },
       { href: "/accounting/statements", label: "Financial statements", icon: FileSpreadsheet, status: "soon", phase: "14", summary: "PFRF-for-Cooperatives statements by business line." },

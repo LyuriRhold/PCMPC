@@ -46,8 +46,8 @@ test("A2.10 encode applicant → approve → list shows ACTIVE with member no.",
   await expect(page.getByText("APPLICANT", { exact: true })).toBeVisible();
 
   // Approve from the profile.
-  await page.getByLabel("PMES date").fill("2026-10-01");
-  await page.getByLabel("BOD resolution no.").fill("2026-15");
+  await page.getByLabel("PMES date", { exact: true }).fill("2026-10-01");
+  await page.getByLabel("BOD resolution no.", { exact: true }).fill("2026-15");
   await page.getByRole("button", { name: "Approve membership" }).click();
   await expect(page.getByText(/Approved as M-\d{6}/)).toBeVisible();
 

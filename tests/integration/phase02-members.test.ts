@@ -122,6 +122,29 @@ describe("T2.3 beneficiaries", () => {
   });
 });
 
+describe("T2.4 masking on edit", () => {
+  it("an editor without members.read_sensitive (LOAN_OFFICER) can't overwrite masked fields", async () => {
+    const lo = await makeUser("LOAN_OFFICER", "lo1");
+    const id = await createApplicantAs(mgr, applicant());
+    // The loan officer saves the form with masked/blank sensitive values and a new occupation.
+    const r = await runAs(lo.id, () =>
+      updateMemberAction({
+        memberId: id,
+        data: applicant({ occupation: "Driver", birthdate: "1900-01-01", validIdNo: null, tin: null, mobile: null }),
+      }),
+    );
+    expect(r).toEqual({ ok: true, data: undefined });
+    const [row] = await getDb().select().from(members).where(eq(members.id, id));
+    expect(row).toMatchObject({
+      occupation: "Driver",
+      birthdate: "1990-05-10",
+      validIdNo: "1234-5678-9012-3456",
+      tin: "123-456-789-000",
+      mobile: "09171234567",
+    });
+  });
+});
+
 describe("T2.4 permissions", () => {
   it("a TELLER can search and view but not encode, approve or change status", async () => {
     const teller = await makeUser("TELLER", "teller1");

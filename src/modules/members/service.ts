@@ -33,6 +33,11 @@ const TRANSITIONS: Record<MemberStatus, readonly MemberStatus[]> = {
   DECEASED: [],
 };
 
+/** Statuses a member can be moved to by a status change (approval is separate). */
+export function allowedStatusTargets(status: MemberStatus): MemberStatus[] {
+  return [...TRANSITIONS[status]];
+}
+
 function searchTextOf(m: { memberNo: string | null; lastName: string; firstName: string; middleName: string | null; suffix: string | null }) {
   return normalizeName([m.memberNo, m.lastName, m.firstName, m.middleName, m.suffix].filter(Boolean).join(" "));
 }
@@ -133,8 +138,18 @@ export async function createApplicant(tx: Tx, data: MemberData, actorId: string 
 }
 
 /** Edits a member's details. Terminated or deceased members are read-only. */
-export async function updateMember(tx: Tx, memberId: string, data: MemberData, actorId: string): Promise<Member> {
+export async function updateMember(
+  tx: Tx,
+  memberId: string,
+  input: MemberData,
+  actorId: string,
+  opts: { keepSensitive?: boolean } = {},
+): Promise<Member> {
   const before = await loadForUpdate(tx, memberId);
+  // Editors who can't see sensitive fields (they got masked values) never overwrite them.
+  const data: MemberData = opts.keepSensitive
+    ? { ...input, birthdate: before.birthdate, validIdNo: before.validIdNo, tin: before.tin, mobile: before.mobile }
+    : input;
   if (TERMINAL.includes(before.status)) throw new MemberRuleError(`A ${before.status} member can't be edited`);
   assertBirthdate(data.birthdate);
   const key = nameKey(data.lastName, data.firstName);
@@ -378,7 +393,7 @@ export async function getMemberProfile(memberId: string, canSeeSensitive: boolea
   const member: MemberView = canSeeSensitive ? toView(m) : maskSensitive(toView(m));
   return {
     member,
-    beneficiaries: beneficiaries.map((b) => (canSeeSensitive ? b : { ...b, birthdate: b.birthdate ? "••••-••-••" : null })),
+    beneficiaries,
     history,
   };
 }

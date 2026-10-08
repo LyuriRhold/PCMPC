@@ -25,7 +25,8 @@ export async function updateMemberAction(input: z.input<typeof updateSchema>): P
   const actor = await requirePermission("members.write");
   try {
     const { memberId, data } = updateSchema.parse(input);
-    await withTx((tx) => updateMember(tx, memberId, data, actor.id));
+    const keepSensitive = !can(actor, "members.read_sensitive");
+    await withTx((tx) => updateMember(tx, memberId, data, actor.id, { keepSensitive }));
     return ok(undefined);
   } catch (e) {
     return failFrom(e, [MemberRuleError]);

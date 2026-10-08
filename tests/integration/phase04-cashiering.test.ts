@@ -179,3 +179,23 @@ describe("T4.7 cash position", () => {
     expect(pos.reconciled).toBe(true);
   });
 });
+
+describe("T4.7 cash position Excel export", () => {
+  it("returns an .xlsx for permitted users and 403 for a teller", async () => {
+    const { GET } = await import("@/app/api/reports/cash-position/route");
+    await openSessionAs(teller, "0");
+    await receiptAs(teller, [["CERT_FEE", "50.00"]]);
+    const ok = await runAs(manager, () => GET(new Request("http://localhost:3000/api/reports/cash-position?date=2026-10-07")));
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("content-type")).toContain("spreadsheetml");
+    const ExcelJS = (await import("exceljs")).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(new Uint8Array(await ok.arrayBuffer()).buffer);
+    const values: unknown[] = [];
+    wb.worksheets[0]!.eachRow((r) => values.push((r.values as unknown[]).slice(1)));
+    expect(values).toContainEqual(["Ending cash on hand", 50]);
+    expect(values).toContainEqual(["Agrees with the general ledger"]);
+    const denied = await runAs(teller, () => GET(new Request("http://localhost:3000/api/reports/cash-position")));
+    expect(denied.status).toBe(403);
+  });
+});

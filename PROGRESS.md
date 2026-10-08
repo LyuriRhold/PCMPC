@@ -85,8 +85,8 @@
 - [x] T4.3 Session service (open, close with count, verify with variance posting)
 - [x] T4.4 Receipt service (registered items in one transaction) + cancellation
 - [x] T4.5 DV workflow + bank deposit
-- [ ] T4.6 Teller UI (payor search → dues cart → slip print, cash count, verification)
-- [ ] T4.7 Daily cash position report + Excel export
+- [x] T4.6 Teller UI (payor search → dues cart → slip print, cash count, verification)
+- [x] T4.7 Daily cash position report + Excel export
 - [x] Acceptance tests written first (tests/acceptance/phase-04.test.ts)
 - [ ] Exit checks passed
 

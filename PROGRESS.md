@@ -13,7 +13,7 @@
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ✅ | phase-02-members · tag `phase-02` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ✅ | phase-03-accounting-core · tag `phase-03` | rldejoya (reviewer agent: no blockers; follow-ups fixed) · 2026-10-08 |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ✅ | phase-04-cashiering · tag `phase-04` | rldejoya (reviewer agent: SoD test gap + drawer check fixed) · 2026-10-08 |
-| 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | 🔨 | phase-05-water-connections | |
+| 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | 🟡 awaiting review | phase-05-water-connections | |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ⬜ | | |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ⬜ | | |
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ⬜ | | |
@@ -100,7 +100,7 @@
 - [x] T5.7 Senior-citizen eligibility records
 - [x] T5.8 UI: customers, applications, account profile, routes/sequence, tariff admin, meters
 - [x] Acceptance tests written first (tests/acceptance/phase-05.test.ts)
-- [ ] Exit checks passed
+- [x] Exit checks passed
 
 ### Phase 06 — Water: Meter Reading & Billing
 - [ ] T6.1 `job_runs` + `runOnce`; schema for periods, readings, bills, lines, memos
@@ -513,3 +513,77 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - DV approval limits (Q-04.4).
 
 **Exit checks / counts:** `npm run gate` green: 239 tests (unit 142, integration 49, acceptance 48: A0 10 + A1 9 + A2 9 + A3 10 + A4 10). `npm run build` green. `npm run e2e` green: 7 specs including A4.11. Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.
+
+### Phase 05 summary
+**Built**
+- **Schema (T5.1):** migration `0009_water`. Tables:
+  - `water_customers`: MEMBER or NON_MEMBER; at most one MEMBER record per member; a normalized name+address key for duplicate checks.
+  - `water_zones` and `water_routes`.
+  - `water_accounts`: account no. `WA-`, classification, route + `sequence_no`, status, `deposit_amount`.
+  - `water_applications` (`WAPP-`).
+  - `water_meters` (3–9 dial digits).
+  - `water_meter_installations`: at most one active installation per meter and per account.
+  - `water_rate_schedules`: versioned; unique on classification + effective date; blocks priced in centavos.
+  - `water_fees`, `water_senior_eligibility`, `water_account_history`.
+  - The migration also adds `journal_lines.customer_id` and `account_mappings.requires_customer`. `ar_water`, `customers_deposits` and `customers_advances` are customer sub-ledgers: `postJournal` requires the customer tag on those lines and checks that the customer exists.
+  - Seeds: zone PIPINDAN / route R-01; the DOMAIN §2 sample tariffs as versions effective 2026-01-01; fees CONNECTION, METER_DEPOSIT, RECONNECTION. The provisional COA gains 42170 Reconnection Fee Income.
+- **Customers (T5.2):**
+  - A member customer links to an ACTIVE or INACTIVE member and copies the member's name, address and mobile. "Customer already exists for M-000001" if one is already linked.
+  - Non-members are checked for duplicates on name + address.
+  - A member hook (`members/hooks.ts`) turns a TERMINATED or DECEASED member's customer into NON_MEMBER (Q-05.6).
+  - Read models mask mobile, ID no. and OSCA ID unless the viewer has `members.read_sensitive` (Q-05.5).
+  - Teller payor type `WATER_CUSTOMER`: search by name or account no.
+- **Workflow (T5.3):**
+  - Application, optional inspection, then approval. The approver can't be the encoder (SoD). Approval opens a PENDING account at the end of its route.
+  - The connection fee and meter deposit are paid at the teller. Installing the meter then activates the account; an account can't be ACTIVE without an installed meter.
+  - Reject.
+  - Transfer of ownership; the deposit stays with the account.
+  - Move to another route; reorder a route.
+  - Every change is written to the account history and the audit log.
+- **Meters (T5.4):**
+  - Inventory with the serial uppercased and unique.
+  - Installation needs an IN_STOCK meter; "already installed at WA-…" otherwise. Readings are checked against the dial digits.
+  - Replacement records the old meter's final reading and new status plus the new meter's initial reading, both as installation rows.
+  - An installed meter's status changes only through replacement.
+- **Rates (T5.5):**
+  - Pure `chargeFor()` returns itemized lines. It is checked against a unit-by-unit reference for 0–500 m³.
+  - Schedule validation: no gaps, only the last block is open-ended, integer centavo rates.
+  - `computeWaterCharge(classification, m³, periodEnd)` uses the version in force on the period-end date.
+  - New versions are insert-only and must be dated after the latest version.
+- **Teller items (T5.6):**
+  - `WATER_CONNECTION_FEE` and `METER_DEPOSIT` are offered as dues for approved applications. The amount must equal the fee, and each fee can be paid only once.
+  - The deposit credits Customers' Deposits with the customer tag and adds to the account's deposit.
+  - Cancelling the receipt reverses the deposit, but is refused once the meter is installed.
+  - `WATER_OTHER_FEE` covers fees by code, such as reconnection.
+- **Senior citizens (T5.7):** eligibility records apply to RESIDENTIAL accounts only. `isSeniorEligible(account, date)` is ready for Phase 06 billing.
+- **Screens (T5.8):**
+  - Customers: list/search, new (member lookup by member no.), profile with accounts and applications plus the application form.
+  - Application queue and detail: inspect, approve/reject, fee status, install form.
+  - Connections & meters: account list, meter inventory with add and status.
+  - Account profile: meter history, replace meter, senior eligibility, move route, transfer, account history.
+  - Zones & routes: reading order per route, reordered by drag-and-drop or ↑/↓, then saved.
+  - Tariffs & fees: versions with "In force" / "Upcoming", the add-version form, the fee schedule.
+  - The five water nav items are Live.
+- **Teller desk:** a due already in the cart is no longer offered again. Manual items appear only after the chosen payor's dues have loaded, so the dues stay above them.
+- **Fix found while seeding:** Drizzle's `jsonb` column parsed JSON strings a second time, so a setting such as `"350000"` came back as a number. Settings and audit values now use a `jsonbValue` column type, with a regression test.
+
+**Decisions** (see Questions Q-05.1–Q-05.6)
+- One seeded zone and route until PCMPC sends its puroks and reading routes. An application without a route goes to the first route.
+- Only the RESIDENTIAL and COMMERCIAL sample tariffs are seeded. INSTITUTIONAL and BULK accounts can be opened, but they need a rate version added on the Tariffs screen before Phase 06 bills them.
+- Transfers have no fee, and the deposit stays with the account.
+- Both fees must be paid before installation.
+- Billing clerks see masked mobile and ID numbers.
+- A member's customer becomes NON_MEMBER on termination or death.
+
+**Deviations from spec (with reason)**
+- **Zones and routes have no create/edit screen.** They are seeded (Q-05.1) and the screen manages the reading order. Assigning meter readers to routes is left to Phase 06, where the readers' screens are built.
+- **Fee amounts:** they are read from settings when the water seed runs. Changing `water.fee.*` later does not change `water_fees`, and there is no fee edit screen yet (Follow-ups).
+- **E2E:** the UI-shell test's "coming soon" example changed from water Customers (now Live) to Meter readings (Phase 06).
+
+**Follow-ups**
+- Answer Q-05.1–Q-05.6, especially the real zones/routes and the NWRB-approved tariff with its reference.
+- A fee-schedule edit screen, or syncing `water_fees` from settings.
+- Zone/route maintenance and assigning readers to routes (Phase 06).
+- The real COA with water accounts (Q-03.x) before Phase 06 posts water revenue.
+
+**Exit checks / counts:** `npm run gate` green: 295 tests (unit 167, integration 69, acceptance 59: A0 10 + A1 9 + A2 9 + A3 10 + A4 10 + A5 11). `npm run build` green. `npm run e2e` green: 8 specs including A5.12. Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.

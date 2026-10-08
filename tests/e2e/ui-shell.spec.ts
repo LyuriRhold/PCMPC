@@ -21,7 +21,7 @@ test("planned screens show the under-construction page with their phase", async 
 });
 
 test("the dashboard lists live and coming-soon modules; unknown paths are 404", async ({ page }) => {
-  await expect(page.getByRole("link", { name: /Customers.*Soon · P05/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Meter readings.*Soon · P06/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Coop settings.*Live/ })).toBeVisible();
 
   await page.goto("/water/no-such-screen");

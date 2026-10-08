@@ -11,7 +11,7 @@
 | 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | ✅ | phase-00-foundation · tag `phase-00` | rldejoya (reviewer agent: no must-fix) · 2026-10-07 |
 | 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ✅ | phase-01-auth-roles-audit · tag `phase-01` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ✅ | phase-02-members · tag `phase-02` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
-| 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ⬜ | | |
+| 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | 🔨 | phase-03-accounting-core | |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ⬜ | | |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ⬜ | | |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ⬜ | | |
@@ -76,7 +76,7 @@
 - [ ] T3.4 Manual JV workflow + UI (draft, approve, post, reverse)
 - [ ] T3.5 Reports: TB, GL, journal books, subsidiary ledger + Excel export
 - [ ] T3.6 COA management UI (add/edit/deactivate; can't deactivate an account with a balance)
-- [ ] Acceptance tests written first (tests/acceptance/phase-03.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-03.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 04 — Cashiering Core (Teller) & Daily Cash Position
@@ -259,6 +259,11 @@
 - [ ] Q-02.2 (phase 02) Who may change a member's status (INACTIVE, TERMINATED, DECEASED)? | default used: `members.approve` (MANAGER), same as approval | answer:
 - [ ] Q-02.3 (phase 02) Who encodes membership applications? The Phase 01 matrix gave `members.write` only to LOAN_OFFICER. | default used: also granted to MANAGER (so a manager can encode and approve) | answer:
 - [ ] Q-02.4 (phase 02) Which IDs are required (PLAN §9 "required IDs")? | default used: a valid ID type and number are optional at application and at approval | answer:
+
+- [ ] Q-03.1 (phase 03) We need PCMPC's current chart of accounts (Excel → `docs/coa/pcmpc-coa.csv`; format in `docs/coa/README.md`), including the water accounts (PLAN R3, §9). | default used: a provisional CDA-style COA (flagged provisional) with only the accounts the DOMAIN §6 mapping keys need | answer:
+- [ ] Q-03.2 (phase 03) Who may approve journal vouchers? | default used: MANAGER and BOOKKEEPER both hold `gl.jv_approve`; SoD stops anyone approving a JV they prepared | answer:
+- [ ] Q-03.3 (phase 03) Who maintains the chart of accounts? The Phase 01 catalog has no permission for it. | default used: new permission `gl.coa`, granted to BOOKKEEPER | answer:
+- [ ] Q-03.4 (phase 03) Which ledgers are kept per member? | default used: lines on share capital (subscribed and receivable), savings, time deposits, loans receivable and member store AR must carry a member | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->

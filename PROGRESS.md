@@ -12,7 +12,7 @@
 | 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ✅ | phase-01-auth-roles-audit · tag `phase-01` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ✅ | phase-02-members · tag `phase-02` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ✅ | phase-03-accounting-core · tag `phase-03` | rldejoya (reviewer agent: no blockers; follow-ups fixed) · 2026-10-08 |
-| 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ⬜ | | |
+| 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | 🔨 | phase-04-cashiering | |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ⬜ | | |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ⬜ | | |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ⬜ | | |
@@ -87,7 +87,7 @@
 - [ ] T4.5 DV workflow + bank deposit
 - [ ] T4.6 Teller UI (payor search → dues cart → slip print, cash count, verification)
 - [ ] T4.7 Daily cash position report + Excel export
-- [ ] Acceptance tests written first (tests/acceptance/phase-04.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-04.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 05 — Water: Customers, Service Connections, Meters & Rates
@@ -264,6 +264,12 @@
 - [ ] Q-03.2 (phase 03) Who may approve journal vouchers? | default used: MANAGER and BOOKKEEPER both hold `gl.jv_approve`; SoD stops anyone approving a JV they prepared | answer:
 - [ ] Q-03.3 (phase 03) Who maintains the chart of accounts? The Phase 01 catalog has no permission for it. | default used: new permission `gl.coa`, granted to BOOKKEEPER | answer:
 - [ ] Q-03.4 (phase 03) Which ledgers are kept per member? | default used: lines on share capital (subscribed and receivable), savings, time deposits, loans receivable and member store AR must carry a member | answer:
+
+- [ ] Q-04.1 (phase 04) Which "other income" items may a teller collect, and to which accounts? | default used: setting `cash.other_income_items` with Certification fee → `certification_fee_income` and Hall rental → `rental_income` (both new provisional accounts) | answer:
+- [ ] Q-04.2 (phase 04) Checks received at the counter: Cash on Hand (deposited later) or straight to the bank? | default used: CASH and CHECK receipts debit Cash on Hand and count toward the session's expected cash; BANK_TRANSFER debits Cash in Bank | answer:
+- [ ] Q-04.3 (phase 04) Denominations used at the counter (spec list marked CONFIRM). | default used: setting `cash.denominations` with bills 1000/500/200/100/50/20 and coins 20/10/5/1/0.25/0.05/0.01 | answer:
+- [ ] Q-04.4 (phase 04) DV approval limits (PLAN §9). | default used: none yet; any `cash.dv_approve` holder (MANAGER) approves any DV, never their own | answer:
+- [ ] Q-04.5 (phase 04) Receipt layout and the BIR-registered receipt/invoice series in use (PLAN R1). | default used: a printable acknowledgement receipt showing the system no. AR-… and the BIR receipt no. | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->

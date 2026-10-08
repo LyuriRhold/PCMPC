@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | ✅ | phase-00-foundation · tag `phase-00` | rldejoya (reviewer agent: no must-fix) · 2026-10-07 |
 | 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ✅ | phase-01-auth-roles-audit · tag `phase-01` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
-| 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ⬜ | | |
+| 02 | [Members Registry](docs/phases/PHASE-02-members.md) | 🔨 | phase-02-members | |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ⬜ | | |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ⬜ | | |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ⬜ | | |
@@ -66,7 +66,7 @@
 - [ ] T2.4 Server actions with permissions + audit; server-side masking
 - [ ] T2.5 UI: list/search, application form (zod shared), approval queue, profile tabs
 - [ ] T2.6 Seed fixture: 6 sample members (dev only)
-- [ ] Acceptance tests written first (tests/acceptance/phase-02.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-02.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 03 — Accounting Core (GL engine)
@@ -254,6 +254,11 @@
 - [ ] Q-01.5 (phase 01) `surplus.pr_basis`: do water bills paid by members count as patronage? (DOMAIN §2 has a "?") | default used: not counted (`waterBillsPaidByMembers: false`) | answer:
 - [ ] Q-01.6 (phase 01) `loan.allowance_rates` per aging bucket ("set by bookkeeper"). | default used: all null (not set) until the bookkeeper enters them | answer:
 - [ ] Q-01.7 (phase 01) PLAN §9 inputs for Phase 01 are still needed: CDA registration no., TIN, full official address, fiscal year start, and the staff list with roles. | default used: DOMAIN §2 defaults (blank CDA no./TIN) | answer:
+
+- [ ] Q-02.1 (phase 02) A2.9 says "history has 1 row", but the business rules also say every status change writes member_status_history, and approval (APPLICANT → ACTIVE) is a status change. | default used: approval writes its own history row; the A2.9 test checks that the ACTIVE → TERMINATED → ACTIVE scenario adds exactly 1 row (the termination) and the rejected change adds none | answer:
+- [ ] Q-02.2 (phase 02) Who may change a member's status (INACTIVE, TERMINATED, DECEASED)? | default used: `members.approve` (MANAGER), same as approval | answer:
+- [ ] Q-02.3 (phase 02) Who encodes membership applications? The Phase 01 matrix gave `members.write` only to LOAN_OFFICER. | default used: also granted to MANAGER (so a manager can encode and approve) | answer:
+- [ ] Q-02.4 (phase 02) Which IDs are required (PLAN §9 "required IDs")? | default used: a valid ID type and number are optional at application and at approval | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->

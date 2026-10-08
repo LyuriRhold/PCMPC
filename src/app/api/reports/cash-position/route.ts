@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { ForbiddenError, getCurrentUser, requirePermission, UnauthenticatedError } from "@/lib/auth-guard";
 import { businessToday, formatDate, isBusinessDate } from "@/lib/dates";
 import type { Money } from "@/lib/money";
-import "@/modules/cashiering/builtins";
+import "@/modules/plugins";
 import { cashPosition } from "@/modules/cashiering/cash-position";
 import { getSetting } from "@/modules/settings/service";
 

@@ -14,6 +14,7 @@ import {
   type MemberStatus,
   type MemberType,
 } from "./schema";
+import { notifyMemberStatusChange } from "./hooks";
 import { canTerminate } from "./termination";
 import { pctToHundredths, type MemberData } from "./validation";
 
@@ -258,6 +259,7 @@ export async function changeStatus(tx: Tx, input: ChangeStatusInput, actorId: st
     .returning();
   if (!after) throw new Error("member update returned no row");
   await writeHistory(tx, before, input.to, input.reason, input.ref, actorId);
+  await notifyMemberStatusChange(tx, { memberId: before.id, from: before.status, to: input.to, actorId });
   await audit(tx, {
     action: "member.status_change",
     entity: "member",

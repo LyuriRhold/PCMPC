@@ -16,6 +16,7 @@ import {
 import { createdColumns, tstz } from "@/db/columns";
 import { users } from "@/modules/auth/schema";
 import { members } from "@/modules/members/schema";
+import { waterCustomers } from "@/modules/water/schema";
 
 export const ACCOUNT_TYPES = ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"] as const;
 export const NORMAL_BALANCES = ["DR", "CR"] as const;
@@ -65,6 +66,8 @@ export const accountMappings = pgTable("account_mappings", {
     .notNull()
     .references(() => accounts.id),
   requiresMember: boolean("requires_member").notNull().default(false),
+  /** Lines must carry a water customer (AR–Water, Customers' Deposits/Advances sub-ledgers; Phase 05). */
+  requiresCustomer: boolean("requires_customer").notNull().default(false),
   ...createdColumns(),
 });
 
@@ -145,6 +148,8 @@ export const journalLines = pgTable(
       .notNull()
       .references(() => accounts.id),
     memberId: uuid("member_id").references(() => members.id),
+    /** Water customer for customer-tagged accounts (Phase 05). */
+    customerId: uuid("customer_id").references(() => waterCustomers.id),
     /** Centavos. Exactly one of debit / credit is > 0. */
     debit: bigint("debit", { mode: "bigint" }).notNull().default(sql`0`),
     credit: bigint("credit", { mode: "bigint" }).notNull().default(sql`0`),
@@ -156,6 +161,7 @@ export const journalLines = pgTable(
     check("journal_lines_amounts_chk", sql`${t.debit} >= 0 AND ${t.credit} >= 0 AND ((${t.debit} > 0) <> (${t.credit} > 0))`),
     index("journal_lines_account_idx").on(t.accountId),
     index("journal_lines_member_idx").on(t.memberId, t.accountId),
+    index("journal_lines_customer_idx").on(t.customerId, t.accountId),
   ],
 );
 

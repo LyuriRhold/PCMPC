@@ -27,6 +27,9 @@ export const MEMBER_SUBSIDIARY_KEYS = [
   "accounts_receivable_members",
 ] as const;
 
+/** Keys whose lines form a water-customer subsidiary ledger (DOMAIN §6 "customer-tagged"). */
+export const CUSTOMER_SUBSIDIARY_KEYS = ["ar_water", "customers_deposits", "customers_advances"] as const;
+
 /**
  * Every DOMAIN §6 mapping key the system posts to. Templated keys are expanded for the sample loan
  * products (REG, EMR, PRD; DOMAIN §2). `accumulated_depreciation_{class}` keys are added in
@@ -158,6 +161,7 @@ export const PROVISIONAL_COA: CoaRow[] = [
   p("42140", "Penalty Income - Water", "REVENUE", "CR", "42000", ["penalty_income_water"]),
   p("42150", "Water Revenue Adjustments", "REVENUE", "DR", "42000", ["water_revenue_adjustments"]),
   p("42160", "Senior Citizen Discounts - Water", "REVENUE", "DR", "42000", ["senior_citizen_discounts"]),
+  p("42170", "Reconnection Fee Income - Water", "REVENUE", "CR", "42000", ["water_reconnection_fee_income"]),
   h("43000", "Income from Store", "REVENUE", "CR", "4"),
   p("43110", "Sales", "REVENUE", "CR", "43000", ["sales"]),
   p("43120", "Sales Returns and Allowances", "REVENUE", "DR", "43000", ["sales_returns"]),

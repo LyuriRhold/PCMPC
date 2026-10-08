@@ -91,7 +91,7 @@
 - [x] Exit checks passed
 
 ### Phase 05 — Water: Customers, Service Connections, Meters & Rates
-- [ ] T5.1 Schema + migrations (incl. `journal_lines.customer_id`) + seeds (zones, tariff, fees)
+- [x] T5.1 Schema + migrations (incl. `journal_lines.customer_id`) + seeds (zones, tariff, fees)
 - [ ] T5.2 Customer service (member/non-member) + payor type `WATER_CUSTOMER`
 - [ ] T5.3 Application → approval → installation → activation workflow + transfers
 - [ ] T5.4 Meter inventory, installation and replacement service

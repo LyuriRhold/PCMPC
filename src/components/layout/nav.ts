@@ -57,8 +57,8 @@ export type NavItem = {
   summary: string;
   /** What the screen will let staff do (coming-soon page). */
   features?: string[];
-  /** Live items are shown only to users holding this permission (pages re-check it on the server). */
-  permission?: Permission;
+  /** Live items are shown only to users holding this permission, or any one of a list (pages re-check on the server). */
+  permission?: Permission | Permission[];
 };
 
 export type NavSection = {
@@ -332,16 +332,27 @@ export const NAV_SECTIONS: NavSection[] = [
         href: "/cashiering/teller",
         label: "Teller counter",
         icon: Receipt,
-        status: "soon",
+        status: "live",
+        permission: "cash.session",
         phase: "04",
         summary: "One receipt for water bills, shares, savings and loans.",
         features: ["Teller session with opening cash", "Many items on one receipt", "Cash count and manager verification"],
       },
       {
+        href: "/cashiering/sessions",
+        label: "Teller sessions",
+        icon: CalendarCheck,
+        status: "live",
+        permission: ["cash.verify", "cash.cancel"],
+        phase: "04",
+        summary: "Verify closed sessions and post cash short/over.",
+      },
+      {
         href: "/cashiering/vouchers",
         label: "Disbursement vouchers",
         icon: FileText,
-        status: "soon",
+        status: "live",
+        permission: ["cash.dv_prepare", "cash.dv_approve", "cash.session"],
         phase: "04",
         summary: "Prepare and approve cash-out vouchers.",
       },
@@ -349,7 +360,8 @@ export const NAV_SECTIONS: NavSection[] = [
         href: "/cashiering/cash-position",
         label: "Daily cash position",
         icon: Wallet,
-        status: "soon",
+        status: "live",
+        permission: ["cash.verify", "gl.read"],
         phase: "04",
         summary: "Cash in, cash out and balances per day.",
       },
@@ -418,7 +430,6 @@ export function comingSoonItem(path: string): NavItem | undefined {
  * every signed-in user (they show no data and allow no actions).
  */
 export function visibleHrefs(permissions: ReadonlySet<string>): string[] {
-  return ALL_NAV_ITEMS.filter((i) => i.status === "soon" || !i.permission || permissions.has(i.permission)).map(
-    (i) => i.href,
-  );
+  const allowed = (p: NavItem["permission"]) => !p || (Array.isArray(p) ? p.some((x) => permissions.has(x)) : permissions.has(p));
+  return ALL_NAV_ITEMS.filter((i) => i.status === "soon" || allowed(i.permission)).map((i) => i.href);
 }

@@ -50,6 +50,20 @@
       "when": 1791436974690,
       "tag": "0006_ledger_line_entry_immutable",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791438987395,
+      "tag": "0007_cashiering",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791439025398,
+      "tag": "0008_cash_count_kind",
+      "breakpoints": true
     }
   ]
 }

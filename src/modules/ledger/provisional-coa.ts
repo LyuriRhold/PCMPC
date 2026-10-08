@@ -163,6 +163,8 @@ export const PROVISIONAL_COA: CoaRow[] = [
   p("43120", "Sales Returns and Allowances", "REVENUE", "DR", "43000", ["sales_returns"]),
   h("44000", "Other Income", "REVENUE", "CR", "4"),
   p("44110", "Membership Fee Income", "REVENUE", "CR", "44000", ["membership_fee_income"]),
+  p("44120", "Certification Fee Income", "REVENUE", "CR", "44000", ["certification_fee_income"]),
+  p("44130", "Rental Income", "REVENUE", "CR", "44000", ["rental_income"]),
 
   h("5", "EXPENSES", "EXPENSE", "DR", null),
   h("51000", "Cost of Sales", "EXPENSE", "DR", "5"),

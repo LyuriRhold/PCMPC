@@ -18,3 +18,12 @@ export async function guardPage(permission: Permission): Promise<PageAccess> {
     throw e;
   }
 }
+
+/** Like guardPage, for pages several roles use: the user needs any one of `permissions`. */
+export async function guardPageAny(permissions: Permission[]): Promise<PageAccess> {
+  const { getCurrentUser } = await import("@/lib/auth-guard");
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (permissions.some((p) => user.permissions.has(p))) return { ok: true, user };
+  return guardPage(permissions[0] as Permission);
+}

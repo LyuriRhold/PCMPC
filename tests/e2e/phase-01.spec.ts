@@ -14,7 +14,7 @@ test("A1.10 login as admin → dashboard → Users → logout; protected URL red
   await expect(page).toHaveURL(/localhost:3000\/$/);
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
 
-  await page.getByRole("link", { name: "Users" }).click();
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Users", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/users/);
   await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
   await expect(page.getByRole("cell", { name: username, exact: true })).toBeVisible();

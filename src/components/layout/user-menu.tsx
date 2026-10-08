@@ -5,8 +5,8 @@ import { logoutAction } from "@/modules/auth/session-actions";
 
 export function UserMenu({ user }: { user: CurrentUser }) {
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-sm">
+    <div className="ml-auto flex items-center gap-3">
+      <span className="hidden text-sm sm:inline">
         <span className="font-medium">{user.name}</span>{" "}
         <span className="text-muted-foreground">({user.roleCode})</span>
       </span>

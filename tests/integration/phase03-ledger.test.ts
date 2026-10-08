@@ -187,3 +187,13 @@ describe("T3.6 chart of accounts rules", () => {
     });
   });
 });
+
+describe("T3.4 account picker", () => {
+  it("lists active postable accounts and flags member ledgers", async () => {
+    const { postableAccounts } = await import("@/modules/ledger/queries");
+    const list = await postableAccounts();
+    expect(list.find((a) => a.code === "21110")).toMatchObject({ name: "Savings Deposits", requiresMember: true });
+    expect(list.find((a) => a.code === "11110")).toMatchObject({ name: "Cash on Hand", requiresMember: false });
+    expect(list.some((a) => a.code === "11000")).toBe(false);
+  });
+});

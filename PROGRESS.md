@@ -75,7 +75,7 @@
 - [x] T3.3 Ledger service (postJournal, reverseJournal, balances)
 - [x] T3.4 Manual JV workflow + UI (draft, approve, post, reverse)
 - [x] T3.5 Reports: TB, GL, journal books, subsidiary ledger + Excel export
-- [ ] T3.6 COA management UI (add/edit/deactivate; can't deactivate an account with a balance)
+- [x] T3.6 COA management UI (add/edit/deactivate; can't deactivate an account with a balance)
 - [x] Acceptance tests written first (tests/acceptance/phase-03.test.ts)
 - [ ] Exit checks passed
 

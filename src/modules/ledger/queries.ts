@@ -3,7 +3,7 @@ import { getDb, type Db, type Tx } from "@/db/client";
 import type { BusinessDate } from "@/lib/dates";
 import { users } from "@/modules/auth/schema";
 import { members } from "@/modules/members/schema";
-import { accounts, journalEntries, journalLines, type Book, type JeStatus } from "./schema";
+import { accountMappings, accounts, journalEntries, journalLines, type Book, type JeStatus } from "./schema";
 
 export type EntryFilters = { status?: JeStatus; book?: Book; from?: BusinessDate; to?: BusinessDate; q?: string; page?: number };
 
@@ -96,15 +96,14 @@ export async function getEntry(jeId: string, db: Db | Tx = getDb()) {
 
 /** Active postable accounts for pickers (code order), flagged when lines need a member. */
 export async function postableAccounts(db: Db | Tx = getDb()) {
-  const rows = await db
-    .select({
-      id: accounts.id,
-      code: accounts.code,
-      name: accounts.name,
-      requiresMember: sql<boolean>`exists (select 1 from account_mappings m where m.account_id = ${accounts.id} and m.requires_member)`,
-    })
-    .from(accounts)
-    .where(and(eq(accounts.isPostable, true), eq(accounts.isActive, true)))
-    .orderBy(asc(accounts.code));
-  return rows;
+  const [rows, memberLedgers] = await Promise.all([
+    db
+      .select({ id: accounts.id, code: accounts.code, name: accounts.name })
+      .from(accounts)
+      .where(and(eq(accounts.isPostable, true), eq(accounts.isActive, true)))
+      .orderBy(asc(accounts.code)),
+    db.select({ accountId: accountMappings.accountId }).from(accountMappings).where(eq(accountMappings.requiresMember, true)),
+  ]);
+  const needsMember = new Set(memberLedgers.map((m) => m.accountId));
+  return rows.map((r) => ({ ...r, requiresMember: needsMember.has(r.id) }));
 }

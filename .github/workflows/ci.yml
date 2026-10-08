@@ -35,6 +35,9 @@ jobs:
       CRON_SECRET: ci-only-cron-secret-not-used-in-prod
       APP_TZ: Asia/Manila
       APP_ENV: ci
+      APP_URL: http://localhost:3000
+      SEED_ADMIN_USERNAME: admin
+      SEED_ADMIN_PASSWORD: ci-only-admin-password
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

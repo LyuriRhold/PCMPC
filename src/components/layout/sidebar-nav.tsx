@@ -5,11 +5,14 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { NAV_SECTIONS } from "./nav";
 
-export function SidebarNav() {
+export function SidebarNav({ allowed }: { allowed: string[] }) {
   const pathname = usePathname();
+  const sections = NAV_SECTIONS.map((s) => ({ ...s, items: s.items.filter((i) => allowed.includes(i.href)) })).filter(
+    (s) => s.items.length > 0,
+  );
   return (
     <nav aria-label="Main" className="flex flex-col gap-6 px-3 py-4">
-      {NAV_SECTIONS.map((section) => (
+      {sections.map((section) => (
         <div key={section.title} className="flex flex-col gap-1">
           <p className="px-2 text-xs font-medium uppercase tracking-wide text-sidebar-foreground/60">
             {section.title}

@@ -3,13 +3,13 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 01
+**Current phase:** 02
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
 |---|---|---|---|---|
 | 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | ✅ | phase-00-foundation · tag `phase-00` | rldejoya (reviewer agent: no must-fix) · 2026-10-07 |
-| 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ⬜ | | |
+| 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ✅ | phase-01-auth-roles-audit · tag `phase-01` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ⬜ | | |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ⬜ | | |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ⬜ | | |
@@ -47,17 +47,17 @@
 - [x] Exit checks passed
 
 ### Phase 01 — Auth, Roles, Audit Trail & Coop Settings
-- [ ] T1.1 Choose Better Auth vs Auth.js, record the decision, install & configure
-- [ ] T1.2 Schema + migrations: users, roles, permissions, audit_log (+ trigger), settings, number_series
-- [ ] T1.3 Seed: roles, permission matrix, settings defaults, number series, first admin
-- [ ] T1.4 `src/lib/auth-guard.ts` (requirePermission, assertNotSameUser)
-- [ ] T1.5 `src/lib/audit.ts` audit() + audit log viewer
-- [ ] T1.6 Login/logout pages, lockout logic, and protected `(staff)` layout redirect
-- [ ] T1.7 Users admin UI and actions
-- [ ] T1.8 Settings service (`getSetting<T>(key)` with zod-typed keys) and the settings UI
-- [ ] T1.9 `src/lib/numbering.ts` `next(code, tx, date)`
-- [ ] Acceptance tests written first (tests/acceptance/phase-01.test.ts)
-- [ ] Exit checks passed
+- [x] T1.1 Choose Better Auth vs Auth.js, record the decision, install & configure
+- [x] T1.2 Schema + migrations: users, roles, permissions, audit_log (+ trigger), settings, number_series
+- [x] T1.3 Seed: roles, permission matrix, settings defaults, number series, first admin
+- [x] T1.4 `src/lib/auth-guard.ts` (requirePermission, assertNotSameUser)
+- [x] T1.5 `src/lib/audit.ts` audit() + audit log viewer
+- [x] T1.6 Login/logout pages, lockout logic, and protected `(staff)` layout redirect
+- [x] T1.7 Users admin UI and actions
+- [x] T1.8 Settings service (`getSetting<T>(key)` with zod-typed keys) and the settings UI
+- [x] T1.9 `src/lib/numbering.ts` `next(code, tx, date)`
+- [x] Acceptance tests written first (tests/acceptance/phase-01.test.ts)
+- [x] Exit checks passed
 
 ### Phase 02 — Members Registry
 - [ ] T2.1 Schema + migrations + name normalization helper
@@ -247,6 +247,13 @@
 
 ## Questions (Claude → Rhold / PCMPC)
 <!-- Format: - [ ] Q-XX.n (phase XX) question… | default used: … | answer: … -->
+- [ ] Q-01.1 (phase 01) Idle session timeout: is 8 hours right for office PCs? | default used: 8 h sliding (spec, CONFIRM); a constant in `src/lib/auth.ts` because Better Auth reads it at startup | answer:
+- [ ] Q-01.2 (phase 01) Role → permission matrix (`src/modules/auth/permissions.ts`, visible at /admin/roles) is my reading of PLAN §3. Please confirm these choices in particular: ADMIN has no operational permissions (users, settings, period reopen, audit, reports only); tariff changes (`water.rates`), loan release, loan write-off and receipt cancellation are MANAGER-only; LOAN_OFFICER can edit member records (`members.write`); MANAGER and AUDITOR can read the audit log. | default used: as seeded | answer:
+- [ ] Q-01.3 (phase 01) Water bill numbers `WB-{YYYYMM}-{000000}`: DOMAIN §5 says series reset yearly, but the example `WB-202610-000001` suggests a monthly reset. | default used: yearly reset (the month is part of the text only) | answer:
+- [ ] Q-01.4 (phase 01) PO and RR number formats are given only as `PO-…` / `RR-…` in DOMAIN §5. | default used: `PO-{YYYY}-{00000}`, `RR-{YYYY}-{00000}`, yearly reset | answer:
+- [ ] Q-01.5 (phase 01) `surplus.pr_basis`: do water bills paid by members count as patronage? (DOMAIN §2 has a "?") | default used: not counted (`waterBillsPaidByMembers: false`) | answer:
+- [ ] Q-01.6 (phase 01) `loan.allowance_rates` per aging bucket ("set by bookkeeper"). | default used: all null (not set) until the bookkeeper enters them | answer:
+- [ ] Q-01.7 (phase 01) PLAN §9 inputs for Phase 01 are still needed: CDA registration no., TIN, full official address, fiscal year start, and the staff list with roles. | default used: DOMAIN §2 defaults (blank CDA no./TIN) | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -256,6 +263,7 @@
 - 2026-10-07 · plan v1.1 · Cashiering is a pluggable registry (Phase 04); every module registers its own receipt items · one counter, one receipt
 - 2026-10-07 · phase 00 · Local DB is PostgreSQL 18.6 portable binaries (no Docker, no admin), managed by `scripts/db.mjs`; T0.4 adapted (no docker-compose) · Docker and native Postgres not installed; user chose portable over SQL Server so dev matches Neon (Postgres)
 - 2026-10-07 · phase 00 · Pinned stable versions: Node 24 LTS, Next.js 16.4.0 (Cache Components + Partial Prefetching on), React 19.3, TypeScript 5, Tailwind 4, shadcn 4 (base-nova), drizzle-orm 0.45.3 + drizzle-kit 0.31.11, pg 8.23, Vitest 5.0.3, Playwright 1.63, zod 4.6, decimal.js 10.6, date-fns 4.4 + @date-fns/tz 1.5, PostgreSQL 18.6 · PLAN §4 asks to record them
+- 2026-10-07 · phase 01 · Auth library: **Better Auth 1.7.7** (username plugin, Drizzle adapter, DB sessions in Postgres, uuid ids), not Auth.js · Auth.js v5 never shipped a stable release (`next-auth` latest is 4.x) and its credentials provider only supports JWT sessions, while the spec requires sessions stored in Postgres. Better Auth's username sign-in needs no email (spec: email optional), and its before/after hooks let lockout and inactive checks run on every sign-in path. Users, roles and permissions stay in our own tables (Better Auth's admin/RBAC plugin is not used)
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)
@@ -264,6 +272,8 @@
 - Customer/member self-service portal (view bills, balances, SOA)
 - Payroll-deduction integration
 - 2FA for staff logins
+- Self-service password change for staff (v1: the admin resets passwords; Better Auth's /change-password is disabled)
+- Editable role → permission matrix in the UI (v1: read-only grid, changed via seed)
 - Photo / signature capture (Vercel Blob); meter photo on reading
 - Smart/IoT meters
 
@@ -301,3 +311,34 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - `npm audit` reports advisories in the scaffold's dependency tree. Review them in Phase 18 (T18.2).
 - The portable Postgres doesn't start with Windows: run `npm run db:up` after each reboot.
 - The parent folder `C:\Users\rldejoya\source\repos` is itself a git repo, and it lists `PCMPC/` as untracked. Consider adding it to the parent's `.gitignore`.
+
+### Phase 01 summary
+**Built**
+- **Auth (T1.1, T1.6):** Better Auth 1.7.7 with the username plugin, Drizzle adapter and sessions in Postgres (`sessions`), with an 8-hour sliding idle timeout. Lockout (5 failures → 15 minutes) and the inactive-user check run in Better Auth's before/after sign-in hooks, so every sign-in path enforces them. Sign-up, e-mail sign-in and self-service profile endpoints are disabled. Also: `/login`, Sign out, a `src/proxy.ts` cookie redirect, and a server-side `getCurrentUser()` check in the `(staff)` layout.
+- **Schema (T1.2):** users, roles, role_permissions, Better Auth's sessions/accounts/verifications, audit_log (a trigger rejects UPDATE/DELETE), settings, settings_history and number_series.
+- **Seed (T1.3):** 11 roles, a 49-permission catalog and the role matrix, 67 settings: DOMAIN §2 plus three `auth.*` limits from this spec, 20 number series from DOMAIN §5, and the first admin from `SEED_ADMIN_*`.
+- **Guard (T1.4):** `getCurrentUser`, `requirePermission` (writes `auth.denied` outside the caller's transaction so the denial survives a rollback), `assertNotSameUser`, `runAs()` for jobs and tests, and `guardPage()` plus `<Forbidden>` for pages.
+- **Audit (T1.5):** `audit(tx, …)` strips secret-looking keys and records the actor, IP and user agent. Login, failed login, lockout, logout and denied access are audited too. Viewer at /admin/audit (filters: user, entity, action, Manila date range).
+- **Users (T1.7):** /admin/users and /admin/users/[id] (create, edit, reset password, activate/deactivate). Self-deactivation and changing your own role are blocked. Deactivating a user, changing their role or resetting their password ends their sessions.
+- **Settings (T1.8):** `getSetting(key)` typed by a zod registry; updates are validated, keep history and are audited. /admin/settings has editors per kind: pesos→centavos, percent→fraction (exact string math), and JSON for tariffs. /admin/roles shows the read-only matrix.
+- **Numbering (T1.9):** `numbering.next(code, tx, date)` uses `SELECT … FOR UPDATE` in the caller's transaction. Yearly series open a new row at 1 for a new year.
+
+- **Last-admin guard (added after review, approved by Rhold 2026-10-08):** the last active ADMIN can't be deactivated or moved to another role. Active admin rows are locked in id order, so two admins removing each other at the same time can't leave zero admins.
+
+**Decisions** (also in the Decisions log): Better Auth over Auth.js. Users, roles and permissions live in our own tables. Settings store money as centavo strings and rates as fraction strings, because JSON can't hold bigint.
+
+**Deviations from spec (with reason)**
+- Better Auth's own tables (sessions, accounts, verifications) have no `created_by`, because the library defines their shape. `users` carries two extra Better Auth columns (`email_verified`, `image`). `audit_log` has the spec's `at`/`user_id` plus `created_at`/`created_by`.
+- The idle timeout is a constant, not a setting, because Better Auth reads its session config once at startup (Q-01.1). Password length and lockout limits are settings (`auth.*`), per "config over code".
+- The audit trigger blocks UPDATE and DELETE as the spec says. TRUNCATE is not blocked: the test harness and `db:reset` rely on it.
+- `/health` moved out of the staff layout so it stays public for monitoring (Phase 18). A0.10 still passes.
+- **E2E file edited after the `test(phase-01)` commit:** `tests/e2e/phase-01.spec.ts` (not `tests/acceptance/`) started by opening `/admin/users`. The login then correctly returned the user to `/admin/users`, so the spec's "login → dashboard" step could never happen. The steps now follow the spec row: start at `/login`, and check the protected-URL redirect at the end. No assertion was removed. Playwright's `expect` timeout went from 5 to 15 s because cold dev compiles load Better Auth (about 7 s on this PC).
+
+**Follow-ups**
+- Answer Q-01.1 to Q-01.7.
+- Cross-key settings checks (ISC% + PR% = 100%, the sum of statutory funds) belong to Phase 15.
+- `member.no_format`, `water.customer_no_format` and `water.account_no_format` in settings duplicate the `number_series` formats. `number_series` is what numbering uses; decide in Phase 02/05 whether to drop the setting copies.
+- Login rate limiting by IP, security headers and the cookie review are in Phase 18 (T18.2).
+- Postgres was killed once when an interrupted command's process tree was torn down. If anything fails with ECONNREFUSED, run `npm run db:up`.
+
+**Exit checks / counts:** `npm run gate` green, with 152 tests in 10 files: unit 114, integration 19, acceptance 19 (A0.x 10 + A1.1–A1.9). `npm run build` green. `npm run e2e` green (A0.10, A1.10). Fresh `db:reset → db:migrate → db:seed` OK (4 seed steps, admin created). Checked in the browser: sign-in redirect back to `next`, editing a peso setting (₱500.00 → ₱600.00, shown in the audit log), and the roles matrix (49 × 11, 85 grants).

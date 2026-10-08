@@ -60,7 +60,7 @@
 - [x] Exit checks passed
 
 ### Phase 02 — Members Registry
-- [ ] T2.1 Schema + migrations + name normalization helper
+- [x] T2.1 Schema + migrations + name normalization helper
 - [ ] T2.2 Member service (create, approve, status, duplicates, canTerminate registry)
 - [ ] T2.3 Beneficiaries service and validation
 - [ ] T2.4 Server actions with permissions + audit; server-side masking

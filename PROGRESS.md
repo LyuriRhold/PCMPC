@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 04
+**Current phase:** 05
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -12,7 +12,7 @@
 | 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ✅ | phase-01-auth-roles-audit · tag `phase-01` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ✅ | phase-02-members · tag `phase-02` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ✅ | phase-03-accounting-core · tag `phase-03` | rldejoya (reviewer agent: no blockers; follow-ups fixed) · 2026-10-08 |
-| 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | 🟡 awaiting review | phase-04-cashiering | |
+| 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ✅ | phase-04-cashiering · tag `phase-04` | rldejoya (reviewer agent: SoD test gap + drawer check fixed) · 2026-10-08 |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ⬜ | | |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ⬜ | | |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ⬜ | | |
@@ -270,6 +270,8 @@
 - [ ] Q-04.3 (phase 04) Denominations used at the counter (spec list marked CONFIRM). | default used: setting `cash.denominations` with bills 1000/500/200/100/50/20 and coins 20/10/5/1/0.25/0.05/0.01 | answer:
 - [ ] Q-04.4 (phase 04) DV approval limits (PLAN §9). | default used: none yet; any `cash.dv_approve` holder (MANAGER) approves any DV, never their own | answer:
 - [ ] Q-04.5 (phase 04) Receipt layout and the BIR-registered receipt/invoice series in use (PLAN R1). | default used: a printable acknowledgement receipt showing the system no. AR-… and the BIR receipt no. | answer:
+- [ ] Q-04.6 (phase 04) How is a receipt corrected after the teller's session is closed (cancellation needs an OPEN session)? | default used: no cancel path after close; correct it with a manager-approved journal voucher (reversal) | answer:
+- [ ] Q-04.7 (phase 04) Must BIR receipt/invoice numbers be unique across valid receipts? | default used: not enforced (depends on how PCMPC numbers its BIR booklets, Q-04.5) | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -479,6 +481,11 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - DV list, new and detail (approve, release, cancel).
 - **Cash position (T4.7):** built from the counter's records: beginning (GL as of the day before) + receipts by item type − cash-outs by type + other postings to Cash on Hand (listed per entry) = ending. That ending is compared to the GL balance. Excel export via `/api/reports/cash-position`.
 - **Sidebar:** Teller counter, Teller sessions (new), Disbursement vouchers and Daily cash position are Live. Nav items can now require any one of several permissions.
+
+- **Review follow-ups (approved by Rhold 2026-10-08):**
+  - Integration tests now exercise the SoD checks directly: a DV approved by its preparer, and a receipt cancelled by its own teller. Before this, the default roles only ever hit the permission check.
+  - Cancelling a cash or check receipt is refused if its cash already left the drawer (deposited or paid out).
+  - Post-close receipt corrections and BIR number uniqueness are logged as Q-04.6 and Q-04.7.
 
 **Decisions** (see Questions Q-04.1–Q-04.5)
 - Other-income items and their posting keys are a setting.

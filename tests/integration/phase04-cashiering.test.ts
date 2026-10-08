@@ -1,4 +1,6 @@
 import { eq } from "drizzle-orm";
+import ExcelJS from "exceljs";
+import { GET as cashPositionXlsx } from "@/app/api/reports/cash-position/route";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb, withTx } from "@/db/client";
 import { ForbiddenError, runAs, SodError } from "@/lib/auth-guard";
@@ -182,20 +184,51 @@ describe("T4.7 cash position", () => {
 
 describe("T4.7 cash position Excel export", () => {
   it("returns an .xlsx for permitted users and 403 for a teller", async () => {
-    const { GET } = await import("@/app/api/reports/cash-position/route");
     await openSessionAs(teller, "0");
     await receiptAs(teller, [["CERT_FEE", "50.00"]]);
-    const ok = await runAs(manager, () => GET(new Request("http://localhost:3000/api/reports/cash-position?date=2026-10-07")));
+    const ok = await runAs(manager, () => cashPositionXlsx(new Request("http://localhost:3000/api/reports/cash-position?date=2026-10-07")));
     expect(ok.status).toBe(200);
     expect(ok.headers.get("content-type")).toContain("spreadsheetml");
-    const ExcelJS = (await import("exceljs")).default;
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(new Uint8Array(await ok.arrayBuffer()).buffer);
     const values: unknown[] = [];
     wb.worksheets[0]!.eachRow((r) => values.push((r.values as unknown[]).slice(1)));
     expect(values).toContainEqual(["Ending cash on hand", 50]);
     expect(values).toContainEqual(["Agrees with the general ledger"]);
-    const denied = await runAs(teller, () => GET(new Request("http://localhost:3000/api/reports/cash-position")));
+    const denied = await runAs(teller, () => cashPositionXlsx(new Request("http://localhost:3000/api/reports/cash-position")));
     expect(denied.status).toBe(403);
+  });
+});
+
+describe("Review follow-ups: SoD paths and drawer check", () => {
+  it("DV approval by its preparer is blocked by SoD itself (not only by missing permissions)", async () => {
+    const { approveDv, createDv } = await import("@/modules/cashiering/service");
+    const account = await acct("inventory_losses");
+    const dvRow = await withTx((tx) =>
+      createDv(tx, { date: "2026-10-07", payee: "X", particulars: "Y", mode: "CASH", checkNo: null, lines: [{ accountId: account, memberId: null, amount: P(100), memo: null }] }, manager),
+    );
+    await expect(withTx((tx) => approveDv(tx, dvRow.id, manager))).rejects.toThrow("Segregation of duties: preparer cannot approve");
+    await expect(withTx((tx) => approveDv(tx, dvRow.id, book))).resolves.toMatchObject({ status: "APPROVED" });
+  });
+
+  it("a receipt can't be cancelled by the teller who issued it, even with cancel rights", async () => {
+    const { cancelReceipt } = await import("@/modules/cashiering/service");
+    await openSessionAs(teller);
+    const r = await receiptAs(teller, [["CERT_FEE", "50.00"]]);
+    if (!r.ok) throw new Error(r.error);
+    await expect(withTx((tx) => cancelReceipt(tx, r.data.id, "own", teller))).rejects.toThrow("Segregation of duties: preparer cannot approve");
+  });
+
+  it("cancelling is refused when the receipt's cash already left the drawer", async () => {
+    await openSessionAs(teller, "0");
+    const r = await receiptAs(teller, [["CERT_FEE", "100.00"]]);
+    if (!r.ok) throw new Error(r.error);
+    expect((await runAs(teller, () => bankDepositAction({ amount: "100.00", bankReference: "DS-9" }))).ok).toBe(true);
+    expect(await runAs(manager, () => cancelReceiptAction({ receiptId: r.data.id, reason: "wrong" }))).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/leave the drawer short/),
+    });
+    const [row] = await getDb().select().from(receipts).where(eq(receipts.id, r.data.id));
+    expect(row?.status).toBe("VALID");
   });
 });

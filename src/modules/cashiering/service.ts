@@ -293,6 +293,14 @@ export async function cancelReceipt(tx: Tx, receiptId: string, reason: string, s
   assertNotSameUser(s.tellerId, supervisorId);
   if (s.status !== "OPEN") throw new CashieringError("The teller's session is already closed; the receipt can't be cancelled");
   if (!reason.trim()) throw new CashieringError("A reason is required");
+  // Cancelling a cash or check receipt takes its amount out of the expected drawer cash; if that
+  // cash was already deposited or paid out, the drawer can't cover the cancellation.
+  if (DRAWER_MODES.includes(r.mode)) {
+    const { expected } = await sessionTotals(r.sessionId, tx);
+    if (expected - r.total < 0n) {
+      throw new CashieringError(`Cancelling would leave the drawer short: only ${format(expected)} is expected in the drawer`);
+    }
+  }
 
   const items = await tx.select().from(receiptItems).where(eq(receiptItems.receiptId, receiptId)).orderBy(asc(receiptItems.lineNo));
   const ctx: ReceiptContext = {

@@ -189,10 +189,12 @@ export const cashCounts = pgTable(
       .references(() => tellerSessions.id),
     /** Face value in centavos (₱1,000 = 100000, ₱0.25 = 25). */
     denomination: money("denomination").notNull(),
+    /** BILL or COIN (₱20 exists as both). */
+    kind: text("kind").notNull().default("BILL"),
     qty: integer("qty").notNull(),
     ...createdColumns(),
   },
-  (t) => [unique("cash_counts_session_denom_uq").on(t.sessionId, t.denomination), check("cash_counts_qty_chk", sql`${t.qty} >= 0`)],
+  (t) => [unique("cash_counts_session_denom_kind_uq").on(t.sessionId, t.denomination, t.kind), check("cash_counts_kind_chk", sql`${t.kind} IN ('BILL', 'COIN')`), check("cash_counts_qty_chk", sql`${t.qty} >= 0`)],
 );
 
 export type TellerSession = typeof tellerSessions.$inferSelect;

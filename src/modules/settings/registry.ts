@@ -135,6 +135,9 @@ export const SETTINGS = {
   "surplus.isc_pr_wtax_rate": def({ group: "Net surplus", label: "Withholding tax on ISC/PR", kind: "rate", schema: rateBetween("0", "1"), default: "0", confirm: true }),
 
   // Cashiering
+  "cash.require_bir_receipt_no": def({ group: "Cashiering", label: "Require the BIR receipt no. on every receipt", kind: "bool", schema: z.boolean(), default: true, confirm: true, note: "PLAN R1: until BIR approves system-printed receipts" }),
+  "cash.other_income_items": def({ group: "Cashiering", label: "Other income items the teller may collect", kind: "json", schema: z.array(z.object({ code: z.string().regex(/^[A-Z0-9_]{2,30}$/), label: text.min(1), mappingKey: z.string().min(1) })).min(1), default: [{ code: "CERT_FEE", label: "Certification fee", mappingKey: "certification_fee_income" }, { code: "HALL_RENTAL", label: "Hall rental", mappingKey: "rental_income" }], confirm: true, note: "mappingKey = an account posting key" }),
+  "cash.denominations": def({ group: "Cashiering", label: "Denominations for the cash count", kind: "json", schema: z.array(z.object({ value: money, kind: z.enum(["BILL", "COIN"]) })).min(1), default: [{ value: "100000", kind: "BILL" }, { value: "50000", kind: "BILL" }, { value: "20000", kind: "BILL" }, { value: "10000", kind: "BILL" }, { value: "5000", kind: "BILL" }, { value: "2000", kind: "BILL" }, { value: "2000", kind: "COIN" }, { value: "1000", kind: "COIN" }, { value: "500", kind: "COIN" }, { value: "100", kind: "COIN" }, { value: "25", kind: "COIN" }, { value: "5", kind: "COIN" }, { value: "1", kind: "COIN" }], confirm: true, note: "centavos" }),
   "cash.short_over_policy": def({ group: "Cashiering", label: "Cash short/over", kind: "enum", schema: z.enum(["POST_AFTER_MANAGER_VERIFICATION"]), default: "POST_AFTER_MANAGER_VERIFICATION", confirm: true }),
 } as const;
 

@@ -53,6 +53,8 @@ code,name,type,normal_balance,parent_code,postable,sca_code,mapping_keys
 43120,Sales Returns and Allowances,REVENUE,DR,43000,true,,sales_returns
 44000,Other Income,REVENUE,CR,4,false,,
 44110,Membership Fee Income,REVENUE,CR,44000,true,,membership_fee_income
+44120,Certification Fee Income,REVENUE,CR,44000,true,,certification_fee_income
+44130,Rental Income,REVENUE,CR,44000,true,,rental_income
 5,EXPENSES,EXPENSE,DR,,false,,
 51000,Cost of Sales,EXPENSE,DR,5,false,,
 51110,Cost of Sales - Store,EXPENSE,DR,51000,true,,cost_of_sales

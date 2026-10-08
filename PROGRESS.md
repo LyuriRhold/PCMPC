@@ -13,7 +13,7 @@
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ✅ | phase-02-members · tag `phase-02` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ✅ | phase-03-accounting-core · tag `phase-03` | rldejoya (reviewer agent: no blockers; follow-ups fixed) · 2026-10-08 |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ✅ | phase-04-cashiering · tag `phase-04` | rldejoya (reviewer agent: SoD test gap + drawer check fixed) · 2026-10-08 |
-| 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ⬜ | | |
+| 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | 🔨 | phase-05-water-connections | |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ⬜ | | |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ⬜ | | |
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ⬜ | | |
@@ -99,7 +99,7 @@
 - [ ] T5.6 Teller items `WATER_CONNECTION_FEE`, `METER_DEPOSIT`, `WATER_OTHER_FEE`
 - [ ] T5.7 Senior-citizen eligibility records
 - [ ] T5.8 UI: customers, applications, account profile, routes/sequence, tariff admin, meters
-- [ ] Acceptance tests written first (tests/acceptance/phase-05.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-05.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 06 — Water: Meter Reading & Billing
@@ -272,6 +272,12 @@
 - [ ] Q-04.5 (phase 04) Receipt layout and the BIR-registered receipt/invoice series in use (PLAN R1). | default used: a printable acknowledgement receipt showing the system no. AR-… and the BIR receipt no. | answer:
 - [ ] Q-04.6 (phase 04) How is a receipt corrected after the teller's session is closed (cancellation needs an OPEN session)? | default used: no cancel path after close; correct it with a manager-approved journal voucher (reversal) | answer:
 - [ ] Q-04.7 (phase 04) Must BIR receipt/invoice numbers be unique across valid receipts? | default used: not enforced (depends on how PCMPC numbers its BIR booklets, Q-04.5) | answer:
+- [ ] Q-05.1 (phase 05) PCMPC's water zones (puroks/sitios) and reading routes, plus the existing connections list (PLAN §9). | default used: one zone "Barangay Pipindan" with one route "Route 1" | answer:
+- [ ] Q-05.2 (phase 05) Tariffs for INSTITUTIONAL and BULK classifications (DOMAIN §2 only has RESIDENTIAL and COMMERCIAL), and the NWRB CPC/resolution reference. | default used: no schedule for those classes, so the rate engine refuses to price them; NWRB ref "CONFIRM" on the seeded versions | answer:
+- [ ] Q-05.3 (phase 05) Transfer fee for ownership transfers, and what happens to the meter deposit on transfer. | default used: no transfer fee seeded; the deposit stays with the account | answer:
+- [ ] Q-05.4 (phase 05) Must the connection fee and meter deposit be paid before installation? | default used: yes, installation is refused until both are paid | answer:
+- [ ] Q-05.5 (phase 05) Should billing clerks see full customer mobile and ID numbers? | default used: masked unless the user has `members.read_sensitive` (same rule as members) | answer:
+- [ ] Q-05.6 (phase 05) When a member is TERMINATED or DECEASED, does their water customer become NON_MEMBER (spec CONFIRM)? | default used: yes, on termination or death, with the change kept in the customer's history | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->

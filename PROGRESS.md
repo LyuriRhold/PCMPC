@@ -12,7 +12,7 @@
 | 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ✅ | phase-01-auth-roles-audit · tag `phase-01` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ✅ | phase-02-members · tag `phase-02` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ✅ | phase-03-accounting-core · tag `phase-03` | rldejoya (reviewer agent: no blockers; follow-ups fixed) · 2026-10-08 |
-| 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | 🔨 | phase-04-cashiering | |
+| 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | 🟡 awaiting review | phase-04-cashiering | |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ⬜ | | |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ⬜ | | |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ⬜ | | |
@@ -88,7 +88,7 @@
 - [x] T4.6 Teller UI (payor search → dues cart → slip print, cash count, verification)
 - [x] T4.7 Daily cash position report + Excel export
 - [x] Acceptance tests written first (tests/acceptance/phase-04.test.ts)
-- [ ] Exit checks passed
+- [x] Exit checks passed
 
 ### Phase 05 — Water: Customers, Service Connections, Meters & Rates
 - [ ] T5.1 Schema + migrations (incl. `journal_lines.customer_id`) + seeds (zones, tariff, fees)
@@ -449,3 +449,54 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - Period close and reopen (with reason and audit) are Phase 14. For now periods are only OPEN, or CLOSED in the database.
 
 **Exit checks / counts:** `npm run gate` green: 218 tests (unit 142, integration 38, acceptance 38: A0 10 + A1 9 + A2 9 + A3 10). `npm run build` green. `npm run e2e` green: 6 specs including A3.11. Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK, and the TB on the seeded fixture balances.
+
+### Phase 04 summary
+**Built**
+- **Schema (T4.1):** `teller_sessions` (one OPEN per teller), `receipts` (gapless `AR-` no., `je_id`, cancel link), `receipt_items`, `cash_outs` (`je_id`), `disbursement_vouchers` with `dv_lines`, and `cash_counts`. All amounts are bigint centavos with positive-amount CHECKs. Migration `0008` adds the count `kind` (BILL/COIN), because ₱20 exists as both.
+- **Registry (T4.2):** `registerReceiptItem`, `registerCashOut`, `registerPayorType` and `duesFor()`. Built-ins:
+  - `OTHER_INCOME`: items and accounts come from the new setting `cash.other_income_items`.
+  - Cash-outs `DV` and `BANK_DEPOSIT`.
+  - Payor types `MEMBER` (normalized-name search in SQL) and `WALK_IN`.
+- **Sessions (T4.3):**
+  - Open one session for today's business date.
+  - Close with a denomination count. Expected = opening + cash and check receipts − cash-outs; variance = counted − expected.
+  - Manager verification, never by the session's teller, posts any variance to Cash Short/Over on the session's date.
+- **Receipts (T4.4):**
+  - One receipt covering many items makes exactly one CRJ entry: Dr Cash for the total plus each item's credit lines. Everything runs in one transaction.
+  - If any item fails, nothing is saved and the AR number isn't used.
+  - The BIR receipt no. is required by setting.
+  - The payor is resolved on the server, and each item type's permission is checked.
+  - Cancellation: same business day, by a supervisor who isn't the teller, while the session is open. Each item's reverse hook runs, the receipt's JE is reversed with an exact mirror, and the number stays used.
+- **DVs and deposits (T4.5):**
+  - DV lifecycle: DRAFT (gapless `DV-` no.) → approve (SoD) → release (CDJ; a cash DV is a cash-out of the releasing teller's session) or cancel.
+  - Bank deposit: Dr Cash in Bank / Cr Cash on Hand.
+  - Cash-outs can't exceed the cash in the drawer.
+- **Screens (T4.6):**
+  - Teller counter: payor search, dues, other-income items, cart total, mode, BIR no., bank deposit.
+  - Printable acknowledgement receipt with supervisor cancellation.
+  - Cash count and close.
+  - Manager session verification.
+  - DV list, new and detail (approve, release, cancel).
+- **Cash position (T4.7):** built from the counter's records: beginning (GL as of the day before) + receipts by item type − cash-outs by type + other postings to Cash on Hand (listed per entry) = ending. That ending is compared to the GL balance. Excel export via `/api/reports/cash-position`.
+- **Sidebar:** Teller counter, Teller sessions (new), Disbursement vouchers and Daily cash position are Live. Nav items can now require any one of several permissions.
+
+**Decisions** (see Questions Q-04.1–Q-04.5)
+- Other-income items and their posting keys are a setting.
+- Certification Fee Income and Rental Income were added to the provisional COA.
+- Checks received go to Cash on Hand and count toward the expected drawer cash. Bank transfers go to Cash in Bank.
+- Denominations are a setting.
+- There are no DV approval limits yet.
+- The receipt is an acknowledgement receipt that carries the BIR receipt no.
+
+**Deviations from spec (with reason)**
+- **Item `reverse` hook:** it undoes sub-ledger effects and returns nothing. The ledger side of a cancellation is an exact mirror of the receipt's JE (`reverseJournal`), not debit lines returned by each item. This gives the same result and guarantees the reversal matches the original entry.
+- **Cancellation needs the teller's session to be still OPEN.** That keeps the cash count consistent; the spec only says "same business date".
+- **Cash position:** "other postings to Cash on Hand" (short/over, manual JVs) are listed explicitly so the reconciliation is real. Without them, the ending figure would differ from the GL whenever such entries exist.
+- **E2E:** the UI-shell test now checks a still-planned item, because the teller counter went Live.
+
+**Follow-ups**
+- Answer Q-04.1–Q-04.5, including the receipt layout and BIR series (PLAN R1).
+- Phases 05–13 register their receipt items (WATER_BILL, share payment, savings, loans, store AR) and payor types (WATER_CUSTOMER).
+- DV approval limits (Q-04.4).
+
+**Exit checks / counts:** `npm run gate` green: 239 tests (unit 142, integration 49, acceptance 48: A0 10 + A1 9 + A2 9 + A3 10 + A4 10). `npm run build` green. `npm run e2e` green: 7 specs including A4.11. Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.

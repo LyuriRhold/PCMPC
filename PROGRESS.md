@@ -3,13 +3,13 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 01
+**Current phase:** 02
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
 |---|---|---|---|---|
 | 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | ✅ | phase-00-foundation · tag `phase-00` | rldejoya (reviewer agent: no must-fix) · 2026-10-07 |
-| 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | 🟡 awaiting review | phase-01-auth-roles-audit | |
+| 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ✅ | phase-01-auth-roles-audit · tag `phase-01` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ⬜ | | |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ⬜ | | |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ⬜ | | |
@@ -322,6 +322,8 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - **Users (T1.7):** /admin/users and /admin/users/[id] (create, edit, reset password, activate/deactivate). Self-deactivation and changing your own role are blocked. Deactivating a user, changing their role or resetting their password ends their sessions.
 - **Settings (T1.8):** `getSetting(key)` typed by a zod registry; updates are validated, keep history and are audited. /admin/settings has editors per kind: pesos→centavos, percent→fraction (exact string math), and JSON for tariffs. /admin/roles shows the read-only matrix.
 - **Numbering (T1.9):** `numbering.next(code, tx, date)` uses `SELECT … FOR UPDATE` in the caller's transaction. Yearly series open a new row at 1 for a new year.
+
+- **Last-admin guard (added after review, approved by Rhold 2026-10-08):** the last active ADMIN can't be deactivated or moved to another role. Active admin rows are locked in id order, so two admins removing each other at the same time can't leave zero admins.
 
 **Decisions** (also in the Decisions log): Better Auth over Auth.js. Users, roles and permissions live in our own tables. Settings store money as centavo strings and rates as fraction strings, because JSON can't hold bigint.
 

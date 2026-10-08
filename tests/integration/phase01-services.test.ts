@@ -10,7 +10,7 @@ import { auditLog } from "@/modules/audit/schema";
 import { listAuditLog } from "@/modules/audit/service";
 import { createUserAction, deactivateUserAction, resetPasswordAction, updateUserAction } from "@/modules/auth/actions";
 import { rolePermissions, roles, sessions } from "@/modules/auth/schema";
-import { signIn } from "@/modules/auth/service";
+import { setUserActive, signIn, updateUser } from "@/modules/auth/service";
 import { numberSeries } from "@/modules/numbering/schema";
 import { settings } from "@/modules/settings/schema";
 import { getSetting, settingHistory } from "@/modules/settings/service";
@@ -154,6 +154,34 @@ describe("T1.7 users admin rules", () => {
       ),
     ).toMatchObject({ ok: false, error: expect.stringMatching(/at least 10/) });
     expect((await loadUser("admin1")).roleCode).toBe("ADMIN");
+  });
+
+  it("keeps at least one active ADMIN (no deactivating or demoting the last one)", async () => {
+    const a = await makeUser("ADMIN", "admin1");
+    const b = await makeUser("ADMIN", "admin2");
+    // a demotes b: allowed while a remains an active admin.
+    expect(await runAs(a.id, () => updateUserAction({ userId: b.id, fullName: "B", roleCode: "TELLER", email: null }))).toEqual(OK);
+
+    // The system (no actor) tries to remove the only remaining admin.
+    await expect(withTx((tx) => setUserActive(tx, a.id, false, b.id))).rejects.toThrow(/last active administrator/);
+    await expect(
+      withTx((tx) => updateUser(tx, { userId: a.id, fullName: "A", email: null, roleCode: "TELLER" }, b.id)),
+    ).rejects.toThrow(/last active administrator/);
+    expect((await loadUser("admin1")).roleCode).toBe("ADMIN");
+    expect((await loadUser("admin1")).isActive).toBe(true);
+  });
+
+  it("two admins deactivating each other at the same time leave one active admin", async () => {
+    const a = await makeUser("ADMIN", "admin1");
+    const b = await makeUser("ADMIN", "admin2");
+    const results = await Promise.allSettled([
+      runAs(a.id, () => deactivateUserAction({ userId: b.id })),
+      runAs(b.id, () => deactivateUserAction({ userId: a.id })),
+    ]);
+    const succeeded = results.filter((r) => r.status === "fulfilled" && r.value.ok).length;
+    expect(succeeded).toBe(1);
+    const active = [await loadUser("admin1"), await loadUser("admin2")].filter((u) => u.isActive);
+    expect(active).toHaveLength(1);
   });
 
   it("reset password clears a lockout and the new password works", async () => {

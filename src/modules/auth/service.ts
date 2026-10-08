@@ -1,5 +1,5 @@
 import { isAPIError } from "better-auth/api";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { getAuth } from "@/lib/auth";
@@ -61,6 +61,27 @@ async function loadForUpdate(tx: Tx, userId: string): Promise<User> {
   return u;
 }
 
+/**
+ * Locks the active ADMIN rows (always in id order, so concurrent calls queue instead of
+ * deadlocking) and returns their ids. Call it before locking the target user.
+ */
+async function lockActiveAdmins(tx: Tx): Promise<string[]> {
+  const rows = await tx
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.roleCode, "ADMIN"), eq(users.isActive, true)))
+    .orderBy(asc(users.id))
+    .for("update");
+  return rows.map((r) => r.id);
+}
+
+/** The coop must always keep at least one active ADMIN, or nobody could manage users or settings. */
+function assertAnotherActiveAdmin(activeAdminIds: string[], userId: string): void {
+  if (!activeAdminIds.some((id) => id !== userId)) {
+    throw new UserRuleError("This is the last active administrator. Make another user an active ADMIN first.");
+  }
+}
+
 export type CreateUserInput = {
   username: string;
   fullName: string;
@@ -113,9 +134,13 @@ export type UpdateUserInput = { userId: string; fullName: string; email: string 
 /** Edits name, e-mail and role. An admin can't change their own role (no self-demotion). */
 export async function updateUser(tx: Tx, input: UpdateUserInput, actorId: string): Promise<User> {
   assertRole(input.roleCode);
+  const activeAdmins = await lockActiveAdmins(tx);
   const before = await loadForUpdate(tx, input.userId);
   if (input.userId === actorId && input.roleCode !== before.roleCode) {
     throw new UserRuleError("You can't change your own role");
+  }
+  if (before.roleCode === "ADMIN" && before.isActive && input.roleCode !== "ADMIN") {
+    assertAnotherActiveAdmin(activeAdmins, before.id);
   }
   const [after] = await tx
     .update(users)
@@ -130,9 +155,11 @@ export async function updateUser(tx: Tx, input: UpdateUserInput, actorId: string
 
 /** Activates or deactivates a user (users are never deleted). Deactivation ends their sessions. */
 export async function setUserActive(tx: Tx, userId: string, active: boolean, actorId: string): Promise<User> {
+  const activeAdmins = active ? [] : await lockActiveAdmins(tx);
   const before = await loadForUpdate(tx, userId);
   if (!active && userId === actorId) throw new UserRuleError("You can't deactivate yourself");
   if (before.isActive === active) return before;
+  if (!active && before.roleCode === "ADMIN") assertAnotherActiveAdmin(activeAdmins, userId);
   const [after] = await tx
     .update(users)
     .set({ isActive: active, failedAttempts: 0, lockedUntil: null, updatedAt: now() })

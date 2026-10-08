@@ -10,7 +10,7 @@ import { isBusinessDate } from "@/lib/dates";
 import { parse as parseMoney } from "@/lib/money";
 import { members } from "@/modules/members/schema";
 import { addRateSchedule, RateError } from "./rates";
-import { CLASSIFICATIONS } from "./schema";
+import { CLASSIFICATIONS, waterCustomers } from "./schema";
 import {
   activateAccount,
   addMeter,
@@ -18,6 +18,7 @@ import {
   approveApplication,
   createApplication,
   createCustomer,
+  customerName,
   inspectApplication,
   installMeter,
   moveAccountToRoute,
@@ -94,6 +95,20 @@ export async function findMemberAction(input: z.input<typeof memberNoSchema>): P
       status: m.status,
       address: [m.addrStreet, m.addrPurok, m.addrBarangay, m.addrMunicipality, m.addrProvince].filter(Boolean).join(", "),
     });
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const customerNoSchema = z.object({ customerNo: text(20).min(1, "Enter the customer no.") });
+/** Finds a water customer by customer no. (e.g. the new owner in a transfer). */
+export async function findCustomerAction(input: z.input<typeof customerNoSchema>): Promise<ActionResult<{ id: string; name: string }>> {
+  await requirePermission("water.customers");
+  try {
+    const { customerNo } = customerNoSchema.parse(input);
+    const [c] = await getDb().select().from(waterCustomers).where(eq(waterCustomers.customerNo, customerNo.toUpperCase()));
+    if (!c) throw new WaterError(`No customer ${customerNo.toUpperCase()}`);
+    return ok({ id: c.id, name: customerName(c) });
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

@@ -98,7 +98,7 @@
 - [x] T5.5 Versioned rate schedules + pure rate engine + fee schedule
 - [x] T5.6 Teller items `WATER_CONNECTION_FEE`, `METER_DEPOSIT`, `WATER_OTHER_FEE`
 - [x] T5.7 Senior-citizen eligibility records
-- [ ] T5.8 UI: customers, applications, account profile, routes/sequence, tariff admin, meters
+- [x] T5.8 UI: customers, applications, account profile, routes/sequence, tariff admin, meters
 - [x] Acceptance tests written first (tests/acceptance/phase-05.test.ts)
 - [ ] Exit checks passed
 

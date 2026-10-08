@@ -70,7 +70,7 @@
 - [x] Exit checks passed
 
 ### Phase 03 — Accounting Core (GL engine)
-- [ ] T3.1 Schema, migrations, immutability trigger, CHECK constraints
+- [x] T3.1 Schema, migrations, immutability trigger, CHECK constraints
 - [ ] T3.2 COA import (CSV) + provisional seed + account mappings seed + fiscal year 2026 periods
 - [ ] T3.3 Ledger service (postJournal, reverseJournal, balances)
 - [ ] T3.4 Manual JV workflow + UI (draft, approve, post, reverse)

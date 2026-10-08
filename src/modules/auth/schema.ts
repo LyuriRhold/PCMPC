@@ -60,7 +60,7 @@ export const sessions = pgTable("sessions", {
   updatedAt: tstz("updated_at").notNull().defaultNow(),
 });
 
-export const accounts = pgTable("accounts", {
+export const authAccounts = pgTable("accounts", {
   id: uuid("id").primaryKey().defaultRandom(),
   accountId: text("account_id").notNull(),
   providerId: text("provider_id").notNull(),

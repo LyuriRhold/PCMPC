@@ -4,7 +4,7 @@ import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { username } from "better-auth/plugins";
 import { getDb } from "@/db/client";
-import { accounts, sessions, users, verifications } from "@/modules/auth/schema";
+import { authAccounts, sessions, users, verifications } from "@/modules/auth/schema";
 import { afterSignInAttempt, beforeSignIn, SignInBlockedError } from "@/modules/auth/service";
 
 const HOUR = 60 * 60;
@@ -21,7 +21,7 @@ function createAuth() {
     baseURL: process.env.APP_URL ?? "http://localhost:3000",
     database: drizzleAdapter(getDb(), {
       provider: "pg",
-      schema: { user: users, session: sessions, account: accounts, verification: verifications },
+      schema: { user: users, session: sessions, account: authAccounts, verification: verifications },
     }),
     advanced: { database: { generateId: "uuid" } },
     // Our own columns on `users`. input:false = never accepted from a client request; users are

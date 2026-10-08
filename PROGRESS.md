@@ -11,7 +11,7 @@
 | 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | ✅ | phase-00-foundation · tag `phase-00` | rldejoya (reviewer agent: no must-fix) · 2026-10-07 |
 | 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ✅ | phase-01-auth-roles-audit · tag `phase-01` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ✅ | phase-02-members · tag `phase-02` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
-| 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | 🔨 | phase-03-accounting-core | |
+| 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | 🟡 awaiting review | phase-03-accounting-core | |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ⬜ | | |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ⬜ | | |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ⬜ | | |
@@ -77,7 +77,7 @@
 - [x] T3.5 Reports: TB, GL, journal books, subsidiary ledger + Excel export
 - [x] T3.6 COA management UI (add/edit/deactivate; can't deactivate an account with a balance)
 - [x] Acceptance tests written first (tests/acceptance/phase-03.test.ts)
-- [ ] Exit checks passed
+- [x] Exit checks passed
 
 ### Phase 04 — Cashiering Core (Teller) & Daily Cash Position
 - [ ] T4.1 Schema + migrations
@@ -276,6 +276,8 @@
 - 2026-10-07 · phase 01 · Auth library: **Better Auth 1.7.7** (username plugin, Drizzle adapter, DB sessions in Postgres, uuid ids), not Auth.js · Auth.js v5 never shipped a stable release (`next-auth` latest is 4.x) and its credentials provider only supports JWT sessions, while the spec requires sessions stored in Postgres. Better Auth's username sign-in needs no email (spec: email optional), and its before/after hooks let lockout and inactive checks run on every sign-in path. Users, roles and permissions stay in our own tables (Better Auth's admin/RBAC plugin is not used)
 - 2026-10-08 · ui/module-shell (Rhold's request) · The full front-end shell is built now: every planned screen from PLAN §2/§6 is in the sidebar and on the dashboard, and unbuilt ones open a "Coming soon: under construction" page naming the phase that delivers them. This replaces PHASE-00 T0.3 "modules appear only once built". Coming-soon items are visible to every signed-in user (no data, no actions); live items stay permission-filtered. Registry: `src/components/layout/nav.ts` (flip `status` to `live` when a phase ships; a unit test fails if a live item has no page or a planned item already has one)
 - 2026-10-08 · phase 02 · The duplicate rule ignores TERMINATED and DECEASED members (both terminal), so a deceased member's record never blocks a new applicant with the same name and birthdate · spec says "non-terminated"; DECEASED is treated the same way as the other terminal status (reviewer follow-up)
+- 2026-10-08 · phase 03 · Excel exports write amounts as spreadsheet numbers (pesos, 2 decimals). It's the one place a bigint amount becomes a JS number, only to fill a cell; ledger math stays bigint · the bookkeeper needs numeric cells to work in Excel
+- 2026-10-08 · phase 03 · The ledger table is `gl_accounts` (Drizzle export `accounts`); Better Auth's `accounts` table export was renamed `authAccounts` · both tables can't be called `accounts`
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)
@@ -388,3 +390,49 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - Termination rules come with share capital (08), savings (09) and loans (11).
 
 **Exit checks / counts:** `npm run gate` green: 189 tests (unit 132, integration 29, acceptance 28: A0 10 + A1 9 + A2 9). `npm run build` green. `npm run e2e` green, 5 specs including A2.10. Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.
+
+### Phase 03 summary
+**Built**
+- **Schema and immutability (T3.1):**
+  - Tables: `gl_accounts`, `account_mappings` (with a `requires_member` flag), `fiscal_years`, `periods`, `journal_entries`, `journal_lines` (bigint centavos).
+  - CHECKs: exactly one of debit/credit is > 0; drafts have no JE no.; a REVERSED entry links to its reversal.
+  - Triggers: lines of POSTED/REVERSED entries can't change. A POSTED entry can only become REVERSED. Posted entries can't be deleted. No lines can be added to an entry posted in an earlier transaction. A deferred check makes every non-draft entry balance at commit.
+- **Chart of accounts seed (T3.2):**
+  - `docs/coa/pcmpc-coa.csv` is imported when it exists (format in `docs/coa/README.md`).
+  - Otherwise a **provisional** CDA-style chart is seeded: 63 accounts, flagged provisional, mapping all 44 DOMAIN §6 keys.
+  - 8 member-ledger keys require a member on every line.
+  - `docs/coa/provisional-coa.csv` is a template for the bookkeeper.
+  - The fiscal year of today's business date is seeded with 12 OPEN periods.
+- **Ledger service (T3.3):**
+  - `postJournal` is the single door to the GL. It checks balance (the message names both totals), postable and active accounts, an OPEN period, and members on member-ledger lines. Then it assigns the gapless per-book number. It runs in the caller's transaction and is audited.
+  - `reverseJournal` posts a mirror entry and marks the original REVERSED, once only. A reversal can't itself be reversed.
+  - Queries: `accountBalance`, `trialBalance`, `generalLedger`, `subsidiaryLedger`, `journalBook`.
+- **Manual JV (T3.4):** draft with live debit/credit totals → approve and post (SoD: the preparer can't approve) → reverse or discard. Screens: /accounting/journals, /new, /[id].
+- **Reports (T3.5):** /accounting/ledger has the trial balance, general ledger (opening and running balance), journal books, and member subsidiary ledger. Excel export of the TB and GL via exceljs.
+- **COA management (T3.6):** /accounting/coa: add under headers, rename, activate/deactivate. Deactivation is blocked when the account has a balance, a posting key, or active sub-accounts.
+- **Dev fixture:** `db:seed:dev` also posts 5 sample entries for the sample members, and its trial balance balances (₱18,150.00 = ₱18,150.00).
+- **Sidebar:** Journal vouchers, Ledger & trial balance, and Chart of accounts are Live.
+
+**Decisions** (also in the Decisions log and Questions)
+- BOOKKEEPER now holds `gl.jv_approve` (Q-03.2), and SoD stops self-approval.
+- New permission `gl.coa` for BOOKKEEPER (Q-03.3).
+- Member-ledger keys are listed in Q-03.4.
+- Manual JVs post to the General Journal (GJ).
+- Excel cells hold numbers.
+- Table name `gl_accounts`.
+
+**Deviations from spec (with reason)**
+- **Provisional COA (Q-03.1):** PCMPC's real chart isn't available yet, as the spec anticipates.
+- **Templated keys:** `accumulated_depreciation_{class}` waits for Phase 14, which defines the asset classes. `loans_receivable_{product}` is expanded for the sample products REG, EMR and PRD.
+- **Phase 01 code touched:** Better Auth's Drizzle export was renamed `authAccounts` because of the table-name clash. There is no behavior change.
+- **Bugs found by the E2E run and fixed:**
+  - In the account picker, an unqualified `id` in a subquery bound to `account_mappings.id`.
+  - The `/login` Suspense fallback was a working form, so typing before the real form streamed in was lost.
+- **Playwright now runs a single worker.**
+
+**Follow-ups**
+- Answer Q-03.1–Q-03.4. Get the real COA (with water accounts) before Phase 05 posts water revenue.
+- Customer-tagged lines (`ar_water`, `customers_deposits`, `customers_advances`) arrive in Phase 05 with `journal_lines.customer_id`.
+- Period close and reopen (with reason and audit) are Phase 14. For now periods are only OPEN, or CLOSED in the database.
+
+**Exit checks / counts:** `npm run gate` green: 218 tests (unit 142, integration 38, acceptance 38: A0 10 + A1 9 + A2 9 + A3 10). `npm run build` green. `npm run e2e` green: 6 specs including A3.11. Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK, and the TB on the seeded fixture balances.

@@ -61,9 +61,9 @@
 
 ### Phase 02 — Members Registry
 - [x] T2.1 Schema + migrations + name normalization helper
-- [ ] T2.2 Member service (create, approve, status, duplicates, canTerminate registry)
-- [ ] T2.3 Beneficiaries service and validation
-- [ ] T2.4 Server actions with permissions + audit; server-side masking
+- [x] T2.2 Member service (create, approve, status, duplicates, canTerminate registry)
+- [x] T2.3 Beneficiaries service and validation
+- [x] T2.4 Server actions with permissions + audit; server-side masking
 - [ ] T2.5 UI: list/search, application form (zod shared), approval queue, profile tabs
 - [ ] T2.6 Seed fixture: 6 sample members (dev only)
 - [x] Acceptance tests written first (tests/acceptance/phase-02.test.ts)

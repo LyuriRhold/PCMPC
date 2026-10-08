@@ -82,9 +82,9 @@
 ### Phase 04 — Cashiering Core (Teller) & Daily Cash Position
 - [x] T4.1 Schema + migrations
 - [x] T4.2 Registry (receipt items, cash-outs, payor types) + built-ins
-- [ ] T4.3 Session service (open, close with count, verify with variance posting)
-- [ ] T4.4 Receipt service (registered items in one transaction) + cancellation
-- [ ] T4.5 DV workflow + bank deposit
+- [x] T4.3 Session service (open, close with count, verify with variance posting)
+- [x] T4.4 Receipt service (registered items in one transaction) + cancellation
+- [x] T4.5 DV workflow + bank deposit
 - [ ] T4.6 Teller UI (payor search → dues cart → slip print, cash count, verification)
 - [ ] T4.7 Daily cash position report + Excel export
 - [x] Acceptance tests written first (tests/acceptance/phase-04.test.ts)

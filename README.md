@@ -28,6 +28,7 @@ npm run dev                 # http://localhost:3000
 | `npm run db:up` / `db:down` | Start / stop local Postgres |
 | `npm run db:generate` / `db:migrate` | Create / apply Drizzle migrations |
 | `npm run db:seed` / `db:reset` | Seed reference data / drop and recreate the dev DB |
+| `npm run db:seed:dev` | Load sample members for local development (refuses production and non-local DBs) |
 | `npm run typecheck` / `lint` | `tsc --noEmit` / ESLint |
 | `npm test` | Vitest: unit + integration + acceptance (uses `DATABASE_URL_TEST`) |
 | `npm run e2e` | Playwright E2E |

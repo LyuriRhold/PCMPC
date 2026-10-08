@@ -87,6 +87,7 @@ export const ROLE_PERMISSIONS: Record<RoleCode, Permission[]> = {
   ADMIN: ["admin.users", "admin.settings", "gl.reopen", "audit.read", "reports.read"],
   MANAGER: [
     ...READ_ALL,
+    "members.write",
     "members.approve",
     "members.read_sensitive",
     "loans.recommend",

@@ -18,7 +18,8 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "scan": "node scripts/scan-placeholders.mjs",
-    "gate": "npm run typecheck && npm run lint && npm run test && npm run scan"
+    "gate": "npm run typecheck && npm run lint && npm run test && npm run scan",
+    "db:seed:dev": "tsx scripts/db-seed-dev.mts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

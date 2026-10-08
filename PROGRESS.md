@@ -3,14 +3,14 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 02
+**Current phase:** 03
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
 |---|---|---|---|---|
 | 00 | [Foundation & Loop Gate](docs/phases/PHASE-00-foundation.md) | ✅ | phase-00-foundation · tag `phase-00` | rldejoya (reviewer agent: no must-fix) · 2026-10-07 |
 | 01 | [Auth, Roles, Audit Trail & Coop Settings](docs/phases/PHASE-01-auth-roles-audit.md) | ✅ | phase-01-auth-roles-audit · tag `phase-01` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
-| 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ⬜ | | |
+| 02 | [Members Registry](docs/phases/PHASE-02-members.md) | ✅ | phase-02-members · tag `phase-02` | rldejoya (reviewer agent: no must-fix) · 2026-10-08 |
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ⬜ | | |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ⬜ | | |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ⬜ | | |
@@ -60,14 +60,14 @@
 - [x] Exit checks passed
 
 ### Phase 02 — Members Registry
-- [ ] T2.1 Schema + migrations + name normalization helper
-- [ ] T2.2 Member service (create, approve, status, duplicates, canTerminate registry)
-- [ ] T2.3 Beneficiaries service and validation
-- [ ] T2.4 Server actions with permissions + audit; server-side masking
-- [ ] T2.5 UI: list/search, application form (zod shared), approval queue, profile tabs
-- [ ] T2.6 Seed fixture: 6 sample members (dev only)
-- [ ] Acceptance tests written first (tests/acceptance/phase-02.test.ts)
-- [ ] Exit checks passed
+- [x] T2.1 Schema + migrations + name normalization helper
+- [x] T2.2 Member service (create, approve, status, duplicates, canTerminate registry)
+- [x] T2.3 Beneficiaries service and validation
+- [x] T2.4 Server actions with permissions + audit; server-side masking
+- [x] T2.5 UI: list/search, application form (zod shared), approval queue, profile tabs
+- [x] T2.6 Seed fixture: 6 sample members (dev only)
+- [x] Acceptance tests written first (tests/acceptance/phase-02.test.ts)
+- [x] Exit checks passed
 
 ### Phase 03 — Accounting Core (GL engine)
 - [ ] T3.1 Schema, migrations, immutability trigger, CHECK constraints
@@ -255,6 +255,11 @@
 - [ ] Q-01.6 (phase 01) `loan.allowance_rates` per aging bucket ("set by bookkeeper"). | default used: all null (not set) until the bookkeeper enters them | answer:
 - [ ] Q-01.7 (phase 01) PLAN §9 inputs for Phase 01 are still needed: CDA registration no., TIN, full official address, fiscal year start, and the staff list with roles. | default used: DOMAIN §2 defaults (blank CDA no./TIN) | answer:
 
+- [ ] Q-02.1 (phase 02) A2.9 says "history has 1 row", but the business rules also say every status change writes member_status_history, and approval (APPLICANT → ACTIVE) is a status change. | default used: approval writes its own history row; the A2.9 test checks that the ACTIVE → TERMINATED → ACTIVE scenario adds exactly 1 row (the termination) and the rejected change adds none | answer:
+- [ ] Q-02.2 (phase 02) Who may change a member's status (INACTIVE, TERMINATED, DECEASED)? | default used: `members.approve` (MANAGER), same as approval | answer:
+- [ ] Q-02.3 (phase 02) Who encodes membership applications? The Phase 01 matrix gave `members.write` only to LOAN_OFFICER. | default used: also granted to MANAGER (so a manager can encode and approve) | answer:
+- [ ] Q-02.4 (phase 02) Which IDs are required (PLAN §9 "required IDs")? | default used: a valid ID type and number are optional at application and at approval | answer:
+
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
 - 2026-10-07 · plan · Stack: Next.js + TypeScript + Postgres (Neon via Vercel Marketplace) + Drizzle · must run on Vercel; local Postgres first, cloud later
@@ -265,6 +270,7 @@
 - 2026-10-07 · phase 00 · Pinned stable versions: Node 24 LTS, Next.js 16.4.0 (Cache Components + Partial Prefetching on), React 19.3, TypeScript 5, Tailwind 4, shadcn 4 (base-nova), drizzle-orm 0.45.3 + drizzle-kit 0.31.11, pg 8.23, Vitest 5.0.3, Playwright 1.63, zod 4.6, decimal.js 10.6, date-fns 4.4 + @date-fns/tz 1.5, PostgreSQL 18.6 · PLAN §4 asks to record them
 - 2026-10-07 · phase 01 · Auth library: **Better Auth 1.7.7** (username plugin, Drizzle adapter, DB sessions in Postgres, uuid ids), not Auth.js · Auth.js v5 never shipped a stable release (`next-auth` latest is 4.x) and its credentials provider only supports JWT sessions, while the spec requires sessions stored in Postgres. Better Auth's username sign-in needs no email (spec: email optional), and its before/after hooks let lockout and inactive checks run on every sign-in path. Users, roles and permissions stay in our own tables (Better Auth's admin/RBAC plugin is not used)
 - 2026-10-08 · ui/module-shell (Rhold's request) · The full front-end shell is built now: every planned screen from PLAN §2/§6 is in the sidebar and on the dashboard, and unbuilt ones open a "Coming soon: under construction" page naming the phase that delivers them. This replaces PHASE-00 T0.3 "modules appear only once built". Coming-soon items are visible to every signed-in user (no data, no actions); live items stay permission-filtered. Registry: `src/components/layout/nav.ts` (flip `status` to `live` when a phase ships; a unit test fails if a live item has no page or a planned item already has one)
+- 2026-10-08 · phase 02 · The duplicate rule ignores TERMINATED and DECEASED members (both terminal), so a deceased member's record never blocks a new applicant with the same name and birthdate · spec says "non-terminated"; DECEASED is treated the same way as the other terminal status (reviewer follow-up)
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)
@@ -343,3 +349,37 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - Postgres was killed once when an interrupted command's process tree was torn down. If anything fails with ECONNREFUSED, run `npm run db:up`.
 
 **Exit checks / counts:** `npm run gate` green, with 152 tests in 10 files: unit 114, integration 19, acceptance 19 (A0.x 10 + A1.1–A1.9). `npm run build` green. `npm run e2e` green (A0.10, A1.10). Fresh `db:reset → db:migrate → db:seed` OK (4 seed steps, admin created). Checked in the browser: sign-in redirect back to `next`, editing a peso setting (₱500.00 → ₱600.00, shown in the audit log), and the roles matrix (49 × 11, 85 grants).
+
+### Phase 02 summary
+**Built**
+- **Schema (T2.1):** `members`, `member_beneficiaries`, `member_status_history`. A CHECK makes `member_no` present exactly when the status isn't APPLICANT. Name normalization in `src/lib/names.ts` (case, accents, punctuation and extra spaces ignored).
+- **Service (T2.2):**
+  - New records start as APPLICANT with no member no.
+  - **Duplicates:** same normalized last + first name + birthdate as a non-terminated member blocks the save. The message names the member no., or the applicant if there is no number yet. An advisory lock stops two saves racing past the check.
+  - **Approval** needs a PMES date (not in the future), a BOD resolution no. and privacy consent. It assigns the next `MEMBER` number and sets membership_date to the business date.
+  - **Status changes** follow DOMAIN §4. TERMINATED and DECEASED are terminal. A `canTerminate` rule registry is in place with no rules yet; Phases 08, 09 and 11 add theirs.
+  - Every change writes history and the audit log.
+- **Beneficiaries (T2.3):** shares must total exactly 100%, compared in hundredths of a percent (no floats). The list is replaced as a whole, and an empty list clears it.
+- **Actions and masking (T2.4):**
+  - Every action runs requirePermission → zod → service → audit.
+  - Birthdate, valid ID no., TIN and mobile are masked on the server unless the user has `members.read_sensitive`.
+  - Editors without that permission can't overwrite the masked fields: the server keeps the stored values.
+- **Screens (T2.5):** /members (search, filters, pagination), /members/new, /members/applications (approval queue), /members/[id] (Profile, Beneficiaries and Status history tabs, approval panel, status change), /members/[id]/edit. The sidebar shows Member registry and Membership applications as Live.
+- **Dev fixture (T2.6):** `npm run db:seed:dev` loads 6 sample members: 4 approved (2 with beneficiaries) and 2 applicants. The data lives in `scripts/fixtures/`, not `src/`, and the script refuses production and non-local databases.
+
+**Decisions**
+- `members.write` is now also granted to MANAGER (Q-02.3).
+- Status changes need `members.approve` (Q-02.2).
+- Beneficiary birthdates are not masked, because the spec's masking list covers only the member's own birthdate, ID no., TIN and mobile.
+
+**Deviations from spec (with reason)**
+- **A2.9 "history has 1 row":** approval also writes a history row (APPLICANT → ACTIVE), because the rules say every status change does. The test asserts that the ACTIVE → TERMINATED → ACTIVE scenario adds exactly one row and the rejected change adds none (Q-02.1).
+- **E2E spec edited after the `test(phase-02)` commit** (`tests/e2e/`, not `tests/acceptance/`): the PMES date and BOD resolution locators now match their labels exactly. Next 16 keeps the previous page hidden in the DOM after navigating, so the application form's similar labels also matched. No assertion changed.
+- **Playwright config:** the per-test timeout is now 90 s (from 30 s). The two-user A2.10 flow compiles five pages cold on the dev server.
+
+**Follow-ups**
+- Answer Q-02.1–Q-02.4, and get PCMPC's membership form, ID requirements and PMES process (PLAN §9).
+- Photo and signature capture stay in the Backlog.
+- Termination rules come with share capital (08), savings (09) and loans (11).
+
+**Exit checks / counts:** `npm run gate` green: 189 tests (unit 132, integration 29, acceptance 28: A0 10 + A1 9 + A2 9). `npm run build` green. `npm run e2e` green, 5 specs including A2.10. Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.

@@ -3,7 +3,8 @@ import { businessToday, setClock } from "@/lib/dates";
 import { issueReceiptAction } from "@/modules/cashiering/actions";
 import { subscribeAction } from "@/modules/share/actions";
 import { makeUser } from "./phase01";
-import { applicant, approveAs, createApplicantAs } from "./phase02";
+import { approveMemberAction } from "@/modules/members/actions";
+import { applicant, createApplicantAs } from "./phase02";
 import { openSessionAs, setupCashiering } from "./phase04";
 
 /** Manila 09:00 on a business date. */
@@ -30,7 +31,9 @@ export async function setupShares() {
 export async function member(lastName = "Member"): Promise<string> {
   seq += 1;
   const id = await createApplicantAs(manager, applicant({ lastName, firstName: `Juan ${seq}`, birthdate: `1980-01-${String((seq % 28) + 1).padStart(2, "0")}`, tin: null, validIdNo: `ID-${seq}` }));
-  await approveAs(manager, id);
+  // PMES on the (test) business date: a fixed PMES date would be in the future for early-2026 fixtures.
+  const r = await runAs(manager, () => approveMemberAction({ memberId: id, pmesDate: businessToday(), bodResolutionNo: "2026-15", privacyConsent: true }));
+  if (!r.ok) throw new Error(r.error);
   return id;
 }
 

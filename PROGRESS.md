@@ -127,8 +127,8 @@
 
 ### Phase 08 — Share Capital & CBU
 - [x] T8.1 Schema, migrations, view, mappings check
-- [ ] T8.2 Share service (subscribe, pay, fee, transfer, withdraw, retainCbu, isGoodStanding, ASM)
-- [ ] T8.3 GL integration via `postJournal` in the same transaction
+- [x] T8.2 Share service (subscribe, pay, fee, transfer, withdraw, retainCbu, isGoodStanding, ASM)
+- [x] T8.3 GL integration via `postJournal` in the same transaction
 - [ ] T8.4 Actions, UI tab/forms, teller registrations (fee, share payment, withdrawal)
 - [ ] T8.5 Member share ledger report (per member, date range) + Excel export
 - [x] Acceptance tests written first (tests/acceptance/phase-08.test.ts)

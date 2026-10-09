@@ -10,7 +10,7 @@ import { accounts } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal, reverseJournal, type LineInput } from "@/modules/ledger/service";
 import { getSetting } from "@/modules/settings/service";
 import { CashieringError } from "./builtins";
-import { payorType, receiptItem, type ItemInput, type Payor, type ReceiptContext } from "./registry";
+import { cashOutType, payorType, receiptItem, type ItemInput, type Payor, type ReceiptContext } from "./registry";
 import {
   cashCounts,
   cashOuts,
@@ -477,4 +477,46 @@ export async function bankDeposit(tx: Tx, input: { amount: Money; bankReference:
   );
   await recordCashOut(tx, { sessionId: session.id, type: "BANK_DEPOSIT", refId: null, reference: input.bankReference.trim(), amount: input.amount, jeId: je.id, date }, tellerId);
   await audit(tx, { action: "cash.bank_deposit", entity: "teller_session", entityId: session.id, after: { amount: input.amount, reference: input.bankReference.trim(), jeNo: je.jeNo }, userId: tellerId });
+}
+
+export type PayOutInput = {
+  /** A registered cash-out type (e.g. SHARE_WITHDRAWAL). */
+  type: string;
+  refId: string | null;
+  reference: string;
+  particulars: string;
+  /** Cash paid out of the drawer. */
+  amount: Money;
+  /** Debit lines of the entry; they total `amount` plus `otherCredits`. */
+  debitLines: LineInput[];
+  /** Credit lines besides the cash (e.g. offsets against what the payee owes). */
+  otherCredits?: LineInput[];
+  source: { module: string; id?: string | null };
+};
+
+/**
+ * Pays cash out of the teller's drawer for another module (e.g. a share withdrawal): one CDJ entry
+ * (the given debits / Cr Cash on Hand, plus any other credits) recorded as a cash-out of the
+ * teller's open session. The drawer must hold the amount.
+ */
+export async function payOut(tx: Tx, input: PayOutInput, tellerId: string): Promise<{ jeId: string }> {
+  if (!cashOutType(input.type)) throw new Error(`cash-out type ${input.type} is not registered`);
+  if (input.amount <= 0n) throw new CashieringError("The amount must be more than zero");
+  const session = await requireOpenSession(tx, tellerId);
+  await assertDrawerHas(tx, session.id, input.amount);
+  const date = businessToday();
+  const je = await postJournal(
+    tx,
+    {
+      date,
+      book: "CDJ",
+      particulars: input.particulars,
+      reference: input.reference,
+      source: input.source,
+      lines: [...input.debitLines, ...(input.otherCredits ?? []), { accountId: await accountIdFor("cash_on_hand", tx), credit: input.amount }],
+    },
+    tellerId,
+  );
+  await recordCashOut(tx, { sessionId: session.id, type: input.type, refId: input.refId, reference: input.reference, amount: input.amount, jeId: je.id, date }, tellerId);
+  return { jeId: je.id };
 }

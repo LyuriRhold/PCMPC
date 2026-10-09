@@ -133,3 +133,8 @@ export function allocate(total: Money, weights: readonly (bigint | number)[]): M
   }
   return negative ? parts.map((p) => -p) : parts;
 }
+
+/** `amount ÷ divisor` (a positive whole number), rounded to the centavo: `divide(1000n, 3n)` → `333n`. */
+export function divide(amount: Money, divisor: bigint, mode: RoundingMode = "HALF_UP"): Money {
+  return divRound(amount, divisor, mode);
+}

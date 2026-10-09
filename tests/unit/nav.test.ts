@@ -28,14 +28,14 @@ describe("module registry (sidebar, dashboard, coming-soon pages)", () => {
   });
 
   it("comingSoonItem resolves only planned paths", () => {
-    expect(comingSoonItem("/water/collections")?.phase).toBe("07");
+    expect(comingSoonItem("/share")?.phase).toBe("08");
     expect(comingSoonItem("/admin/users")).toBeUndefined();
     expect(comingSoonItem("/no/such/page")).toBeUndefined();
   });
 
   it("live items need their permission; coming-soon items are visible to everyone", () => {
     const none = visibleHrefs(new Set());
-    expect(none).toContain("/water/collections");
+    expect(none).toContain("/share");
     expect(none).toContain("/");
     expect(none).not.toContain("/admin/users");
     expect(visibleHrefs(new Set(["admin.users"]))).toContain("/admin/users");

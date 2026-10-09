@@ -448,3 +448,39 @@ export async function settleDeposit(tx: Tx, account: WaterAccount, customer: Wat
   return { deposit, unpaid, offset, refund, offsetJeId, dvId };
 }
 
+
+/** What a printed disconnection notice shows (the bills still unpaid now). */
+export async function noticeData(disconnectionId: string, db: Db | Tx = getDb()) {
+  const [r] = await db
+    .select({ d: waterDisconnections, account: waterAccounts, customer: waterCustomers })
+    .from(waterDisconnections)
+    .innerJoin(waterAccounts, eq(waterAccounts.id, waterDisconnections.accountId))
+    .innerJoin(waterCustomers, eq(waterCustomers.id, waterAccounts.customerId))
+    .where(eq(waterDisconnections.id, disconnectionId));
+  if (!r) return null;
+  const bills = (await billBalances(db, { accountIds: [r.account.id] })).filter((b) => b.outstanding > 0n);
+  const [fee] = await db.select().from(waterFees).where(eq(waterFees.code, "RECONNECTION"));
+  return {
+    noticeNo: r.d.noticeNo,
+    noticeDate: r.d.noticeDate,
+    scheduledDate: r.d.scheduledDate,
+    customerName: customerName(r.customer),
+    accountNo: r.account.accountNo,
+    serviceAddress: r.account.serviceAddress,
+    bills: bills.map((b) => ({ billNo: b.billNo, period: b.period, dueDate: b.dueDate, outstanding: b.outstanding })),
+    total: sum(bills.map((b) => b.outstanding)),
+    reconnectionFee: fee?.amount ?? null,
+  };
+}
+
+/** Notices still open (NOTICED) and accounts currently DISCONNECTED, oldest first. */
+export async function openNotices(db: Db | Tx = getDb()) {
+  const rows = await db
+    .select({ d: waterDisconnections, accountNo: waterAccounts.accountNo, customer: waterCustomers })
+    .from(waterDisconnections)
+    .innerJoin(waterAccounts, eq(waterAccounts.id, waterDisconnections.accountId))
+    .innerJoin(waterCustomers, eq(waterCustomers.id, waterAccounts.customerId))
+    .where(inArray(waterDisconnections.status, ["NOTICED", "DISCONNECTED"]))
+    .orderBy(asc(waterDisconnections.noticeDate), asc(waterDisconnections.noticeNo));
+  return rows.map((r) => ({ ...r.d, accountNo: r.accountNo, customerName: customerName(r.customer) }));
+}

@@ -50,6 +50,6 @@ test("A7.14 teller → search water customer → pay bill → slip printed → a
   // The account's balance is ₱0.00.
   await signIn(page, clerk.user, clerk.pass);
   await page.goto("/water/connections");
-  await page.getByRole("link", { name: accountNo, exact: true }).click();
+  await page.getByRole("link", { name: accountNo, exact: true }).first().click();
   await expect(page.getByTestId("account-balance")).toHaveText("₱0.00");
 });

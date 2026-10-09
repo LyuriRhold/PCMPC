@@ -7,6 +7,8 @@ import { NAV_SECTIONS, visibleHrefs } from "@/components/layout/nav";
 import { getCurrentUser } from "@/lib/auth-guard";
 import { businessToday, formatDate } from "@/lib/dates";
 import { ROLES } from "@/modules/auth/permissions";
+import { WATER_REPORT_VIEWERS } from "@/modules/water/ui/report-access";
+import { Tiles } from "@/modules/water/ui/tiles";
 
 async function DashboardContent() {
   const user = await getCurrentUser();
@@ -17,6 +19,7 @@ async function DashboardContent() {
   const items = sections.flatMap((s) => s.items);
   const live = items.filter((i) => i.status === "live").length;
   const roleName = ROLES.find((r) => r.code === user?.roleCode)?.name ?? user?.roleCode;
+  const seesWater = WATER_REPORT_VIEWERS.some((p) => user?.permissions.has(p));
 
   return (
     <div className="flex flex-col gap-6">
@@ -46,10 +49,17 @@ async function DashboardContent() {
             <CardTitle className="text-sm font-normal text-muted-foreground">Main service</CardTitle>
           </CardHeader>
           <CardContent className="text-sm">
-            Water billing for member and non-member connections arrives in Phases 05–07.
+            Water billing for member and non-member connections: customers, readings, billing, collections and reports.
           </CardContent>
         </Card>
       </div>
+
+      {seesWater ? (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold">Water this month</h2>
+          <Tiles />
+        </section>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
         {sections.map((section) => {

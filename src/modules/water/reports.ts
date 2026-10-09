@@ -379,3 +379,16 @@ export async function waterTiles(month: string, db: Db | Tx = getDb()) {
     nrwPercent: nrwNow.nrwPercent ?? nrwPrev?.nrwPercent ?? null,
   };
 }
+
+/** The latest penalties assessed, newest first. */
+export async function recentPenalties(limit = 50, db: Db | Tx = getDb()) {
+  const rows = await db
+    .select({ p: waterPenalties, billNo: waterBills.billNo, dueDate: waterBills.dueDate, accountNo: waterAccounts.accountNo, customer: waterCustomers })
+    .from(waterPenalties)
+    .innerJoin(waterBills, eq(waterBills.id, waterPenalties.billId))
+    .innerJoin(waterAccounts, eq(waterAccounts.id, waterBills.accountId))
+    .innerJoin(waterCustomers, eq(waterCustomers.id, waterBills.customerId))
+    .orderBy(desc(waterPenalties.assessedOn), asc(waterBills.billNo))
+    .limit(limit);
+  return rows.map((r) => ({ id: r.p.id, assessedOn: r.p.assessedOn, amount: r.p.amount, billNo: r.billNo, dueDate: r.dueDate, accountNo: r.accountNo, customerName: customerName(r.customer) }));
+}

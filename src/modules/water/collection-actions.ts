@@ -5,7 +5,8 @@ import { z } from "zod";
 import { withTx } from "@/db/client";
 import { failFrom, ok, type ActionResult } from "@/lib/action-result";
 import { requirePermission } from "@/lib/auth-guard";
-import { isBusinessDate } from "@/lib/dates";
+import { runDailyJobs } from "@/lib/cron";
+import { businessToday, isBusinessDate } from "@/lib/dates";
 import { LedgerError } from "@/modules/ledger/service";
 import { cancelNotice, disconnect, issueNotice, reconnect } from "./collections";
 import { addProductionReading } from "./reports";
@@ -75,4 +76,11 @@ export async function addProductionReadingAction(input: z.input<typeof productio
   } catch (e) {
     return failFrom(e, EXPECTED);
   }
+}
+
+/** Runs today's daily jobs now (e.g. when the server's cron is off); a job that already ran today is skipped. */
+export async function runDailyJobsAction(): Promise<ActionResult<Array<{ job: string; status: string; detail: string }>>> {
+  await requirePermission("water.bill");
+  const results = await runDailyJobs(businessToday());
+  return ok(results.map((r) => ({ job: r.job, status: r.status, detail: r.error ?? (r.result ? JSON.stringify(r.result) : "") })));
 }

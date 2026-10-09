@@ -2,7 +2,8 @@ import { ForbiddenError, getCurrentUser, requirePermission, UnauthenticatedError
 import type { Permission } from "@/modules/auth/permissions";
 import { getSetting } from "@/modules/settings/service";
 import { billDetail, periodBills, periodGrid, type BillDetail } from "./billing-queries";
-import { billsPdf, readingSheetPdf } from "./pdf";
+import { noticeData } from "./collections";
+import { billsPdf, noticePdf, readingSheetPdf } from "./pdf";
 
 /** Shared logic of the PDF route handlers (src/app/api/water/...). */
 
@@ -59,4 +60,11 @@ export async function billResponse(billId: string): Promise<Response> {
   const d = await billDetail(billId);
   if (!d) return new Response("Not found", { status: 404 });
   return pdf(await billsPdf([d], await getSetting("coop.name"), `Water bill ${d.bill.billNo}`, await getSetting("water.bill_paper")), `${d.bill.billNo}.pdf`);
+}
+
+export async function noticeResponse(id: string): Promise<Response> {
+  if (!UUID.test(id)) return new Response("Not found", { status: 404 });
+  const d = await noticeData(id);
+  if (!d) return new Response("Not found", { status: 404 });
+  return pdf(await noticePdf({ coopName: await getSetting("coop.name"), ...d }), `${d.noticeNo}.pdf`);
 }

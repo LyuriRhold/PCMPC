@@ -12,6 +12,8 @@ import { can } from "@/lib/auth-guard";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPageAny } from "@/lib/page-guard";
+import { getDb } from "@/db/client";
+import { billBalances } from "@/modules/water/collections";
 import { getCustomer, listRoutes } from "@/modules/water/queries";
 import { ApplicationForm } from "@/modules/water/ui/forms";
 import { WATER_STAFF, WaterStatusBadge } from "@/modules/water/ui/shared";
@@ -35,7 +37,8 @@ async function CustomerContent(props: PageProps<"/water/customers/[id]">) {
   const data = await getCustomer(id, can(access.user, "members.read_sensitive"));
   if (!data) notFound();
   const { customer: c, accounts, applications } = data;
-  const routes = await listRoutes();
+  const [routes, balances] = await Promise.all([listRoutes(), billBalances(getDb(), { customerIds: [id] })]);
+  const balance = balances.reduce((s, b) => s + b.outstanding, 0n);
 
   return (
     <div className="flex flex-col gap-5">
@@ -72,6 +75,17 @@ async function CustomerContent(props: PageProps<"/water/customers/[id]">) {
             />
             <Row label="Privacy consent" value={c.privacyConsentAt ? formatDateTime(c.privacyConsentAt) : "Not recorded"} />
             <Row label="Remarks" value={c.remarks} />
+            <Row
+              label="Balance due"
+              value={
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold tabular-nums">{format(balance)}</span>
+                  <Link href={`/water/reports?report=soa&customer=${c.id}`} className="text-xs underline underline-offset-4">
+                    Statement of account
+                  </Link>
+                </span>
+              }
+            />
           </dl>
         </CardContent>
       </Card>

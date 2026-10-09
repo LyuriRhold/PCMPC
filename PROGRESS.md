@@ -16,7 +16,7 @@
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ✅ | phase-05-water-connections · tag `phase-05` | rldejoya (merged on request without the reviewer agent) · 2026-10-09 |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ✅ | phase-06-water-billing · tag `phase-06` | rldejoya (reviewer agent: memo cap + phone re-read fixed) · 2026-10-09 |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ✅ | phase-07-water-collections · tag `phase-07` | rldejoya (reviewer agent: reconnection-fee rules fixed) · 2026-10-09 |
-| 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ⬜ | | |
+| 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | 🔨 | phase-08-share-capital | |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ⬜ | | |
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ⬜ | | |
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ⬜ | | |
@@ -131,7 +131,7 @@
 - [ ] T8.3 GL integration via `postJournal` in the same transaction
 - [ ] T8.4 Actions, UI tab/forms, teller registrations (fee, share payment, withdrawal)
 - [ ] T8.5 Member share ledger report (per member, date range) + Excel export
-- [ ] Acceptance tests written first (tests/acceptance/phase-08.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-08.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 09 — Savings & Time Deposits

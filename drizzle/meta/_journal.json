@@ -71,6 +71,20 @@
       "when": 1791445364968,
       "tag": "0009_water",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791517522192,
+      "tag": "0010_water_billing",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791517541476,
+      "tag": "0011_water_bills_immutable",
+      "breakpoints": true
     }
   ]
 }

@@ -103,7 +103,7 @@
 - [x] Exit checks passed
 
 ### Phase 06 — Water: Meter Reading & Billing
-- [ ] T6.1 `job_runs` + `runOnce`; schema for periods, readings, bills, lines, memos
+- [x] T6.1 `job_runs` + `runOnce`; schema for periods, readings, bills, lines, memos
 - [ ] T6.2 Consumption engine (normal, rollover, meter change, estimate, flags)
 - [ ] T6.3 Periods + office reading-entry grid + flag review queue
 - [ ] T6.4 Mobile reading PWA with offline queue + idempotent sync

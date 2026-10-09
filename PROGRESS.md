@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 07
+**Current phase:** 08
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -15,7 +15,7 @@
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ✅ | phase-04-cashiering · tag `phase-04` | rldejoya (reviewer agent: SoD test gap + drawer check fixed) · 2026-10-08 |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ✅ | phase-05-water-connections · tag `phase-05` | rldejoya (merged on request without the reviewer agent) · 2026-10-09 |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ✅ | phase-06-water-billing · tag `phase-06` | rldejoya (reviewer agent: memo cap + phone re-read fixed) · 2026-10-09 |
-| 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ⬜ | | |
+| 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ✅ | phase-07-water-collections · tag `phase-07` | rldejoya (reviewer agent: reconnection-fee rules fixed) · 2026-10-09 |
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ⬜ | | |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ⬜ | | |
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ⬜ | | |
@@ -115,15 +115,15 @@
 - [x] Exit checks passed (all automated checks green; the real-phone offline test was waived: PCMPC reads meters by hand and encodes them in the office)
 
 ### Phase 07 — Water: Collections, Penalties, Disconnection & Water Reports
-- [ ] T7.1 Schema + migrations
-- [ ] T7.2 `WATER_BILL` teller item (dues, allocation, advances, reverse)
-- [ ] T7.3 Daily cron runner + penalty job
-- [ ] T7.4 Disconnection list, notices, disconnect/reconnect orders, reconnection fee rule
-- [ ] T7.5 Account closure settlement + deposit refund
-- [ ] T7.6 Customer ledger/SOA
-- [ ] T7.7 Water reports + dashboard tiles (+ optional NRW)
-- [ ] Acceptance tests written first (tests/acceptance/phase-07.test.ts)
-- [ ] Exit checks passed
+- [x] T7.1 Schema + migrations
+- [x] T7.2 `WATER_BILL` teller item (dues, allocation, advances, reverse)
+- [x] T7.3 Daily cron runner + penalty job
+- [x] T7.4 Disconnection list, notices, disconnect/reconnect orders, reconnection fee rule
+- [x] T7.5 Account closure settlement + deposit refund
+- [x] T7.6 Customer ledger/SOA
+- [x] T7.7 Water reports + dashboard tiles (+ optional NRW)
+- [x] Acceptance tests written first (tests/acceptance/phase-07.test.ts)
+- [x] Exit checks passed
 
 ### Phase 08 — Share Capital & CBU
 - [ ] T8.1 Schema, migrations, view, mappings check
@@ -287,6 +287,13 @@
 - [x] Q-06.7 (phase 06) Bill numbers WB-{YYYYMM}-{000000}: should the counter restart every month? | default used: it restarts every year (DOMAIN §5 series resets yearly), so November continues from October's last number | answer: bill numbers are a running log and never restart, like the meters → WB series no longer resets yearly (migration 0012 carries the counter over) (Rhold, 2026-10-09)
 - [x] Q-06.8 (phase 06) May the clerk who encodes a flagged reading also approve it? | default used: yes (no SoD rule in the spec); approval needs water.review_readings | answer: readings are encoded by hand → no SoD between encoding and approving (Rhold, 2026-10-09)
 - [x] Q-06.9 (phase 06) PCMPC: "non-member does not have revenue". The spec and golden test A6.8 post non-members' bills to Water Revenue – Non-members (925.00 in the example). Does this mean (a) one Water Revenue account for everyone (then A6.8 and DOMAIN §6 must change), or (b) something else? | default used: as specified (separate account), since acceptance tests can't be changed without a spec change | answer: it meant a separate RATE: non-members pay the general minimum (₱200), members a lower one (₱160) → tariff versions can now apply to all customers, members only, or non-members only (migration 0013); the admin adds the members-only version on Tariffs & fees. Revenue accounts stay as specified (Rhold, 2026-10-09)
+- [ ] Q-07.1 (phase 07) Penalty policy: rate and base. | default used: water.penalty_pct 10% (CONFIRM) of the bill's unpaid amount on its due date, once per bill, assessed the day after the due date (HALF-UP); final bills too | answer:
+- [ ] Q-07.2 (phase 07) Disconnection policy: how many unpaid bills, and must they be past due? | default used: 2 unpaid bills (water.disconnect_after_bills), counting a bill as unpaid even before its due date; notice gives 7 days (water.notice_days) | answer:
+- [ ] Q-07.3 (phase 07) Reconnection: fee and what must be paid first. | default used: all arrears + penalties paid, plus the ₱300.00 reconnection fee (WATER_OTHER_FEE "RECONNECTION") paid after the disconnection; each fee receipt is used once | answer:
+- [ ] Q-07.4 (phase 07) Overpayment. | default used: becomes an advance credit (Cr Customers' Advances) applied automatically on the next billing run; a receipt whose advance was already applied can't be cancelled | answer:
+- [ ] Q-07.5 (phase 07) Deposit refund on closure. | default used: automatic when the account is closed: the deposit offsets everything the account still owes (oldest bill first) and the rest is refunded by a DV (DRAFT, then approved and released as usual) | answer:
+- [ ] Q-07.6 (phase 07) Collection efficiency: do advances applied to a bill count as collected? | default used: yes (cash received earlier, applied to the bill); penalties are not counted | answer:
+- [ ] Q-07.7 (phase 07) Report formats used today (billing summary, collection report, aging, notices). | default used: on-screen tables that print and export to Excel; the notice is a one-page PDF | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -715,3 +722,107 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - clerk-entered estimates.
 - **Follow-up for Phase 07:** `previousBalance` skips CANCELLED bills, but cancellation arrives in Phase 07, so add a test there.
 - **Follow-up:** the test reset deletes all rows in `public` (as superuser, `session_replication_role = replica`). Data a migration inserts is therefore checked through the seed, not directly.
+
+### Phase 07 summary
+**Built**
+- **Schema (T7.1):** migrations `0014` and `0015`.
+  - Tables:
+    - `water_payment_allocations`: from a receipt item or a deposit settlement;
+    - `water_penalties`: unique per bill;
+    - `water_customer_advances`;
+    - `water_disconnections`: one open notice per account; each reconnection-fee receipt used once;
+    - `water_production_readings`;
+    - `water_deposit_settlements`.
+  - Allocations, penalties, advances and settlements are immutable (triggers).
+  - `dv_lines.customer_id` lets a DV debit a customer sub-ledger account (the deposit refund).
+- **Payments (T7.2):** teller item `WATER_BILL`.
+  - Dues show each account's unpaid total, with penalties.
+  - Allocation goes oldest bill first, penalty before bill.
+  - Overpayment becomes an advance (Cr Customers' Advances), applied by the next billing run.
+  - GL: Dr Cash / Cr AR–Water (customer-tagged).
+  - The receipt shows the balance after payment.
+  - Bill status moves UNPAID → PARTIAL → PAID (a status-only update, which the 0011 trigger allows).
+  - Cancelling a receipt restores the bills, but is refused once its advance was applied.
+  - Several water items in one receipt never pay the same bill twice.
+  - The cashiering registry gained an optional `recorded` hook, which runs after the receipt's item rows exist.
+- **Cron and penalties (T7.3):**
+  - `src/lib/cron.ts` registry with `runDailyJobs(date)`: `runOnce(job, date)` per job, one transaction each.
+  - `GET /api/cron/daily` checks `CRON_SECRET` (Bearer, constant-time compare) and is excluded from the login proxy.
+  - `vercel.json` schedules it at 17:00 UTC (1:00 AM Manila).
+  - Penalty job: `water.penalty_pct` × the bill's unpaid amount on its due date, once per bill. One GJ per run: Dr AR–Water per customer / Cr Penalty Income–Water.
+  - "Run today's daily jobs" button on Collections, for setups without the cron.
+- **Disconnection (T7.4):**
+  - The list: ACTIVE accounts with ≥ `water.disconnect_after_bills` unpaid bills.
+  - Notice: DN number, a "pay by" date `water.notice_days` later, and a printable PDF.
+  - Disconnect order: only after the "pay by" date, with a reading → DISCONNECTED. The next billing run skips the account.
+  - Reconnect order: needs every arrear and penalty paid, plus a reconnection fee paid after the disconnection → ACTIVE.
+  - Notices can be cancelled.
+- **Closure (T7.5):** closing an account (Phase 06 final bill) now settles the meter deposit. It offsets what the account owes (GJ Dr Customers' Deposits / Cr AR–Water, allocated oldest first), and the rest is refunded through a DRAFT DV (Dr Customers' Deposits, tagged / Cr Cash on release).
+- **SOA (T7.6):** built from the water records:
+  - bills, advances applied and penalties;
+  - memos and payments;
+  - deposit offsets, with a running balance.
+
+  It equals the customer's AR–Water subsidiary in GL (A7.10 and an integration test).
+- **Reports (T7.7):** on screen, printable, and exported to Excel (`/api/water/reports/{key}`):
+  - billing summary;
+  - member vs non-member revenue;
+  - daily collection report;
+  - AR aging (current / 1–30 / 31–60 / 61–90 / > 90);
+  - collection efficiency;
+  - disconnection list;
+  - disconnection and reconnection log;
+  - consumption by zone and route;
+  - top consumers;
+  - zero-consumption and estimated accounts;
+  - senior discount report;
+  - NRW (with production meter readings);
+  - customer SOA.
+
+  Dashboard tiles (billed, collected, efficiency, accounts for disconnection, NRW %) appear on Water reports, on Collections and on the main Dashboard for water staff. Customer and account profiles show the balance due and link to the SOA.
+- **Phase 06 updates:**
+  - The previous balance on a bill now counts payments and penalties.
+  - The credit-memo limit is what the bill still owes.
+  - A bill fully covered by an advance is posted as PAID.
+  - Memo approval refreshes the bill status.
+- **`npm run water:cycle`** (local only) runs one full simulated cycle on the local data: connect → read → bill → penalty → disconnect → pay → reconnect. It then checks that the bills are PAID and that the SOA and GL AR are both ₱0.00.
+
+**Decisions** (see Questions Q-07.1–Q-07.7)
+- Penalty: 10% of the unpaid bill amount on the due date, assessed the day after; final bills too.
+- Disconnection after 2 unpaid bills, counting a bill as unpaid even before its due date; 7-day notice.
+- Reconnection: everything paid, plus a ₱300 fee paid after the disconnection.
+- Overpayment becomes an advance.
+- The deposit settles automatically at closure.
+- Collection efficiency counts advances applied to a bill as collected, and leaves penalties out.
+
+**Deviations from spec (with reason)**
+- **A7.3 golden value:** "₱180.00 left" is tested as ₱140.00. The spec's own allocation (penalty 40, bill 260) leaves 400 − 260 = 140, consistent with A7.4. Rhold approved this on 2026-10-09; PHASE-07 should be corrected.
+- **Extra table** `water_deposit_settlements` (records the offset, refund and DV), and allocations can come from a settlement. The spec's data model has no place for the closure offset.
+- **`water_customer_advances.applied_bill_id` stays empty:** advances are applied by amount, from the Customers' Advances sub-ledger, and each bill shows `advance_applied`.
+- **`issueReceiptAction` now also returns `jeId`** (additive).
+- **E2E:** the UI-shell examples moved to Phase 08 (`/share`).
+
+**Follow-ups**
+- Answer Q-07.1–Q-07.7.
+- **Set `CRON_SECRET` in Vercel** (Settings → Environment Variables); otherwise the daily job refuses to run. Until it's set, use "Run today's daily jobs" on Collections.
+- Cancelling a posted bill (status CANCELLED via an approved memo) isn't built yet. `previousBalance` and the balances already skip CANCELLED bills.
+
+**Exit checks / counts:**
+- `npm run gate` is green: 386 tests.
+- `npm run build` is green.
+- `npm run e2e` is green: 11 tests, including A7.14.
+- Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.
+- `npm run water:cycle` on the fresh seed data: OK (connect → read → bill 2 months → penalty ₱40.00 → notice DN-2026-00001 → disconnect → pay ₱840.00 + ₱300.00 fee → reconnect; bills PAID; SOA = GL AR = ₱0.00).
+
+**Review follow-ups (reviewer agent, 2026-10-09; merged at Rhold's request)**
+- **Fixed (must-fix):** the reconnection fee must be the exact fee amount, and it names the DISCONNECTED account it is for (`RECONNECTION:<account id>`). Only that account can use it, and only if paid after the disconnection. The teller sees it as a due. A fee already used for a reconnection can't be refunded by cancelling its receipt. Other water fees must also be paid in full. Tested.
+- **Fixed:**
+  - Cancelling a water bill payment is refused when the account was closed and settled, or when the receipt's advance was already used by a billing run (advances are used oldest first).
+  - Closing a disconnected account closes its disconnection record.
+  - The SOA, NRW and consumption reports skip cancelled bills.
+  - Running the daily jobs by hand is audited.
+  - Only `/api/cron/daily` bypasses the login redirect.
+- **Dropped** the unused `water_customer_advances.applied_bill_id` (migration 0016); bills record `advance_applied`.
+- **Not changed (noted):**
+  - The Excel export turns peso amounts into spreadsheet numbers. They are exact for any realistic amount and used for display only.
+  - `dv_lines.customer_id` makes cashiering reference water customers, the same way journal lines already do.

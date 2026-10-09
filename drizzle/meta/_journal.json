@@ -99,6 +99,27 @@
       "when": 1791527342815,
       "tag": "0013_tariff_applies_to",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791529892616,
+      "tag": "0014_water_collections",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791529900054,
+      "tag": "0015_water_collections_immutable",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791534248548,
+      "tag": "0016_drop_advance_applied_bill",
+      "breakpoints": true
     }
   ]
 }

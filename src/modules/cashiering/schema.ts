@@ -4,6 +4,7 @@ import { createdColumns, tstz } from "@/db/columns";
 import { users } from "@/modules/auth/schema";
 import { accounts, journalEntries } from "@/modules/ledger/schema";
 import { members } from "@/modules/members/schema";
+import { waterCustomers } from "@/modules/water/schema";
 
 export const SESSION_STATUSES = ["OPEN", "CLOSED", "VERIFIED"] as const;
 export const RECEIPT_MODES = ["CASH", "CHECK", "BANK_TRANSFER"] as const;
@@ -173,6 +174,8 @@ export const dvLines = pgTable(
       .notNull()
       .references(() => accounts.id),
     memberId: uuid("member_id").references(() => members.id),
+    /** Water customer, for customer sub-ledger accounts (e.g. a deposit refund). */
+    customerId: uuid("customer_id").references(() => waterCustomers.id),
     amount: money("amount").notNull(),
     memo: text("memo"),
     ...createdColumns(),

@@ -227,3 +227,66 @@ export async function billsPdf(bills: BillDetail[], coopName: string, title: str
     </Document>,
   );
 }
+
+// ── Disconnection notice ──
+
+export type NoticeInput = {
+  coopName: string;
+  noticeNo: string;
+  noticeDate: string;
+  scheduledDate: string;
+  customerName: string;
+  accountNo: string;
+  serviceAddress: string;
+  bills: Array<{ billNo: string; period: string; dueDate: string; outstanding: bigint }>;
+  total: bigint;
+  reconnectionFee: bigint | null;
+};
+
+export async function noticePdf(d: NoticeInput): Promise<Buffer> {
+  return renderToBuffer(
+    <Document title={`Disconnection notice ${d.noticeNo}`} author={d.coopName}>
+      <Page size={{ width: 612, height: 792 }} style={[s.page, { fontSize: 10, padding: 48 }]}>
+        <Text style={[s.h1, { fontSize: 14 }]}>{d.coopName}</Text>
+        <Text style={{ marginTop: 4, fontSize: 12, fontWeight: "bold" }}>NOTICE OF DISCONNECTION</Text>
+        <View style={[s.between, { marginTop: 8 }]}>
+          <Text>Notice no. {d.noticeNo}</Text>
+          <Text>Date: {formatDate(d.noticeDate)}</Text>
+        </View>
+        <View style={{ marginTop: 14 }}>
+          <Text style={{ fontWeight: "bold" }}>{d.customerName}</Text>
+          <Text>{d.serviceAddress}</Text>
+          <Text>Account {d.accountNo}</Text>
+        </View>
+        <Text style={{ marginTop: 14 }}>Our records show the following water bills are unpaid:</Text>
+        <View style={[s.head, { marginTop: 6 }]}>
+          <Text style={{ width: "30%" }}>Bill</Text>
+          <Text style={{ width: "20%" }}>Period</Text>
+          <Text style={{ width: "25%" }}>Due date</Text>
+          <Text style={[{ width: "25%" }, s.right]}>Amount due</Text>
+        </View>
+        {d.bills.map((b) => (
+          <View key={b.billNo} style={s.row}>
+            <Text style={{ width: "30%" }}>{b.billNo}</Text>
+            <Text style={{ width: "20%" }}>{b.period}</Text>
+            <Text style={{ width: "25%" }}>{formatDate(b.dueDate)}</Text>
+            <Text style={[{ width: "25%" }, s.right]}>{format(b.outstanding)}</Text>
+          </View>
+        ))}
+        <View style={[s.between, { marginTop: 6 }]}>
+          <Text style={{ fontWeight: "bold" }}>Total amount due (including penalties)</Text>
+          <Text style={{ fontWeight: "bold" }}>{format(d.total)}</Text>
+        </View>
+        <Text style={{ marginTop: 14 }}>
+          Please pay the full amount on or before {formatDate(d.scheduledDate)}. If it remains unpaid, your water service will be disconnected after that date without further notice.
+          {d.reconnectionFee !== null ? ` Reconnection requires full payment of all arrears and penalties plus the reconnection fee of ${format(d.reconnectionFee)}.` : ""}
+        </Text>
+        <Text style={{ marginTop: 10 }}>If you have already paid, please disregard this notice and present your receipt at the office.</Text>
+        <View style={[s.between, { marginTop: 48 }]}>
+          <Text>______________________________{"\n"}Billing Clerk</Text>
+          <Text>______________________________{"\n"}Received by / date</Text>
+        </View>
+      </Page>
+    </Document>,
+  );
+}

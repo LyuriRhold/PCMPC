@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { bigint, boolean, check, date, index, integer, jsonb, pgTable, serial, text, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { createdColumns, tstz } from "@/db/columns";
 import { users } from "@/modules/auth/schema";
+import { disbursementVouchers, receiptItems } from "@/modules/cashiering/schema";
 import { journalEntries } from "@/modules/ledger/schema";
 import { members } from "@/modules/members/schema";
 
@@ -473,3 +474,142 @@ export type WaterReading = typeof waterReadings.$inferSelect;
 export type WaterBill = typeof waterBills.$inferSelect;
 export type WaterBillLine = typeof waterBillLines.$inferSelect;
 export type WaterBillAdjustment = typeof waterBillAdjustments.$inferSelect;
+
+// ── Collections, penalties, disconnection (Phase 07) ────────────────────────────────────────
+
+export const DISCONNECTION_STATUSES = ["NOTICED", "DISCONNECTED", "RECONNECTED", "CANCELLED"] as const;
+export type DisconnectionStatus = (typeof DISCONNECTION_STATUSES)[number];
+
+/** Account closure settlement: the meter deposit offsets unpaid bills; the rest is refunded by DV. */
+export const waterDepositSettlements = pgTable(
+  "water_deposit_settlements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .unique()
+      .references(() => waterAccounts.id),
+    deposit: money("deposit").notNull(),
+    unpaid: money("unpaid").notNull(),
+    offset: money("offset").notNull(),
+    refund: money("refund").notNull(),
+    /** Dr Customers' Deposits / Cr AR–Water for the offset (null when nothing was unpaid). */
+    offsetJeId: uuid("offset_je_id").references(() => journalEntries.id),
+    /** The DV that pays out the refund (null when nothing is left to refund). */
+    dvId: uuid("dv_id").references(() => disbursementVouchers.id),
+    ...createdColumns(),
+  },
+  (t) => [check("water_settlements_amounts_chk", sql`${t.offset} = LEAST(${t.deposit}, ${t.unpaid}) AND ${t.refund} = ${t.deposit} - ${t.offset}`)],
+);
+
+/**
+ * How each payment was applied: oldest bill first, and within a bill the penalty first. A row
+ * comes from a receipt item (teller payment) or from a deposit settlement (offset at closure).
+ */
+export const waterPaymentAllocations = pgTable(
+  "water_payment_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    receiptItemId: uuid("receipt_item_id").references(() => receiptItems.id),
+    settlementId: uuid("settlement_id").references(() => waterDepositSettlements.id),
+    billId: uuid("bill_id")
+      .notNull()
+      .references(() => waterBills.id),
+    penaltyPart: money("penalty_part").notNull(),
+    billPart: money("bill_part").notNull(),
+    ...createdColumns(),
+  },
+  (t) => [
+    check("water_allocations_source_chk", sql`(${t.receiptItemId} IS NULL) <> (${t.settlementId} IS NULL)`),
+    check("water_allocations_amounts_chk", sql`${t.penaltyPart} >= 0 AND ${t.billPart} >= 0 AND ${t.penaltyPart} + ${t.billPart} > 0`),
+    index("water_allocations_bill_idx").on(t.billId),
+  ],
+);
+
+/** Late-payment penalty: once per bill, assessed the day after the due date. */
+export const waterPenalties = pgTable(
+  "water_penalties",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    billId: uuid("bill_id")
+      .notNull()
+      .unique()
+      .references(() => waterBills.id),
+    assessedOn: date("assessed_on", { mode: "string" }).notNull(),
+    amount: money("amount").notNull(),
+    jeId: uuid("je_id")
+      .notNull()
+      .references(() => journalEntries.id),
+    ...createdColumns(),
+  },
+  (t) => [check("water_penalties_amount_chk", sql`${t.amount} > 0`)],
+);
+
+/** Overpayments kept as advance credits (Cr Customers' Advances); billing runs apply them oldest first (see bills.advance_applied). */
+export const waterCustomerAdvances = pgTable(
+  "water_customer_advances",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => waterCustomers.id),
+    amount: money("amount").notNull(),
+    sourceReceiptItemId: uuid("source_receipt_item_id")
+      .notNull()
+      .references(() => receiptItems.id),
+    ...createdColumns(),
+  },
+  (t) => [check("water_advances_amount_chk", sql`${t.amount} > 0`), index("water_advances_customer_idx").on(t.customerId)],
+);
+
+/** Disconnection cycle: notice → disconnection order (with reading) → reconnection order. */
+export const waterDisconnections = pgTable(
+  "water_disconnections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => waterAccounts.id),
+    noticeNo: text("notice_no").notNull().unique(),
+    noticeDate: date("notice_date", { mode: "string" }).notNull(),
+    scheduledDate: date("scheduled_date", { mode: "string" }).notNull(),
+    /** Unpaid amount and bills when the notice was issued (printed on the notice). */
+    noticeAmount: money("notice_amount").notNull(),
+    noticeBills: integer("notice_bills").notNull(),
+    disconnectedAt: date("disconnected_at", { mode: "string" }),
+    disconnectReading: integer("disconnect_reading"),
+    disconnectedBy: uuid("disconnected_by").references(() => users.id),
+    reconnectedAt: date("reconnected_at", { mode: "string" }),
+    reconnectReading: integer("reconnect_reading"),
+    reconnectedBy: uuid("reconnected_by").references(() => users.id),
+    /** The paid reconnection-fee receipt item used for this reconnection (each fee is used once). */
+    feeReceiptItemId: uuid("fee_receipt_item_id")
+      .unique()
+      .references(() => receiptItems.id),
+    status: text("status").$type<DisconnectionStatus>().notNull().default("NOTICED"),
+    cancelReason: text("cancel_reason"),
+    by: uuid("by").references(() => users.id),
+    ...createdColumns(),
+  },
+  (t) => [
+    check("water_disconnections_status_chk", inList("status", DISCONNECTION_STATUSES)),
+    uniqueIndex("water_disconnections_open_uq").on(t.accountId).where(sql`${t.status} IN ('NOTICED', 'DISCONNECTED')`),
+  ],
+);
+
+/** Production (source/bulk) meter readings, for non-revenue water (optional). */
+export const waterProductionReadings = pgTable(
+  "water_production_readings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    source: text("source").notNull(),
+    readingDate: date("reading_date", { mode: "string" }).notNull(),
+    reading: bigint("reading", { mode: "number" }).notNull(),
+    ...createdColumns(),
+  },
+  (t) => [unique("water_production_source_date_uq").on(t.source, t.readingDate), check("water_production_reading_chk", sql`${t.reading} >= 0`)],
+);
+
+export type WaterPenalty = typeof waterPenalties.$inferSelect;
+export type WaterDisconnection = typeof waterDisconnections.$inferSelect;
+export type WaterPaymentAllocation = typeof waterPaymentAllocations.$inferSelect;

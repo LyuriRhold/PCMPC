@@ -107,7 +107,7 @@ const receiptSchema = z.object({
 });
 
 /** Issues one receipt for many items. Each item type's own permission is checked too. */
-export async function issueReceiptAction(input: z.input<typeof receiptSchema>): Promise<ActionResult<{ id: string; receiptNo: string; total: string }>> {
+export async function issueReceiptAction(input: z.input<typeof receiptSchema>): Promise<ActionResult<{ id: string; receiptNo: string; total: string; jeId: string }>> {
   const actor = await requirePermission("cash.session");
   let data: z.output<typeof receiptSchema>;
   try {
@@ -122,7 +122,7 @@ export async function issueReceiptAction(input: z.input<typeof receiptSchema>): 
   try {
     const items = data.items.map((i) => ({ type: i.type, refId: i.refId, amount: pesos(i.amount), description: i.description || null }));
     const r = await withTx((tx) => issueReceipt(tx, { payor: data.payor, mode: data.mode, checkNo: data.checkNo, birReceiptNo: data.birReceiptNo, items }, actor.id));
-    return ok({ id: r.id, receiptNo: r.receiptNo, total: String(r.total) });
+    return ok({ id: r.id, receiptNo: r.receiptNo, total: String(r.total), jeId: r.jeId });
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

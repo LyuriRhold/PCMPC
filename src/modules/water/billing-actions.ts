@@ -325,12 +325,19 @@ export async function rejectAdjustmentAction(input: z.input<typeof rejectAdjustm
 // ── Closure ──
 
 const closeSchema = z.object({ accountId: z.uuid(), finalReading: reading, rollover: z.boolean(), reason });
-export async function closeAccountAction(input: z.input<typeof closeSchema>): Promise<ActionResult<{ billId: string; billNo: string }>> {
+export type SettlementView = { deposit: string; unpaid: string; offset: string; refund: string; offsetJeId: string | null; dvId: string | null };
+
+/** Closes the account: final bill, then the deposit settles (offset unpaid, refund the rest by DV). */
+export async function closeAccountAction(input: z.input<typeof closeSchema>): Promise<ActionResult<{ billId: string; billNo: string; settlement: SettlementView }>> {
   const actor = await requirePermission("water.disconnect");
   try {
     const data = closeSchema.parse(input);
     const r = await withTx((tx) => closeAccount(tx, data, actor.id));
-    return ok({ billId: r.billId, billNo: r.billNo });
+    const s = r.settlement;
+    const settlement: SettlementView = s
+      ? { deposit: String(s.deposit), unpaid: String(s.unpaid), offset: String(s.offset), refund: String(s.refund), offsetJeId: s.offsetJeId, dvId: s.dvId }
+      : { deposit: "0", unpaid: "0", offset: "0", refund: "0", offsetJeId: null, dvId: null };
+    return ok({ billId: r.billId, billNo: r.billNo, settlement });
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

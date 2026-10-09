@@ -12,6 +12,7 @@ import { businessToday, formatDate, formatDateTime } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPageAny } from "@/lib/page-guard";
 import { accountBills } from "@/modules/water/billing-queries";
+import { accountOutstanding } from "@/modules/water/collections";
 import { getAccount, listRoutes } from "@/modules/water/queries";
 import { CloseAccountForm } from "@/modules/water/ui/billing-forms";
 import { ActivateButton, MoveRouteForm, ReplaceMeterForm, SeniorForm, TransferForm } from "@/modules/water/ui/forms";
@@ -36,7 +37,7 @@ async function AccountContent(props: PageProps<"/water/connections/[id]">) {
   const d = await getAccount(id, can(access.user, "members.read_sensitive"));
   if (!d) notFound();
   const { account: a, customer: c, current } = d;
-  const [routes, bills] = await Promise.all([listRoutes(), accountBills(id)]);
+  const [routes, bills, balance] = await Promise.all([listRoutes(), accountBills(id), accountOutstanding(id)]);
   const today = businessToday();
   const open = a.status !== "CLOSED";
   const canInstall = can(access.user, "water.install");
@@ -75,6 +76,19 @@ async function AccountContent(props: PageProps<"/water/connections/[id]">) {
             <Row label="Route / sequence" value={`${d.route.code} · ${d.route.name} · #${a.sequenceNo}`} />
             <Row label="Connected" value={a.connectedAt ? formatDate(a.connectedAt) : null} />
             <Row label="Meter deposit held" value={format(a.depositAmount)} />
+            <Row
+              label="Balance due"
+              value={
+                <span className="flex flex-wrap items-center gap-2">
+                  <span data-testid="account-balance" className="font-semibold tabular-nums">
+                    {format(balance)}
+                  </span>
+                  <Link href={`/water/reports?report=soa&customer=${c.id}`} className="text-xs underline underline-offset-4">
+                    Statement of account
+                  </Link>
+                </span>
+              }
+            />
             <Row label="Current meter" value={current ? `${current.serialNo} since ${formatDate(current.inst.installedAt)} (initial reading ${current.inst.initialReading})` : "None installed"} />
           </dl>
         </CardContent>

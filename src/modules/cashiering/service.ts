@@ -267,7 +267,11 @@ export async function issueReceipt(tx: Tx, input: IssueReceiptInput, tellerId: s
     })
     .returning();
   if (!receipt) throw new Error("receipt insert returned no row");
-  await tx.insert(receiptItems).values(stored.map((s, i) => ({ receiptId, lineNo: i + 1, ...s, createdBy: tellerId })));
+  const rows = await tx.insert(receiptItems).values(stored.map((s, i) => ({ receiptId, lineNo: i + 1, ...s, createdBy: tellerId }))).returning();
+  for (const row of rows) {
+    const def = receiptItem(row.type);
+    if (def?.recorded) await def.recorded(tx, { id: row.id, type: row.type, refId: row.refId, amount: row.amount, breakdown: row.breakdown }, ctx);
+  }
   await audit(tx, {
     action: "receipt.issue",
     entity: "receipt",
@@ -347,7 +351,7 @@ async function recordCashOut(tx: Tx, input: { sessionId: string; type: string; r
   });
 }
 
-export type DvLineInput = { accountId: string; memberId: string | null; amount: Money; memo: string | null };
+export type DvLineInput = { accountId: string; memberId: string | null; customerId?: string | null; amount: Money; memo: string | null };
 export type CreateDvInput = { date: BusinessDate; payee: string; particulars: string; mode: DvMode; checkNo: string | null; lines: DvLineInput[] };
 
 /** Prepares a disbursement voucher (DRAFT). It gets its DV number now; cancelled DVs keep theirs. */
@@ -380,7 +384,7 @@ export async function createDv(tx: Tx, input: CreateDvInput, preparerId: string)
     })
     .returning();
   if (!dv) throw new Error("DV insert returned no row");
-  await tx.insert(dvLines).values(input.lines.map((l, i) => ({ dvId: dv.id, lineNo: i + 1, accountId: l.accountId, memberId: l.memberId, amount: l.amount, memo: l.memo, createdBy: preparerId })));
+  await tx.insert(dvLines).values(input.lines.map((l, i) => ({ dvId: dv.id, lineNo: i + 1, accountId: l.accountId, memberId: l.memberId, customerId: l.customerId ?? null, amount: l.amount, memo: l.memo, createdBy: preparerId })));
   await audit(tx, { action: "dv.create", entity: "disbursement_voucher", entityId: dv.id, after: { dvNo, payee: dv.payee, amount, mode: dv.mode }, userId: preparerId });
   return dv;
 }
@@ -422,7 +426,7 @@ export async function releaseDv(tx: Tx, dvId: string, tellerId: string): Promise
       particulars: `${dv.dvNo} · ${dv.payee} · ${dv.particulars}`,
       reference: dv.checkNo ?? dv.dvNo,
       source: { module: "cashiering.dv", id: dv.id },
-      lines: [...lines.map((l) => ({ accountId: l.accountId, debit: l.amount, memberId: l.memberId, memo: l.memo })), { accountId: credit, credit: dv.amount }],
+      lines: [...lines.map((l) => ({ accountId: l.accountId, debit: l.amount, memberId: l.memberId, customerId: l.customerId, memo: l.memo })), { accountId: credit, credit: dv.amount }],
     },
     tellerId,
   );

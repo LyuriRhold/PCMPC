@@ -20,7 +20,8 @@
     "e2e:prod": "node scripts/e2e-prod.mjs",
     "scan": "node scripts/scan-placeholders.mjs",
     "gate": "npm run typecheck && npm run lint && npm run test && npm run scan",
-    "db:seed:dev": "tsx scripts/db-seed-dev.mts"
+    "db:seed:dev": "tsx scripts/db-seed-dev.mts",
+    "water:cycle": "tsx scripts/water-cycle.mts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 06
+**Current phase:** 07
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -14,7 +14,7 @@
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ✅ | phase-03-accounting-core · tag `phase-03` | rldejoya (reviewer agent: no blockers; follow-ups fixed) · 2026-10-08 |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ✅ | phase-04-cashiering · tag `phase-04` | rldejoya (reviewer agent: SoD test gap + drawer check fixed) · 2026-10-08 |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ✅ | phase-05-water-connections · tag `phase-05` | rldejoya (merged on request without the reviewer agent) · 2026-10-09 |
-| 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | 🟡 awaiting review | phase-06-water-billing | |
+| 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ✅ | phase-06-water-billing · tag `phase-06` | rldejoya (reviewer agent: memo cap + phone re-read fixed) · 2026-10-09 |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ⬜ | | |
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ⬜ | | |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ⬜ | | |
@@ -700,3 +700,18 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - **Estimates (Q-06.4):** the clerk enters the estimated m³ (the 3-month average is shown as a hint, not used as a default). The API still falls back to the average when no m³ is given (golden A6.6).
 - **Reading app:** PCMPC reads meters by hand and encodes them in the office, so the app is optional and the real-phone check is waived.
 - **For later phases:** only members may file loans or hold share capital.
+
+**Review follow-ups (reviewer agent, 2026-10-09; merged at Rhold's request)**
+- **Fixed:** a credit memo's cap is checked again when it is approved, with the bill row locked, so two pending credits can't together exceed the bill. Tested.
+- **Fixed:** a reading the office rejected can be re-sent from the phone; other readings are still never overwritten by a sync. Tested.
+- **Fixed (nits):** the senior-discount percentage is printed without float maths; the grid's 3-month average rounds HALF-UP like estimates; an unneeded dynamic import was removed.
+- **Added:** a test that the seeded water bill series never resets (year 0).
+- **Acceptance file note:** after the test commit, `tests/acceptance/phase-06.test.ts` got one type-only fix: `let zoneId = ""` → `let zoneId = 0`, because zone ids are serial numbers. No golden value or assertion changed. It is recorded here for the human reviewer.
+- **Deviations from the spec made on PCMPC's answers (2026-10-09)**, to be folded into PHASE-06 / DOMAIN by a human:
+  - tariff versions by customer group (`water_rate_schedules.applies_to`, migration 0013);
+  - the settings `water.reading_schedule` and `water.bill_paper`, and `water.senior_discount.enabled`;
+  - ADMIN gets `water.rates` (the admin sets the minimum m³ and minimum charge: 10 m³ per house, PCMPC);
+  - the WB bill series never resets (migration 0012);
+  - clerk-entered estimates.
+- **Follow-up for Phase 07:** `previousBalance` skips CANCELLED bills, but cancellation arrives in Phase 07, so add a test there.
+- **Follow-up:** the test reset deletes all rows in `public` (as superuser, `session_replication_role = replica`). Data a migration inserts is therefore checked through the seed, not directly.

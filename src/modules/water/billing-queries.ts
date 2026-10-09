@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, inArray, like, lt, or, sql } from "drizzle-o
 import { getDb, type Db, type Tx } from "@/db/client";
 import { normalizeName } from "@/lib/names";
 import { users } from "@/modules/auth/schema";
+import { estimateFrom } from "./consumption";
 import { readingContext } from "./readings";
 import {
   waterAccounts,
@@ -122,7 +123,7 @@ export async function periodGrid(periodId: string, db: Db | Tx = getDb()) {
       meterSerial: ctx?.meter.serialNo ?? "—",
       digits: ctx?.meter.digits ?? 4,
       previous: ctx ? (ctx.changes.length ? ctx.changes.at(-1)!.newInitial : ctx.previous) : (reading?.previousReading ?? 0),
-      average: ctx?.history.length ? Math.round(ctx.history.reduce((s, h) => s + h, 0) / ctx.history.length) : null,
+      average: ctx?.history.length ? estimateFrom(ctx.history) : null,
       estimatedSince: ctx?.estimatedSince ?? 0,
       meterChanged: (ctx?.changes.length ?? 0) > 0,
       reading,

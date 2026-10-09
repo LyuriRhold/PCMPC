@@ -162,6 +162,18 @@ describe("billing (T6.3–T6.8)", () => {
       expect(saved.ok && saved.data.map((r) => r.status)).toEqual(["saved", "duplicate"]);
       const rows = await getDb().select().from(waterReadings).where(eq(waterReadings.accountId, a.accountId));
       expect(rows.map((r) => [r.presentReading, r.readerId])).toEqual([[9, reader]]);
+
+      // A flagged phone reading (0 m³ → ZERO) is rejected by the office; the re-read from the phone replaces it.
+      const b = await acc({ initialReading: 50 });
+      const zero = { clientUuid: "55555555-5555-4555-8555-555555555555", periodId, accountId: b.accountId, presentReading: 50, rollover: false, remarks: null, readAt: "2026-10-03T02:00:00.000Z" };
+      const first = await runAs(reader, () => syncReadingsAction({ items: [zero] }));
+      expect(first.ok && first.data[0]?.reading?.status).toBe("ENTERED");
+      const flagged = first.ok ? first.data[0]!.reading!.id : "";
+      expect((await runAs(clerk, () => rejectReadingAction({ readingId: flagged, reason: "Re-read" }))).ok).toBe(true);
+      const again = await runAs(reader, () => syncReadingsAction({ items: [{ ...zero, clientUuid: "44444444-4444-4444-8444-444444444444", presentReading: 57 }] }));
+      expect(again.ok && again.data.map((r) => r.status)).toEqual(["saved"]);
+      const after = await getDb().select().from(waterReadings).where(eq(waterReadings.accountId, b.accountId));
+      expect(after.map((r) => [r.presentReading, r.status])).toEqual([[57, "APPROVED"]]);
     });
   });
 
@@ -272,6 +284,12 @@ describe("billing (T6.3–T6.8)", () => {
       expect(est.ok && { consumption: est.data.consumption, type: est.data.type, status: est.data.status }).toEqual({ consumption: 12, type: "ESTIMATED", status: "APPROVED" });
     });
 
+    it("the seeded water bill series never resets (year 0)", async () => {
+      const { numberSeries } = await import("@/modules/numbering/schema");
+      const rows = await getDb().select().from(numberSeries).where(eq(numberSeries.code, "WB"));
+      expect(rows.map((r) => [r.year, r.resetsYearly])).toEqual([[0, false]]);
+    });
+
     it("bill numbers keep counting across years (they never restart)", async () => {
       await withTx((tx) => ensureFiscalYear(tx, 2027));
       const a = await acc({ initialReading: 0 });
@@ -337,6 +355,14 @@ describe("billing (T6.3–T6.8)", () => {
       const [ar, adj] = await Promise.all([acct("ar_water"), acct("water_revenue_adjustments")]);
       const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, jeId));
       expect(lines.map((l) => [l.accountId, l.debit, l.credit])).toEqual(expect.arrayContaining([[ar, P(30), 0n], [adj, 0n, P(30)]]));
+    });
+
+    it("two pending credit memos can't together exceed the bill: the cap is checked again at approval", async () => {
+      const { bill } = await billed();
+      const m1 = await withTx((tx) => prepareAdjustment(tx, { billId: bill.id, kind: "CREDIT", amount: P(300), reason: "Leak" }, clerk));
+      const m2 = await withTx((tx) => prepareAdjustment(tx, { billId: bill.id, kind: "CREDIT", amount: P(300), reason: "Leak again" }, clerk));
+      await withTx((tx) => approveAdjustment(tx, m1.id, manager));
+      await expect(withTx((tx) => approveAdjustment(tx, m2.id, manager))).rejects.toThrow("A credit memo on WB-202610-000001 can be at most ₱100.00");
     });
 
     it("a credit memo can't exceed what the bill still owes, and reduces the next previous balance", async () => {

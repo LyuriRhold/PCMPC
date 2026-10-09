@@ -24,7 +24,7 @@ import {
   rejectReading,
 } from "./readings";
 import type { WaterReading } from "./schema";
-import { addRoute, addZone, WaterError } from "./service";
+import { addRoute, addZone, customerName, WaterError } from "./service";
 
 const EXPECTED = [WaterError, RateError, ConsumptionError, JobAlreadyRunError, LedgerError];
 const businessDate = z.string().refine(isBusinessDate, "Enter a valid date (YYYY-MM-DD)");
@@ -246,7 +246,6 @@ export async function previewBillingAction(input: z.input<typeof periodIdSchema>
   await requirePermission("water.bill");
   try {
     const { periodId } = periodIdSchema.parse(input);
-    const { customerName } = await import("./service");
     const { bills, blockers } = await previewRun(periodId);
     return ok({
       bills: bills.map((b) => ({

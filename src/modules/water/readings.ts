@@ -214,7 +214,8 @@ export async function enterReading(tx: Tx, input: ReadingInput, actorId: string,
   const account = await lockAccountForPeriod(tx, input.accountId, p);
   if (account.status !== "ACTIVE" && account.status !== "DISCONNECTED") throw new WaterError(`${account.accountNo} is ${account.status}`);
   const [existing] = await tx.select().from(waterReadings).where(and(eq(waterReadings.periodId, p.id), eq(waterReadings.accountId, account.id)));
-  if (existing && source === "MOBILE") return { ...existing, duplicate: true };
+  // The phone never overwrites a reading, except one the office rejected (the meter was re-read).
+  if (existing && source === "MOBILE" && existing.status !== "REJECTED") return { ...existing, duplicate: true };
 
   const ctx = await readingContext(tx, account, p);
   const result = consumptionFor({

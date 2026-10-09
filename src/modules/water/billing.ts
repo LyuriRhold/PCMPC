@@ -1,3 +1,4 @@
+import Decimal from "decimal.js";
 import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
@@ -115,7 +116,7 @@ async function draftBill(
   const senior = await getSetting("water.senior_discount", db);
   if (senior.enabled && account.classification === "RESIDENTIAL" && reading.consumption <= senior.maxM3 && (await isSeniorEligible(account.id, input.billDate, db))) {
     seniorDiscount = mulRate(basicCharge, senior.rate, "HALF_UP");
-    if (seniorDiscount > 0n) lines.push({ kind: "SENIOR_DISCOUNT", description: `Senior-citizen discount (${Number(senior.rate) * 100}% of basic charge)`, qty: null, rate: null, amount: -seniorDiscount });
+    if (seniorDiscount > 0n) lines.push({ kind: "SENIOR_DISCOUNT", description: `Senior-citizen discount (${new Decimal(senior.rate).mul(100).toString()}% of basic charge)`, qty: null, rate: null, amount: -seniorDiscount });
   }
   const otherCharges = 0n;
   const currentAmount = basicCharge - seniorDiscount + otherCharges;
@@ -298,15 +299,18 @@ export async function prepareAdjustment(tx: Tx, input: { billId: string; kind: A
   if (bill.status === "CANCELLED") throw new WaterError(`${bill.billNo} is cancelled`);
   if (input.amount <= 0n) throw new WaterError("The amount must be more than zero");
   if (!input.reason.trim()) throw new WaterError("A reason is required");
-  if (input.kind === "CREDIT") {
-    const credited = await approvedMemoTotal(tx, bill.id);
-    const maxCredit = bill.currentAmount - bill.advanceApplied + credited.debit - credited.credit;
-    if (input.amount > maxCredit) throw new WaterError(`A credit memo on ${bill.billNo} can be at most ${format(maxCredit)}`);
-  }
+  if (input.kind === "CREDIT") await assertCreditFits(tx, bill, input.amount);
   const [row] = await tx.insert(waterBillAdjustments).values({ billId: bill.id, kind: input.kind, amount: input.amount, reason: input.reason.trim(), preparedBy: actorId, createdBy: actorId }).returning();
   if (!row) throw new Error("adjustment insert returned no row");
   await audit(tx, { action: "water.adjustment_prepare", entity: "water_bill_adjustment", entityId: row.id, after: { billNo: bill.billNo, kind: row.kind, amount: format(row.amount), reason: row.reason }, userId: actorId });
   return row;
+}
+
+/** A credit memo can't take a bill below zero (net of advances and memos already approved). */
+async function assertCreditFits(db: Db | Tx, bill: WaterBill, amount: Money) {
+  const done = await approvedMemoTotal(db, bill.id);
+  const maxCredit = bill.currentAmount - bill.advanceApplied + done.debit - done.credit;
+  if (amount > maxCredit) throw new WaterError(`A credit memo on ${bill.billNo} can be at most ${format(maxCredit)}`);
 }
 
 async function approvedMemoTotal(db: Db | Tx, billId: string) {
@@ -320,8 +324,10 @@ export async function approveAdjustment(tx: Tx, adjustmentId: string, actorId: s
   if (!adj) throw new WaterError("Memo not found");
   if (adj.status !== "PENDING") throw new WaterError(`This memo is already ${adj.status}`);
   assertNotSameUser(adj.preparedBy, actorId);
-  const [bill] = await tx.select().from(waterBills).where(eq(waterBills.id, adj.billId));
+  // The bill row is locked so concurrent approvals of memos on the same bill run one at a time.
+  const [bill] = await tx.select().from(waterBills).where(eq(waterBills.id, adj.billId)).for("update");
   if (!bill) throw new WaterError("Bill not found");
+  if (adj.kind === "CREDIT") await assertCreditFits(tx, bill, adj.amount);
   const [ar, rev] = await Promise.all([accountIdFor("ar_water", tx), accountIdFor("water_revenue_adjustments", tx)]);
   const arLine: LineInput = { accountId: ar, customerId: bill.customerId, memo: bill.billNo, ...(adj.kind === "CREDIT" ? { credit: adj.amount } : { debit: adj.amount }) };
   const revLine: LineInput = { accountId: rev, ...(adj.kind === "CREDIT" ? { debit: adj.amount } : { credit: adj.amount }) };

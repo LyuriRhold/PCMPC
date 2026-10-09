@@ -5,7 +5,9 @@ import { PageLoading } from "@/components/page-loading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { can } from "@/lib/auth-guard";
 import { guardPageAny } from "@/lib/page-guard";
+import { listReaders } from "@/modules/water/billing-queries";
 import { routesWithAccounts } from "@/modules/water/queries";
+import { ReaderSelect, RouteForm, ZoneForm } from "@/modules/water/ui/billing-forms";
 import { RouteSequence } from "@/modules/water/ui/forms";
 import { WATER_STAFF } from "@/modules/water/ui/shared";
 
@@ -14,7 +16,7 @@ export const metadata: Metadata = { title: "Zones & routes · PCMPC MIS" };
 async function RoutesContent() {
   const access = await guardPageAny(WATER_STAFF);
   if (!access.ok) return <Forbidden permission={access.permission} />;
-  const zones = await routesWithAccounts();
+  const [zones, readers] = await Promise.all([routesWithAccounts(), listReaders()]);
   const canEdit = can(access.user, "water.customers");
 
   return (
@@ -25,17 +27,36 @@ async function RoutesContent() {
           Reading routes and the order meter readers visit each account.{canEdit ? " Drag rows (or use ↑/↓) to change the order, then save." : ""}
         </p>
       </div>
+      {canEdit ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Add zones and routes</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <ZoneForm />
+            <RouteForm zones={zones.map((z) => ({ id: z.id, code: z.code, name: z.name }))} />
+          </CardContent>
+        </Card>
+      ) : null}
       {zones.length === 0 ? <p className="text-sm text-muted-foreground">No zones set up.</p> : null}
       {zones.map((z) => (
         <section key={z.id} className="flex flex-col gap-3">
           <h2 className="text-lg font-semibold">
             {z.name} <span className="font-mono text-sm text-muted-foreground">{z.code}</span>
           </h2>
+          {z.routes.length === 0 ? <p className="text-sm text-muted-foreground">No routes in this zone yet.</p> : null}
           {z.routes.map((r) => (
             <Card key={r.id}>
               <CardHeader>
-                <CardTitle>
-                  {r.code} · {r.name} <span className="text-sm font-normal text-muted-foreground">({r.accounts.length} account{r.accounts.length === 1 ? "" : "s"})</span>
+                <CardTitle className="flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    {r.code} · {r.name} <span className="text-sm font-normal text-muted-foreground">({r.accounts.length} account{r.accounts.length === 1 ? "" : "s"})</span>
+                  </span>
+                  {canEdit ? (
+                    <ReaderSelect routeId={r.id} routeCode={r.code} readerId={r.assignedReaderId} readers={readers} />
+                  ) : (
+                    <span className="text-sm font-normal text-muted-foreground">Reader: {readers.find((x) => x.id === r.assignedReaderId)?.name ?? "none"}</span>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent>

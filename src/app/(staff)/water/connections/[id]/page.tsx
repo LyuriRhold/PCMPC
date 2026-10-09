@@ -11,7 +11,9 @@ import { can } from "@/lib/auth-guard";
 import { businessToday, formatDate, formatDateTime } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPageAny } from "@/lib/page-guard";
+import { accountBills } from "@/modules/water/billing-queries";
 import { getAccount, listRoutes } from "@/modules/water/queries";
+import { CloseAccountForm } from "@/modules/water/ui/billing-forms";
 import { ActivateButton, MoveRouteForm, ReplaceMeterForm, SeniorForm, TransferForm } from "@/modules/water/ui/forms";
 import { WATER_STAFF, WaterStatusBadge } from "@/modules/water/ui/shared";
 
@@ -34,7 +36,7 @@ async function AccountContent(props: PageProps<"/water/connections/[id]">) {
   const d = await getAccount(id, can(access.user, "members.read_sensitive"));
   if (!d) notFound();
   const { account: a, customer: c, current } = d;
-  const routes = await listRoutes();
+  const [routes, bills] = await Promise.all([listRoutes(), accountBills(id)]);
   const today = businessToday();
   const open = a.status !== "CLOSED";
   const canInstall = can(access.user, "water.install");
@@ -172,6 +174,69 @@ async function AccountContent(props: PageProps<"/water/connections/[id]">) {
           <CardContent className="flex flex-col gap-5">
             <MoveRouteForm accountId={a.id} routeId={a.routeId} routes={routes} />
             <TransferForm accountId={a.id} />
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Bills</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Bill no.</TableHead>
+                <TableHead>Period</TableHead>
+                <TableHead className="text-right">m³</TableHead>
+                <TableHead className="text-right">Current</TableHead>
+                <TableHead className="text-right">Total due</TableHead>
+                <TableHead>Due</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {bills.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                    No bills yet.
+                  </TableCell>
+                </TableRow>
+              ) : null}
+              {bills.map(({ bill: b, period }) => (
+                <TableRow key={b.id}>
+                  <TableCell className="font-mono text-xs">
+                    <Link href={`/water/bills/${b.id}`} className="underline-offset-4 hover:underline">
+                      {b.billNo}
+                    </Link>
+                    {b.isFinal ? " (final)" : ""}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{period}</TableCell>
+                  <TableCell className="text-right tabular-nums">{b.consumption}</TableCell>
+                  <TableCell className="text-right tabular-nums">{format(b.currentAmount)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{format(b.totalAmountDue)}</TableCell>
+                  <TableCell className="tabular-nums">{formatDate(b.dueDate)}</TableCell>
+                  <TableCell>
+                    <WaterStatusBadge status={b.status} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {can(access.user, "water.disconnect") && (a.status === "ACTIVE" || a.status === "DISCONNECTED") ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Close the account</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <p className="text-sm text-muted-foreground">
+              Takes the final reading in the zone&apos;s open billing period, posts the final bill now, removes the meter and closes the account. The deposit refund comes with
+              collections (Phase 07).
+            </p>
+            <CloseAccountForm accountId={a.id} accountNo={a.accountNo} />
           </CardContent>
         </Card>
       ) : null}

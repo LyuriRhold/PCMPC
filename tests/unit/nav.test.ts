@@ -6,7 +6,7 @@ import { ALL_NAV_ITEMS, comingSoonItem, PHASES, visibleHrefs } from "@/component
 /** The page file that serves an href, if one exists (staff group first, then top-level routes). */
 function pageFileFor(href: string): string | null {
   const parts = href.split("/").filter(Boolean);
-  for (const base of ["src/app/(staff)", "src/app"]) {
+  for (const base of ["src/app/(staff)", "src/app/(reader)", "src/app"]) {
     const file = join(base, ...parts, "page.tsx");
     if (existsSync(file)) return file;
   }
@@ -28,14 +28,14 @@ describe("module registry (sidebar, dashboard, coming-soon pages)", () => {
   });
 
   it("comingSoonItem resolves only planned paths", () => {
-    expect(comingSoonItem("/water/bills")?.phase).toBe("06");
+    expect(comingSoonItem("/water/collections")?.phase).toBe("07");
     expect(comingSoonItem("/admin/users")).toBeUndefined();
     expect(comingSoonItem("/no/such/page")).toBeUndefined();
   });
 
   it("live items need their permission; coming-soon items are visible to everyone", () => {
     const none = visibleHrefs(new Set());
-    expect(none).toContain("/water/bills");
+    expect(none).toContain("/water/collections");
     expect(none).toContain("/");
     expect(none).not.toContain("/admin/users");
     expect(visibleHrefs(new Set(["admin.users"]))).toContain("/admin/users");

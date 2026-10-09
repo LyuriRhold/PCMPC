@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { DB_WORKERS } from "./tests/db-env";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 
@@ -11,8 +12,9 @@ const dbEnv = { DATABASE_URL: process.env.DATABASE_URL_TEST ?? "", TZ: "UTC" };
 export default defineConfig({
   resolve: { alias },
   test: {
-    // DB projects share one test database and truncate it between tests, so files run one at a time.
-    fileParallelism: false,
+    // Each worker has its own copy of the test database (tests/global-setup-db.ts), so files run in
+    // parallel; the worker count is capped at the number of database copies.
+    maxWorkers: DB_WORKERS,
     projects: [
       {
         resolve: { alias },

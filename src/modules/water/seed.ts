@@ -29,7 +29,7 @@ export async function seedWater(tx: Tx): Promise<void> {
         blocks: t.blocks.map((b) => ({ from: b.fromM3, to: b.toM3, rate: b.ratePerM3 })),
         nwrbRef: "Sample tariff from DOMAIN §2 (CONFIRM: NWRB-approved tariff)",
       })
-      .onConflictDoNothing({ target: [waterRateSchedules.classification, waterRateSchedules.effectiveFrom] });
+      .onConflictDoNothing({ target: [waterRateSchedules.classification, waterRateSchedules.appliesTo, waterRateSchedules.effectiveFrom] });
   }
 
   const fees = [

@@ -3,7 +3,9 @@ import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { formatDate, type BusinessDate } from "@/lib/dates";
 import { format, type Money } from "@/lib/money";
-import { waterRateSchedules, type Classification, type RateBlock } from "./schema";
+import { waterRateSchedules, type Classification, type CustomerType, type RateBlock, type TariffAppliesTo } from "./schema";
+
+export const APPLIES_LABEL: Record<TariffAppliesTo, string> = { ALL: "all customers", MEMBER: "members", NON_MEMBER: "non-members" };
 
 /** A tariff rule was broken; the message is safe to show. */
 export class RateError extends Error {
@@ -51,25 +53,37 @@ export function chargeFor(s: Schedule, m3: number): Charge {
   return { lines, total: lines.reduce((sum, l) => sum + l.amount, 0n) };
 }
 
-/** The tariff version in effect on a date for a classification (latest effective_from ≤ date). */
-export async function scheduleOn(classification: Classification, date: BusinessDate, db: Db | Tx = getDb()) {
+async function latestVersion(db: Db | Tx, classification: Classification, appliesTo: TariffAppliesTo, date: BusinessDate) {
   const [s] = await db
     .select()
     .from(waterRateSchedules)
-    .where(and(eq(waterRateSchedules.classification, classification), lte(waterRateSchedules.effectiveFrom, date)))
+    .where(and(eq(waterRateSchedules.classification, classification), eq(waterRateSchedules.appliesTo, appliesTo), lte(waterRateSchedules.effectiveFrom, date)))
     .orderBy(desc(waterRateSchedules.effectiveFrom))
     .limit(1);
   return s ?? null;
 }
 
-/** Water charge for `m3` m³ of a classification, using the version effective on the period end. */
-export async function computeWaterCharge(classification: Classification, m3: number, periodEnd: BusinessDate, db: Db | Tx = getDb()) {
-  const s = await scheduleOn(classification, periodEnd, db);
+/**
+ * The tariff version in effect on a date for a classification (latest effective_from ≤ date).
+ * With a customer type, that type's own version (members-only / non-members-only) wins when one
+ * is in effect; otherwise the version for everyone applies.
+ */
+export async function scheduleOn(classification: Classification, date: BusinessDate, db: Db | Tx = getDb(), customerType?: CustomerType) {
+  if (customerType) {
+    const own = await latestVersion(db, classification, customerType, date);
+    if (own) return own;
+  }
+  return latestVersion(db, classification, "ALL", date);
+}
+
+/** Water charge for `m3` m³ of a classification (and customer type), using the version effective on the period end. */
+export async function computeWaterCharge(classification: Classification, m3: number, periodEnd: BusinessDate, db: Db | Tx = getDb(), customerType?: CustomerType) {
+  const s = await scheduleOn(classification, periodEnd, db, customerType);
   if (!s) throw new RateError(`No ${classification} rate schedule is in effect on ${formatDate(periodEnd)}`);
   return { scheduleId: s.id, effectiveFrom: s.effectiveFrom, nwrbRef: s.nwrbRef, ...chargeFor(s, m3) };
 }
 
-export type NewSchedule = Schedule & { classification: Classification; effectiveFrom: BusinessDate; nwrbRef: string };
+export type NewSchedule = Schedule & { classification: Classification; appliesTo?: TariffAppliesTo; effectiveFrom: BusinessDate; nwrbRef: string };
 
 /**
  * Adds a tariff version. Versions are never edited: a change is a new version that takes effect
@@ -78,20 +92,22 @@ export type NewSchedule = Schedule & { classification: Classification; effective
 export async function addRateSchedule(tx: Tx, input: NewSchedule, actorId: string | null) {
   validateSchedule(input);
   if (!input.nwrbRef.trim()) throw new RateError("Enter the NWRB approval reference");
+  const appliesTo = input.appliesTo ?? "ALL";
   const [latest] = await tx
     .select({ effectiveFrom: waterRateSchedules.effectiveFrom })
     .from(waterRateSchedules)
-    .where(eq(waterRateSchedules.classification, input.classification))
+    .where(and(eq(waterRateSchedules.classification, input.classification), eq(waterRateSchedules.appliesTo, appliesTo)))
     .orderBy(desc(waterRateSchedules.effectiveFrom))
     .limit(1)
     .for("update");
   if (latest && input.effectiveFrom <= latest.effectiveFrom) {
-    throw new RateError(`A new ${input.classification} version must take effect after ${formatDate(latest.effectiveFrom)}`);
+    throw new RateError(`A new ${input.classification}${appliesTo === "ALL" ? "" : ` (${APPLIES_LABEL[appliesTo]})`} version must take effect after ${formatDate(latest.effectiveFrom)}`);
   }
   const [row] = await tx
     .insert(waterRateSchedules)
     .values({
       classification: input.classification,
+      appliesTo,
       effectiveFrom: input.effectiveFrom,
       minCharge: input.minCharge,
       minCubic: input.minCubic,
@@ -106,7 +122,7 @@ export async function addRateSchedule(tx: Tx, input: NewSchedule, actorId: strin
     action: "water.rate_schedule_add",
     entity: "water_rate_schedule",
     entityId: row.id,
-    after: { classification: row.classification, effectiveFrom: row.effectiveFrom, minCharge: row.minCharge, minCubic: row.minCubic, blocks: row.blocks, nwrbRef: row.nwrbRef },
+    after: { classification: row.classification, appliesTo: row.appliesTo, effectiveFrom: row.effectiveFrom, minCharge: row.minCharge, minCubic: row.minCubic, blocks: row.blocks, nwrbRef: row.nwrbRef },
     userId: actorId,
   });
   return row;

@@ -264,16 +264,25 @@ export async function enterReading(tx: Tx, input: ReadingInput, actorId: string,
   return { ...row, duplicate: false };
 }
 
-/** Records an estimated reading (meter inaccessible): the average of the recent actual months. */
-export async function enterEstimate(tx: Tx, input: { periodId: string; accountId: string; reason: string }, actorId: string): Promise<WaterReading> {
+/**
+ * Records an estimated reading (meter inaccessible). The clerk enters the estimated m³ (PCMPC:
+ * the estimate is adjusted to fit, not defaulted); without one, the recent actual average is used.
+ */
+export async function enterEstimate(tx: Tx, input: { periodId: string; accountId: string; reason: string; consumption?: number | null }, actorId: string): Promise<WaterReading> {
   if (!input.reason.trim()) throw new WaterError("Say why the meter couldn't be read");
   const p = await lockPeriod(tx, input.periodId);
   await assertReadable(tx, p);
   const account = await lockAccountForPeriod(tx, input.accountId, p);
   if (account.status !== "ACTIVE" && account.status !== "DISCONNECTED") throw new WaterError(`${account.accountNo} is ${account.status}`);
   const ctx = await readingContext(tx, account, p);
-  if (ctx.history.length === 0) throw new WaterError(`${account.accountNo} has no actual readings to estimate from`);
-  const m3 = estimateFrom(ctx.history);
+  let m3: number;
+  if (input.consumption !== undefined && input.consumption !== null) {
+    if (!Number.isInteger(input.consumption) || input.consumption < 0) throw new WaterError("The estimated m³ must be a whole number of 0 or more");
+    m3 = input.consumption;
+  } else {
+    if (ctx.history.length === 0) throw new WaterError(`${account.accountNo} has no actual readings to estimate from; enter the estimated m³`);
+    m3 = estimateFrom(ctx.history);
+  }
   const values = {
     meterId: ctx.meter.id,
     previousReading: ctx.previous,

@@ -10,12 +10,15 @@ export const CLASSIFICATIONS = ["RESIDENTIAL", "COMMERCIAL", "INSTITUTIONAL", "B
 export const ACCOUNT_STATUSES = ["PENDING", "ACTIVE", "DISCONNECTED", "CLOSED"] as const;
 export const APPLICATION_STATUSES = ["APPLIED", "INSPECTED", "APPROVED", "INSTALLED", "REJECTED"] as const;
 export const METER_STATUSES = ["IN_STOCK", "INSTALLED", "DEFECTIVE", "RETIRED"] as const;
+/** Who a tariff version applies to: everyone, or only members / non-members (separate rates). */
+export const TARIFF_APPLIES_TO = ["ALL", "MEMBER", "NON_MEMBER"] as const;
 
 export type CustomerType = (typeof CUSTOMER_TYPES)[number];
 export type Classification = (typeof CLASSIFICATIONS)[number];
 export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 export type ApplicationStatus = (typeof APPLICATION_STATUSES)[number];
 export type MeterStatus = (typeof METER_STATUSES)[number];
+export type TariffAppliesTo = (typeof TARIFF_APPLIES_TO)[number];
 /** Rate block: m³ from..to (inclusive; to null = no upper limit) at `rate` centavos per m³. */
 export type RateBlock = { from: number; to: number | null; rate: string };
 
@@ -187,6 +190,8 @@ export const waterRateSchedules = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     classification: text("classification").$type<Classification>().notNull(),
+    /** ALL, or a members-only / non-members-only version (PCMPC: members pay a lower minimum). */
+    appliesTo: text("applies_to").$type<TariffAppliesTo>().notNull().default("ALL"),
     effectiveFrom: date("effective_from", { mode: "string" }).notNull(),
     minCharge: money("min_charge").notNull(),
     minCubic: integer("min_cubic").notNull(),
@@ -196,8 +201,9 @@ export const waterRateSchedules = pgTable(
     ...createdColumns(),
   },
   (t) => [
-    unique("water_rate_schedules_version_uq").on(t.classification, t.effectiveFrom),
+    unique("water_rate_schedules_version_uq").on(t.classification, t.appliesTo, t.effectiveFrom),
     check("water_rate_schedules_class_chk", inList("classification", CLASSIFICATIONS)),
+    check("water_rate_schedules_applies_chk", inList("applies_to", TARIFF_APPLIES_TO)),
     check("water_rate_schedules_amounts_chk", sql`${t.minCharge} >= 0 AND ${t.minCubic} >= 0`),
   ],
 );

@@ -317,8 +317,10 @@ export function ReadingRow({ periodId, row, canEnter, canReview, open }: { perio
               aria-label={`Estimate ${row.accountNo}`}
               disabled={pending}
               onClick={() => {
-                const reason = window.prompt(`Why couldn't ${row.accountNo} be read? (an estimate is billed)`);
-                if (reason) run(() => enterEstimateAction({ periodId, accountId: row.accountId, reason }));
+                const m3 = window.prompt(`Estimated m³ for ${row.accountNo}${row.average === null ? "" : ` (3-month average: ${row.average} m³)`}`);
+                if (m3 === null || !/^\d+$/.test(m3.trim())) return;
+                const reason = window.prompt(`Why couldn't ${row.accountNo} be read?`);
+                if (reason) run(() => enterEstimateAction({ periodId, accountId: row.accountId, reason, consumption: Number(m3.trim()) }));
               }}
             >
               Estimate

@@ -135,7 +135,7 @@ export async function enterReadingAction(input: z.input<typeof readingSchema>): 
   }
 }
 
-const estimateSchema = z.object({ periodId: z.uuid(), accountId: z.uuid(), reason });
+const estimateSchema = z.object({ periodId: z.uuid(), accountId: z.uuid(), reason, consumption: z.number().int().min(0).max(100_000).nullable().optional() });
 export async function enterEstimateAction(input: z.input<typeof estimateSchema>): Promise<ActionResult<ReadingView>> {
   const actor = await requirePermission("water.review_readings");
   try {

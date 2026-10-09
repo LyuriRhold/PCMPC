@@ -10,7 +10,7 @@ import { isBusinessDate } from "@/lib/dates";
 import { parse as parseMoney } from "@/lib/money";
 import { members } from "@/modules/members/schema";
 import { addRateSchedule, RateError } from "./rates";
-import { CLASSIFICATIONS, waterCustomers } from "./schema";
+import { CLASSIFICATIONS, TARIFF_APPLIES_TO, waterCustomers } from "./schema";
 import {
   activateAccount,
   addMeter,
@@ -275,6 +275,7 @@ export async function moveAccountToRouteAction(input: z.input<typeof moveSchema>
 
 const scheduleSchema = z.object({
   classification,
+  appliesTo: z.enum(TARIFF_APPLIES_TO).default("ALL"),
   effectiveFrom: businessDate,
   minCharge: text(20),
   minCubic: z.number().int().min(0).max(1000),
@@ -290,6 +291,7 @@ export async function addRateScheduleAction(input: z.input<typeof scheduleSchema
         tx,
         {
           classification: data.classification,
+          appliesTo: data.appliesTo,
           effectiveFrom: data.effectiveFrom,
           minCharge: pesos(data.minCharge, "minimum charge"),
           minCubic: data.minCubic,

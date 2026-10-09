@@ -10,6 +10,7 @@ import { businessToday, formatDate } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPageAny } from "@/lib/page-guard";
 import { listFees, listRateSchedules } from "@/modules/water/queries";
+import { APPLIES_LABEL } from "@/modules/water/rates";
 import { RateScheduleForm } from "@/modules/water/ui/forms";
 import { WATER_STAFF } from "@/modules/water/ui/shared";
 
@@ -24,9 +25,10 @@ async function TariffsContent() {
   const inForce = new Set<string>();
   const seen = new Set<string>();
   for (const s of schedules) {
-    if (!seen.has(s.classification) && s.effectiveFrom <= today) {
+    const group = `${s.classification}:${s.appliesTo}`;
+    if (!seen.has(group) && s.effectiveFrom <= today) {
       inForce.add(s.id);
-      seen.add(s.classification);
+      seen.add(group);
     }
   }
 
@@ -35,7 +37,7 @@ async function TariffsContent() {
       <div>
         <h1 className="text-2xl font-semibold">Tariffs &amp; fees</h1>
         <p className="text-sm text-muted-foreground">
-          Rate versions are never edited: a new NWRB-approved tariff is added as a new version with its effective date. Bills use the version in force on the billing period&apos;s end date.
+          Rate versions are never edited: a new NWRB-approved tariff is added as a new version with its effective date. Bills use the version in force on the billing period&apos;s end date; a members-only or non-members-only version takes precedence over the one for all customers.
         </p>
       </div>
 
@@ -48,6 +50,7 @@ async function TariffsContent() {
             <TableHeader>
               <TableRow>
                 <TableHead>Classification</TableHead>
+                <TableHead>Applies to</TableHead>
                 <TableHead>Effective from</TableHead>
                 <TableHead className="text-right">Minimum charge</TableHead>
                 <TableHead>Blocks</TableHead>
@@ -58,7 +61,7 @@ async function TariffsContent() {
             <TableBody>
               {schedules.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
                     No rate schedules.
                   </TableCell>
                 </TableRow>
@@ -66,6 +69,7 @@ async function TariffsContent() {
               {schedules.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell className="text-xs">{s.classification}</TableCell>
+                  <TableCell className="text-xs">{APPLIES_LABEL[s.appliesTo]}</TableCell>
                   <TableCell className="tabular-nums">{formatDate(s.effectiveFrom)}</TableCell>
                   <TableCell className="text-right tabular-nums">
                     {format(s.minCharge)} <span className="text-xs text-muted-foreground">(first {s.minCubic} m³)</span>

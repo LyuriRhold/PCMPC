@@ -101,7 +101,7 @@ async function draftBill(
   input: { account: WaterAccount; customer: WaterCustomer; reading: WaterReading; period: string; rateDate: BusinessDate; billDate: BusinessDate; advanceAvailable: Money },
 ): Promise<DraftBill> {
   const { account, reading } = input;
-  const charge = await computeWaterCharge(account.classification, reading.consumption, input.rateDate, db);
+  const charge = await computeWaterCharge(account.classification, reading.consumption, input.rateDate, db, input.customer.type);
   const lines: DraftLine[] = charge.lines.map((l, i) => ({
     kind: i === 0 ? ("MIN_CHARGE" as const) : ("BLOCK" as const),
     description: l.label,

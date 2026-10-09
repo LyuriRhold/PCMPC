@@ -134,7 +134,7 @@ describe("billing (T6.3–T6.8)", () => {
     it("an estimate needs actual history; a reading of another zone's account is refused", async () => {
       const a = await acc({ initialReading: 0 });
       const periodId = await openPeriod(clerk, zoneId, "2026-10");
-      expect(await runAs(clerk, () => enterEstimateAction({ periodId, accountId: a.accountId, reason: "Dog" }))).toEqual({ ok: false, error: `${a.accountNo} has no actual readings to estimate from` });
+      expect(await runAs(clerk, () => enterEstimateAction({ periodId, accountId: a.accountId, reason: "Dog" }))).toEqual({ ok: false, error: `${a.accountNo} has no actual readings to estimate from; enter the estimated m³` });
       const z2 = await runAs(clerk, () => addZoneAction({ code: "z2", name: "Zone 2" }));
       if (!z2.ok) throw new Error(z2.error);
       const other = await openPeriod(clerk, z2.data.id, "2026-10");
@@ -238,7 +238,40 @@ describe("billing (T6.3–T6.8)", () => {
     });
   });
 
-  describe("PCMPC answers (Q-06.2, Q-06.5, Q-06.7)", () => {
+  describe("PCMPC answers (Q-06.2, Q-06.4, Q-06.5, Q-06.7, Q-06.9)", () => {
+    it("members can have their own tariff (minimum ₱160) while non-members keep the general one (₱200), even at 0 m³", async () => {
+      const { addRateScheduleAction } = await import("@/modules/water/actions");
+      const member = await acc({ kind: "MEMBER", initialReading: 0 });
+      const non = await acc({ initialReading: 0 });
+      const added = await runAs(manager, () =>
+        addRateScheduleAction({
+          classification: "RESIDENTIAL",
+          appliesTo: "MEMBER",
+          effectiveFrom: "2026-02-01",
+          minCharge: "160.00",
+          minCubic: 10,
+          blocks: [{ from: 11, to: null, rate: "25.00" }],
+          nwrbRef: "Board resolution (member rate)",
+        }),
+      );
+      expect(added.ok).toBe(true);
+      const periodId = await openPeriod(clerk, zoneId, "2026-10");
+      await readApproved(clerk, periodId, member.accountId, 0);
+      await readApproved(clerk, periodId, non.accountId, 0);
+      const preview = await runAs(clerk, () => previewBillingAction({ periodId }));
+      if (!preview.ok) throw new Error(preview.error);
+      const by = (id: string) => preview.data.bills.find((b) => b.accountId === id);
+      expect(by(member.accountId)?.currentAmount).toBe(String(P(160)));
+      expect(by(non.accountId)?.currentAmount).toBe(String(P(200)));
+    });
+
+    it("the clerk enters the estimated m³ (no default needed); without it the average is used", async () => {
+      const a = await acc({ initialReading: 0 });
+      const periodId = await openPeriod(clerk, zoneId, "2026-10");
+      const est = await runAs(clerk, () => enterEstimateAction({ periodId, accountId: a.accountId, reason: "Gate locked", consumption: 12 }));
+      expect(est.ok && { consumption: est.data.consumption, type: est.data.type, status: est.data.status }).toEqual({ consumption: 12, type: "ESTIMATED", status: "APPROVED" });
+    });
+
     it("bill numbers keep counting across years (they never restart)", async () => {
       await withTx((tx) => ensureFiscalYear(tx, 2027));
       const a = await acc({ initialReading: 0 });

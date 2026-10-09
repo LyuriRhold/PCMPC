@@ -124,8 +124,8 @@ async function up() {
         windowsHide: true,
       });
       child.unref();
-      if (!(await waitUntilReachable(30_000))) {
-        console.error(`PostgreSQL did not start within 30s. See ${logFile}`);
+      if (!(await waitUntilReachable(180_000))) {
+        console.error(`PostgreSQL did not start within 3 minutes (after an unclean shutdown it first checks its data files). See ${logFile}`);
         process.exit(1);
       }
       console.log(`portable PostgreSQL started on port ${port} (log: ${logFile})`);

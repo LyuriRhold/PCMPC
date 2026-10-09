@@ -1,5 +1,6 @@
 "use server";
 
+import "@/modules/plugins";
 import { z } from "zod";
 import { withTx } from "@/db/client";
 import { failFrom, ok, type ActionResult } from "@/lib/action-result";

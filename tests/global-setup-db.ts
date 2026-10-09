@@ -21,7 +21,7 @@ const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
 async function prepare(): Promise<void> {
   const url = testDatabaseUrl();
   if (!(await reachable(url))) {
-    execFileSync(process.execPath, ["scripts/db.mjs", "up"], { stdio: "inherit", timeout: 90_000 });
+    execFileSync(process.execPath, ["scripts/db.mjs", "up"], { stdio: "inherit", timeout: 200_000 });
   }
   const pool = new Pool({ connectionString: url, max: 1 });
   try {

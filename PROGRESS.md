@@ -311,6 +311,7 @@
 - 2026-10-09 · phase 06 · Members and non-members can have separate water tariffs (members-only / non-members-only versions take precedence over the version for all customers); seeded default stays one tariff for all (DOMAIN §2 water.member_rate_difference = none) · PCMPC: members' minimum ₱160, non-members' ₱200, entered by the admin
 - 2026-10-09 · phase 06 · Meters are read by hand on the printed route sheets and encoded in the office; the reading app (/read) stays available but is optional, so the real-phone offline exit check is waived · PCMPC answer
 - 2026-10-09 · phases 08+ · Only members may file loans or hold share capital (equity); non-members are water customers only · PCMPC answer, for the share-capital and loan phases
+- 2026-10-10 · settings · Coop settings rewritten for non-technical staff: plain labels and help per setting (src/modules/settings/presentation.ts), proper fields (pesos, %, Yes/No, readable choices, small forms and lists) instead of keys/codes/JSON, "To confirm" instead of CONFIRM, read-only settings explain where to change them (e.g. water rates on Tariffs & fees), plain error messages; water fee settings now update the fee the teller collects; "Last changed" shows only after a person changes a setting · requested by Rhold: used by non-IT staff
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)

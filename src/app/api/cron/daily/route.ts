@@ -1,5 +1,4 @@
 import { timingSafeEqual } from "node:crypto";
-import { connection } from "next/server";
 import { runDailyJobs } from "@/lib/cron";
 import { businessToday } from "@/lib/dates";
 import "@/modules/plugins";
@@ -10,7 +9,6 @@ import "@/modules/plugins";
  * a repeat call the same day skips jobs that already ran.
  */
 export async function GET(request: Request) {
-  await connection();
   const secret = process.env.CRON_SECRET;
   const given = request.headers.get("authorization") ?? "";
   const expected = `Bearer ${secret ?? ""}`;

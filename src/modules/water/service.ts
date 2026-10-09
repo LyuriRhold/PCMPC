@@ -18,6 +18,7 @@ import {
   waterMeters,
   waterRoutes,
   waterSeniorEligibility,
+  waterZones,
   type Classification,
   type MeterStatus,
   type WaterAccount,
@@ -460,4 +461,34 @@ export async function isSeniorEligible(accountId: string, date: BusinessDate, db
     )
     .limit(1);
   return !!r;
+}
+
+// ── Zones and routes (Phase 06: periods are per zone; readers are assigned per route) ──────
+
+const CODE_RE = /^[A-Z0-9][A-Z0-9-]{0,19}$/;
+
+export async function addZone(tx: Tx, input: { code: string; name: string }, actorId: string) {
+  const code = input.code.trim().toUpperCase();
+  if (!CODE_RE.test(code)) throw new WaterError("Zone code: letters, digits and dashes (up to 20)");
+  if (!input.name.trim()) throw new WaterError("Zone name is required");
+  const [dup] = await tx.select({ id: waterZones.id }).from(waterZones).where(eq(waterZones.code, code));
+  if (dup) throw new WaterError(`Zone ${code} already exists`);
+  const [z] = await tx.insert(waterZones).values({ code, name: input.name.trim(), createdBy: actorId }).returning();
+  if (!z) throw new Error("zone insert returned no row");
+  await audit(tx, { action: "water.zone_add", entity: "water_zone", entityId: String(z.id), after: { code, name: z.name }, userId: actorId });
+  return z;
+}
+
+export async function addRoute(tx: Tx, input: { zoneId: number; code: string; name: string }, actorId: string) {
+  const code = input.code.trim().toUpperCase();
+  if (!CODE_RE.test(code)) throw new WaterError("Route code: letters, digits and dashes (up to 20)");
+  if (!input.name.trim()) throw new WaterError("Route name is required");
+  const [zone] = await tx.select({ id: waterZones.id }).from(waterZones).where(eq(waterZones.id, input.zoneId));
+  if (!zone) throw new WaterError("Zone not found");
+  const [dup] = await tx.select({ id: waterRoutes.id }).from(waterRoutes).where(eq(waterRoutes.code, code));
+  if (dup) throw new WaterError(`Route ${code} already exists`);
+  const [r] = await tx.insert(waterRoutes).values({ zoneId: zone.id, code, name: input.name.trim(), createdBy: actorId }).returning();
+  if (!r) throw new Error("route insert returned no row");
+  await audit(tx, { action: "water.route_add", entity: "water_route", entityId: r.id, after: { code, name: r.name, zoneId: zone.id }, userId: actorId });
+  return r;
 }

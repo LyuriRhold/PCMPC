@@ -1,6 +1,6 @@
 import { withTx } from "@/db/client";
 import { runAs } from "@/lib/auth-guard";
-import { setClock } from "@/lib/dates";
+import { businessToday, setClock } from "@/lib/dates";
 import {
   addMeterAction,
   addSeniorEligibilityAction,
@@ -19,7 +19,8 @@ import { createCustomerAs, nonMember, payFees, setupWater } from "./phase05";
 export const OCT_7 = new Date("2026-10-07T01:00:00Z");
 
 let tellerId = "";
-let sessionOpen = false;
+/** Business day of the open teller session ("" = none); a new day gets a new teller and session. */
+let sessionDay = "";
 let serial = 0;
 let names = 0;
 
@@ -34,7 +35,7 @@ export async function setupBilling() {
     return { zoneId: zone!.id, routeId: route!.id };
   });
   tellerId = base.teller.id;
-  sessionOpen = false;
+  sessionDay = "";
   serial = 0;
   names = 0;
   return { ...base, reader, zoneId, routeId };
@@ -68,9 +69,10 @@ export async function activeAccount(o: AccountOpts) {
   if (!app.ok) throw new Error(app.error);
   const approved = await runAs(o.manager, () => approveApplicationAction({ applicationId: app.data.id }));
   if (!approved.ok) throw new Error(approved.error);
-  if (!sessionOpen) {
+  if (sessionDay !== businessToday()) {
+    if (sessionDay) tellerId = (await makeUser("TELLER", `teller_${businessToday().replaceAll("-", "")}`)).id;
     await openSessionAs(tellerId, "0");
-    sessionOpen = true;
+    sessionDay = businessToday();
   }
   await payFees(tellerId, customer.id, app.data.id, false);
   serial += 1;
@@ -89,7 +91,7 @@ export async function activeAccount(o: AccountOpts) {
 }
 
 /** Opens `period` (YYYY-MM) for the zone: reading window 1st–5th, bill date the 7th. */
-export async function openPeriod(userId: string, zoneId: string, period: string) {
+export async function openPeriod(userId: string, zoneId: number, period: string) {
   const r = await runAs(userId, () =>
     openPeriodAction({ period, zoneId, readingFrom: `${period}-01`, readingTo: `${period}-05`, billDate: `${period}-07` }),
   );

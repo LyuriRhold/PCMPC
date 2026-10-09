@@ -24,7 +24,7 @@ import { activeAccount, OCT_7, openPeriod, read, readApproved, setupBilling } fr
 let clerk = "";
 let manager = "";
 let reader = "";
-let zoneId = "";
+let zoneId = 0;
 let routeId = "";
 
 beforeEach(async () => {

@@ -3,6 +3,7 @@
 import "@/modules/plugins";
 import { z } from "zod";
 import { withTx } from "@/db/client";
+import { audit } from "@/lib/audit";
 import { failFrom, ok, type ActionResult } from "@/lib/action-result";
 import { requirePermission } from "@/lib/auth-guard";
 import { runDailyJobs } from "@/lib/cron";
@@ -80,7 +81,9 @@ export async function addProductionReadingAction(input: z.input<typeof productio
 
 /** Runs today's daily jobs now (e.g. when the server's cron is off); a job that already ran today is skipped. */
 export async function runDailyJobsAction(): Promise<ActionResult<Array<{ job: string; status: string; detail: string }>>> {
-  await requirePermission("water.bill");
-  const results = await runDailyJobs(businessToday());
+  const actor = await requirePermission("water.bill");
+  const date = businessToday();
+  const results = await runDailyJobs(date);
+  await withTx((tx) => audit(tx, { action: "cron.run_manual", entity: "job_runs", entityId: date, after: { results: results.map((r) => `${r.job}: ${r.status}`) }, userId: actor.id }));
   return ok(results.map((r) => ({ job: r.job, status: r.status, detail: r.error ?? (r.result ? JSON.stringify(r.result) : "") })));
 }

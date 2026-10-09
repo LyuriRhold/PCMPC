@@ -327,8 +327,8 @@ export async function disconnect(tx: Tx, input: { disconnectionId: string; readi
   await audit(tx, { action: "water.disconnect", entity: "water_disconnection", entityId: d.id, after: { accountNo: a.accountNo, reading: input.reading }, userId: actorId });
 }
 
-/** The reconnection-fee receipt item paid by the customer since the disconnection and not used yet. */
-async function unusedReconnectionFee(tx: Tx, customerId: string, since: BusinessDate): Promise<string | null> {
+/** The reconnection-fee receipt item paid for this account (since `since`) and not used yet. */
+export async function unusedReconnectionFee(tx: Db | Tx, accountId: string, since?: BusinessDate): Promise<string | null> {
   const rows = await tx
     .select({ id: receiptItems.id })
     .from(receiptItems)
@@ -337,11 +337,9 @@ async function unusedReconnectionFee(tx: Tx, customerId: string, since: Business
     .where(
       and(
         eq(receiptItems.type, "WATER_OTHER_FEE"),
-        eq(receiptItems.refId, "RECONNECTION"),
+        eq(receiptItems.refId, `RECONNECTION:${accountId}`),
         eq(receipts.status, "VALID"),
-        eq(receipts.payorType, "WATER_CUSTOMER"),
-        eq(receipts.payorId, customerId),
-        sql`${receipts.receiptDate} >= ${since}`,
+        since ? sql`${receipts.receiptDate} >= ${since}` : undefined,
         sql`${waterDisconnections.id} IS NULL`,
       ),
     )
@@ -358,7 +356,7 @@ export async function reconnect(tx: Tx, input: { disconnectionId: string; readin
   const a = await lockAccount(tx, d.accountId);
   const owed = await accountOutstanding(a.id, tx);
   if (owed > 0n) throw new WaterError(`Pay all arrears and penalties first: ${format(owed)} is unpaid on ${a.accountNo}`);
-  const fee = await unusedReconnectionFee(tx, a.customerId, d.disconnectedAt ?? d.noticeDate);
+  const fee = await unusedReconnectionFee(tx, a.id, d.disconnectedAt ?? d.noticeDate);
   if (!fee) {
     const [f] = await tx.select().from(waterFees).where(eq(waterFees.code, "RECONNECTION"));
     throw new WaterError(`Collect the reconnection fee${f ? ` (${format(f.amount)})` : ""} at the teller first`);

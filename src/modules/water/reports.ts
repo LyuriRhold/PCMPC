@@ -150,7 +150,7 @@ export async function customerSoa(customerId: string, db: Db | Tx = getDb()) {
     .from(waterBills)
     .innerJoin(waterAccounts, eq(waterAccounts.id, waterBills.accountId))
     .innerJoin(waterBillingPeriods, eq(waterBillingPeriods.id, waterBills.periodId))
-    .where(eq(waterBills.customerId, customerId));
+    .where(and(eq(waterBills.customerId, customerId), sql`${waterBills.status} <> 'CANCELLED'`));
   const ids = bills.map((b) => b.bill.id);
   const lines: Omit<SoaLine, "balance">[] = [];
   for (const { bill, accountNo, period } of bills) {
@@ -231,7 +231,7 @@ export async function consumptionByRoute(period: string, db: Db | Tx = getDb()) 
     .innerJoin(waterZones, eq(waterZones.id, waterBillingPeriods.zoneId))
     .innerJoin(waterAccounts, eq(waterAccounts.id, waterBills.accountId))
     .innerJoin(waterRoutes, eq(waterRoutes.id, waterAccounts.routeId))
-    .where(eq(waterBillingPeriods.period, period))
+    .where(and(eq(waterBillingPeriods.period, period), sql`${waterBills.status} <> 'CANCELLED'`))
     .groupBy(waterZones.code, waterRoutes.code)
     .orderBy(asc(waterZones.code), asc(waterRoutes.code));
   return { period, rows: rows.map((r) => ({ ...r, billed: BigInt(r.billed) })) };
@@ -341,7 +341,7 @@ export async function nrw(period: string, db: Db | Tx = getDb()) {
     .select({ m3: sql<number>`COALESCE(SUM(${waterBills.consumption}), 0)::int` })
     .from(waterBills)
     .innerJoin(waterBillingPeriods, eq(waterBillingPeriods.id, waterBills.periodId))
-    .where(eq(waterBillingPeriods.period, period));
+    .where(and(eq(waterBillingPeriods.period, period), sql`${waterBills.status} <> 'CANCELLED'`));
   const billed = b?.m3 ?? 0;
   return { period, produced: measured ? produced : null, billed, nrwM3: measured ? produced - billed : null, nrwPercent: measured && produced > 0 ? percent(produced - billed, produced) : null };
 }

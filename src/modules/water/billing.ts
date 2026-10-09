@@ -22,6 +22,7 @@ import {
   waterBillLines,
   waterBills,
   waterCustomers,
+  waterDisconnections,
   waterMeterInstallations,
   waterMeters,
   waterReadings,
@@ -395,6 +396,10 @@ export async function closeAccount(tx: Tx, input: { accountId: string; finalRead
     await tx.update(waterMeters).set({ status: "IN_STOCK" }).where(eq(waterMeters.id, inst.meterId));
   }
   await tx.update(waterAccounts).set({ status: "CLOSED", closedAt: today, updatedAt: now() }).where(eq(waterAccounts.id, account.id));
+  await tx
+    .update(waterDisconnections)
+    .set({ status: "CANCELLED", cancelReason: "Account closed" })
+    .where(and(eq(waterDisconnections.accountId, account.id), inArray(waterDisconnections.status, ["NOTICED", "DISCONNECTED"])));
   await tx.insert(waterAccountHistory).values({ accountId: account.id, event: "STATUS", fromValue: account.status, toValue: "CLOSED", ref: input.reason.trim(), at: now(), by: actorId, createdBy: actorId });
   await audit(tx, { action: "water.account_close", entity: "water_account", entityId: account.id, after: { accountNo: account.accountNo, finalReading: input.finalReading, billNo: bill?.billNo, amount: format(draft.currentAmount) }, userId: actorId });
   // Phase 07: the meter deposit offsets what's unpaid; the rest is refunded by DV.

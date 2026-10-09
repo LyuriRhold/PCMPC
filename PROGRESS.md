@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 07
+**Current phase:** 08
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -15,7 +15,7 @@
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ✅ | phase-04-cashiering · tag `phase-04` | rldejoya (reviewer agent: SoD test gap + drawer check fixed) · 2026-10-08 |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ✅ | phase-05-water-connections · tag `phase-05` | rldejoya (merged on request without the reviewer agent) · 2026-10-09 |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ✅ | phase-06-water-billing · tag `phase-06` | rldejoya (reviewer agent: memo cap + phone re-read fixed) · 2026-10-09 |
-| 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | 🟡 awaiting review | phase-07-water-collections | |
+| 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ✅ | phase-07-water-collections · tag `phase-07` | rldejoya (reviewer agent: reconnection-fee rules fixed) · 2026-10-09 |
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ⬜ | | |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ⬜ | | |
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ⬜ | | |
@@ -813,3 +813,16 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - `npm run e2e` is green: 11 tests, including A7.14.
 - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.
 - `npm run water:cycle` on the fresh seed data: OK (connect → read → bill 2 months → penalty ₱40.00 → notice DN-2026-00001 → disconnect → pay ₱840.00 + ₱300.00 fee → reconnect; bills PAID; SOA = GL AR = ₱0.00).
+
+**Review follow-ups (reviewer agent, 2026-10-09; merged at Rhold's request)**
+- **Fixed (must-fix):** the reconnection fee must be the exact fee amount, and it names the DISCONNECTED account it is for (`RECONNECTION:<account id>`). Only that account can use it, and only if paid after the disconnection. The teller sees it as a due. A fee already used for a reconnection can't be refunded by cancelling its receipt. Other water fees must also be paid in full. Tested.
+- **Fixed:**
+  - Cancelling a water bill payment is refused when the account was closed and settled, or when the receipt's advance was already used by a billing run (advances are used oldest first).
+  - Closing a disconnected account closes its disconnection record.
+  - The SOA, NRW and consumption reports skip cancelled bills.
+  - Running the daily jobs by hand is audited.
+  - Only `/api/cron/daily` bypasses the login redirect.
+- **Dropped** the unused `water_customer_advances.applied_bill_id` (migration 0016); bills record `advance_applied`.
+- **Not changed (noted):**
+  - The Excel export turns peso amounts into spreadsheet numbers. They are exact for any realistic amount and used for display only.
+  - `dv_lines.customer_id` makes cashiering reference water customers, the same way journal lines already do.

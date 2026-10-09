@@ -1,13 +1,13 @@
-import { and, asc, eq, inArray, like, or } from "drizzle-orm";
+import { and, asc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { receiptItems, receipts } from "@/modules/cashiering/schema";
 import type { Tx } from "@/db/client";
 import { normalizeName } from "@/lib/names";
 import { format } from "@/lib/money";
 import { CashieringError } from "@/modules/cashiering/builtins";
 import { registerPayorType, registerReceiptItem, type ItemInput, type ReceiptContext } from "@/modules/cashiering/registry";
 import { accountIdFor } from "@/modules/ledger/service";
-import { advanceBalance } from "./billing";
-import { allocate, billBalances, openBills, refreshBillStatuses, type Allocation } from "./collections";
-import { waterAccounts, waterApplications, waterCustomerAdvances, waterCustomers, waterPaymentAllocations } from "./schema";
+import { allocate, billBalances, openBills, refreshBillStatuses, unusedReconnectionFee, type Allocation } from "./collections";
+import { waterAccounts, waterApplications, waterBills, waterCustomerAdvances, waterCustomers, waterDisconnections, waterPaymentAllocations } from "./schema";
 import { customerName, feeByCode, feePaid } from "./service";
 
 /**
@@ -140,24 +140,83 @@ registerReceiptItem({
   type: "WATER_OTHER_FEE",
   label: "Other water fee",
   permission: "cash.receipt",
-  validate: async (tx, input) => {
-    if (!input.refId || input.refId === "CONNECTION" || input.refId === "METER_DEPOSIT") throw new CashieringError("Choose a water fee");
-    const fee = await feeByCode(input.refId, tx);
-    if (!fee) throw new CashieringError(`Unknown water fee ${input.refId}`);
+  // The reconnection fee of each DISCONNECTED account is offered as a due ("RECONNECTION:<account id>").
+  dues: async (db, payor) => {
+    if (payor.type !== "WATER_CUSTOMER" || !payor.id) return [];
+    const fee = await feeByCode("RECONNECTION", db);
+    if (!fee) return [];
+    const disconnected = await db.select().from(waterAccounts).where(and(eq(waterAccounts.customerId, payor.id), eq(waterAccounts.status, "DISCONNECTED")));
+    const out = [];
+    for (const a of disconnected) {
+      if (await unusedReconnectionFee(db, a.id)) continue;
+      out.push({ type: "WATER_OTHER_FEE", refId: `RECONNECTION:${a.id}`, description: `${fee.name} · ${a.accountNo}`, amount: fee.amount, payable: true });
+    }
+    return out;
   },
-  apply: async (tx, input) => {
-    const fee = await feeByCode(input.refId ?? "", tx);
-    if (!fee) throw new CashieringError(`Unknown water fee ${input.refId ?? ""}`);
+  validate: async (tx, input, ctx) => {
+    await otherFee(tx, input, ctx);
+  },
+  apply: async (tx, input, ctx) => {
+    const { fee, account } = await otherFee(tx, input, ctx);
     return {
       creditLines: [{ accountId: await accountIdFor(fee.mappingKey, tx), credit: input.amount }],
-      description: input.description ? `${fee.name}: ${input.description}` : fee.name,
-      refId: fee.code,
+      description: [fee.name, account?.accountNo, input.description].filter(Boolean).join(" · "),
+      refId: account ? `${fee.code}:${account.id}` : fee.code,
     };
   },
-  reverse: async () => {},
+  // A reconnection fee already used to reconnect the account can't be refunded by cancelling the receipt.
+  reverse: async (tx, item) => {
+    const [used] = await tx.select({ noticeNo: waterDisconnections.noticeNo }).from(waterDisconnections).where(eq(waterDisconnections.feeReceiptItemId, item.id));
+    if (used) throw new CashieringError(`This reconnection fee was used for ${used.noticeNo}; the receipt can't be cancelled`);
+  },
 });
 
+/**
+ * An other-fee item: `refId` is the fee code, or "RECONNECTION:<account id>" for a reconnection fee
+ * (it must name the payor's DISCONNECTED account). Fixed fees are paid in full.
+ */
+async function otherFee(tx: Tx, input: ItemInput, ctx: ReceiptContext) {
+  const [code, accountId] = (input.refId ?? "").split(":");
+  if (!code || code === "CONNECTION" || code === "METER_DEPOSIT") throw new CashieringError("Choose a water fee");
+  const fee = await feeByCode(code, tx);
+  if (!fee) throw new CashieringError(`Unknown water fee ${code}`);
+  if (input.amount !== fee.amount) throw new CashieringError(`${fee.name} is ${format(fee.amount)}`);
+  if (code !== "RECONNECTION") {
+    if (accountId) throw new CashieringError(`${fee.name} isn't tied to an account`);
+    return { fee, account: null };
+  }
+  if (!accountId) throw new CashieringError("Choose the disconnected account the reconnection fee is for");
+  const [account] = await tx.select().from(waterAccounts).where(eq(waterAccounts.id, accountId));
+  if (!account || ctx.payor.type !== "WATER_CUSTOMER" || account.customerId !== ctx.payor.id) throw new CashieringError("Collect the reconnection fee from the account's water customer");
+  if (account.status !== "DISCONNECTED") throw new CashieringError(`${account.accountNo} is ${account.status}; a reconnection fee is collected only for a disconnected account`);
+  return { fee, account };
+}
+
 // ── Water bill payments (Phase 07) ──────────────────────────────────────────────────────────
+
+/**
+ * Whether billing runs have already used (part of) the advance received on `sourceItemId`. Advances
+ * are used oldest first, so it was touched once the total applied exceeds the advances before it.
+ */
+async function advanceUsed(tx: Tx, customerId: string, sourceItemId: string): Promise<boolean> {
+  const received = await tx
+    .select({ itemId: waterCustomerAdvances.sourceReceiptItemId, amount: waterCustomerAdvances.amount })
+    .from(waterCustomerAdvances)
+    .innerJoin(receiptItems, eq(receiptItems.id, waterCustomerAdvances.sourceReceiptItemId))
+    .innerJoin(receipts, eq(receipts.id, receiptItems.receiptId))
+    .where(and(eq(waterCustomerAdvances.customerId, customerId), eq(receipts.status, "VALID")))
+    .orderBy(asc(waterCustomerAdvances.createdAt), asc(waterCustomerAdvances.id));
+  const [applied] = await tx
+    .select({ total: sql<string>`COALESCE(SUM(${waterBills.advanceApplied}), 0)` })
+    .from(waterBills)
+    .where(and(eq(waterBills.customerId, customerId), sql`${waterBills.status} <> 'CANCELLED'`));
+  let before = 0n;
+  for (const r of received) {
+    if (r.itemId === sourceItemId) break;
+    before += r.amount;
+  }
+  return BigInt(applied?.total ?? "0") > before;
+}
 
 /** Allocations made by earlier WATER_BILL items of the same receipt (not written yet). */
 const pendingByReceipt = new WeakMap<ReceiptContext, Allocation[]>();
@@ -227,8 +286,9 @@ registerReceiptItem({
   reverse: async (tx, item, ctx) => {
     const b = item.breakdown as BillPaymentBreakdown | null;
     if (!b) return;
-    const advance = BigInt(b.advance);
-    if (advance > 0n && (await advanceBalance(tx, b.customerId)) < advance) {
+    const [account] = await tx.select({ accountNo: waterAccounts.accountNo, status: waterAccounts.status }).from(waterAccounts).where(eq(waterAccounts.id, b.accountId));
+    if (account?.status === "CLOSED") throw new CashieringError(`${account.accountNo} is closed and its deposit settled; the payment can't be cancelled`);
+    if (BigInt(b.advance) > 0n && (await advanceUsed(tx, b.customerId, item.id))) {
       throw new CashieringError("The advance from this receipt was already applied to a bill; it can't be cancelled");
     }
     await refreshBillStatuses(tx, b.allocations.map((x) => x.billId), ctx.receiptId);

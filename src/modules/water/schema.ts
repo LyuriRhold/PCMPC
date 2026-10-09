@@ -545,7 +545,7 @@ export const waterPenalties = pgTable(
   (t) => [check("water_penalties_amount_chk", sql`${t.amount} > 0`)],
 );
 
-/** Overpayments kept as advance credits (Cr Customers' Advances); billing runs apply them. */
+/** Overpayments kept as advance credits (Cr Customers' Advances); billing runs apply them oldest first (see bills.advance_applied). */
 export const waterCustomerAdvances = pgTable(
   "water_customer_advances",
   {
@@ -557,7 +557,6 @@ export const waterCustomerAdvances = pgTable(
     sourceReceiptItemId: uuid("source_receipt_item_id")
       .notNull()
       .references(() => receiptItems.id),
-    appliedBillId: uuid("applied_bill_id").references(() => waterBills.id),
     ...createdColumns(),
   },
   (t) => [check("water_advances_amount_chk", sql`${t.amount} > 0`), index("water_advances_customer_idx").on(t.customerId)],

@@ -1,4 +1,7 @@
+import { and, eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
 import { runAs } from "@/lib/auth-guard";
+import { waterAccounts } from "@/modules/water/schema";
 import { businessToday, monthEnd, setClock } from "@/lib/dates";
 import { issueReceiptAction } from "@/modules/cashiering/actions";
 import { openPeriodAction, postBillingAction } from "@/modules/water/billing-actions";
@@ -66,16 +69,17 @@ export async function payWater(customerId: string, accountId: string, amount: st
   );
 }
 
-/** Pays the reconnection fee (WATER_OTHER_FEE "RECONNECTION"). */
+/** Pays the reconnection fee of the customer's disconnected account (WATER_OTHER_FEE "RECONNECTION:<account>"). */
 export async function payReconnectionFee(customerId: string) {
   const teller = await tellerToday();
+  const [account] = await getDb().select({ id: waterAccounts.id }).from(waterAccounts).where(and(eq(waterAccounts.customerId, customerId), eq(waterAccounts.status, "DISCONNECTED")));
   return runAs(teller, () =>
     issueReceiptAction({
       payor: { type: "WATER_CUSTOMER", id: customerId, name: "" },
       mode: "CASH",
       checkNo: null,
       birReceiptNo: `BIR-${Math.random().toString(36).slice(2, 10)}`,
-      items: [{ type: "WATER_OTHER_FEE", refId: "RECONNECTION", amount: "300.00", description: null }],
+      items: [{ type: "WATER_OTHER_FEE", refId: `RECONNECTION:${account?.id ?? ""}`, amount: "300.00", description: null }],
     }),
   );
 }

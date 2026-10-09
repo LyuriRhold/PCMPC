@@ -104,7 +104,7 @@ try {
   const owed = await accountOutstanding(account.id);
   const receipt = await pay(t2, customer.id, [
     { type: "WATER_BILL", refId: account.id, amount: owed },
-    { type: "WATER_OTHER_FEE", refId: "RECONNECTION", amount: 30000n },
+    { type: "WATER_OTHER_FEE", refId: `RECONNECTION:${account.id}`, amount: 30000n },
   ]);
   await withTx((tx) => reconnect(tx, { disconnectionId: notice.id, reading: 40 }, clerk));
   step(`paid ${format(owed)} + reconnection fee ₱300.00 on ${receipt}; reconnected`);

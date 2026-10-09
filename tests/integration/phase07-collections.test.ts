@@ -17,7 +17,7 @@ import { customerSoa, nrw, waterTiles } from "@/modules/water/reports";
 import { waterBills, waterDepositSettlements, waterPaymentAllocations, waterPenalties } from "@/modules/water/schema";
 import { acct, P } from "../helpers/phase03";
 import { activeAccount } from "../helpers/phase06";
-import { at, billMonth, payReconnectionFee, payWater, setupCollections, tellerToday } from "../helpers/phase07";
+import { at, billMonth, payWater, setupCollections, tellerToday } from "../helpers/phase07";
 
 let clerk = "";
 let manager = "";
@@ -200,17 +200,34 @@ describe("T7.4 disconnection", () => {
     expect(await runAs(clerk, () => cancelNoticeAction({ disconnectionId: n.data.id, reason: "Promised to pay" }))).toEqual({ ok: true, data: undefined });
   });
 
-  it("a reconnection fee is used once; a fee paid before the disconnection doesn't count", async () => {
+  it("the reconnection fee is the exact amount, for the disconnected account only, and a used fee can't be refunded", async () => {
     const a = await twoUnpaid();
-    expect((await payReconnectionFee(a.customer.id)).ok).toBe(true);
+    const teller = await tellerToday();
+    const fee = (refId: string, amount: string) =>
+      runAs(teller, () =>
+        issueReceiptAction({ payor: { type: "WATER_CUSTOMER", id: a.customer.id, name: "" }, mode: "CASH", checkNo: null, birReceiptNo: `BIR-F-${amount}`, items: [{ type: "WATER_OTHER_FEE", refId, amount, description: null }] }),
+      );
+    expect(await fee(`RECONNECTION:${a.accountId}`, "300.00")).toEqual({ ok: false, error: `${a.accountNo} is ACTIVE; a reconnection fee is collected only for a disconnected account` });
     const n = await runAs(clerk, () => issueNoticeAction({ accountId: a.accountId }));
     if (!n.ok) throw new Error(n.error);
     setClock(() => at("2026-11-09"));
     expect((await runAs(clerk, () => disconnectAction({ disconnectionId: n.data.id, reading: 40 }))).ok).toBe(true);
     expect((await payWater(a.customer.id, a.accountId, "800.00")).ok).toBe(true);
     expect(await runAs(clerk, () => reconnectAction({ disconnectionId: n.data.id, reading: 40 }))).toEqual({ ok: false, error: "Collect the reconnection fee (₱300.00) at the teller first" });
-    expect((await payReconnectionFee(a.customer.id)).ok).toBe(true);
+
+    const teller2 = await tellerToday();
+    const pay = (refId: string, amount: string) =>
+      runAs(teller2, () =>
+        issueReceiptAction({ payor: { type: "WATER_CUSTOMER", id: a.customer.id, name: "" }, mode: "CASH", checkNo: null, birReceiptNo: `BIR2-${amount}`, items: [{ type: "WATER_OTHER_FEE", refId, amount, description: null }] }),
+      );
+    expect(await pay(`RECONNECTION:${a.accountId}`, "1.00")).toEqual({ ok: false, error: "Reconnection fee is ₱300.00" });
+    expect(await pay("RECONNECTION", "300.00")).toEqual({ ok: false, error: "Choose the disconnected account the reconnection fee is for" });
+    const dues = await runAs(teller2, () => duesAction({ payor: { type: "WATER_CUSTOMER", id: a.customer.id, name: "" } }));
+    expect(dues.ok && dues.data.filter((d) => d.type === "WATER_OTHER_FEE").map((d) => [d.refId, d.amount])).toEqual([[`RECONNECTION:${a.accountId}`, String(P(300))]]);
+    const paid = await pay(`RECONNECTION:${a.accountId}`, "300.00");
+    if (!paid.ok) throw new Error(paid.error);
     expect((await runAs(clerk, () => reconnectAction({ disconnectionId: n.data.id, reading: 40 }))).ok).toBe(true);
+    expect(await runAs(manager, () => cancelReceiptAction({ receiptId: paid.data.id, reason: "Refund" }))).toEqual({ ok: false, error: expect.stringMatching(/was used for DN-2026-\d{5}; the receipt can't be cancelled/) });
   });
 });
 
@@ -230,6 +247,19 @@ describe("T7.5 closure settlement", () => {
     expect(await arFor(a.customer.id)).toBe(owedBefore + final - P(1000));
     expect(await getDb().select().from(disbursementVouchers)).toHaveLength(0);
     expect(await getDb().select().from(waterDepositSettlements)).toHaveLength(1);
+  });
+
+  it("a payment on an account that was later closed and settled can't be cancelled", async () => {
+    setClock(() => at("2026-10-01"));
+    const a = await acc();
+    await billMonth(clerk, zoneId, "2026-10", [[a.accountId, 18]]);
+    setClock(() => at("2026-11-03"));
+    const paid = await payWater(a.customer.id, a.accountId, "400.00");
+    if (!paid.ok) throw new Error(paid.error);
+    const p = await runAs(clerk, () => openPeriodAction({ period: "2026-11", zoneId, readingFrom: "2026-11-01", readingTo: "2026-11-25", billDate: "2026-11-30" }));
+    if (!p.ok) throw new Error(p.error);
+    expect((await runAs(clerk, () => closeAccountAction({ accountId: a.accountId, finalReading: 18, rollover: false, reason: "Moved" }))).ok).toBe(true);
+    expect(await runAs(manager, () => cancelReceiptAction({ receiptId: paid.data.id, reason: "Oops" }))).toEqual({ ok: false, error: `${a.accountNo} is closed and its deposit settled; the payment can't be cancelled` });
   });
 });
 

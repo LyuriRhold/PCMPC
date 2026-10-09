@@ -7,6 +7,7 @@ import { normalizeName } from "@/lib/names";
 import { next as nextNumber } from "@/lib/numbering";
 import { receiptItems, receipts } from "@/modules/cashiering/schema";
 import { onMemberStatusChange } from "@/modules/members/hooks";
+import { onSettingChange } from "@/modules/settings/service";
 import { members } from "@/modules/members/schema";
 import {
   waterAccountHistory,
@@ -491,4 +492,15 @@ export async function addRoute(tx: Tx, input: { zoneId: number; code: string; na
   if (!r) throw new Error("route insert returned no row");
   await audit(tx, { action: "water.route_add", entity: "water_route", entityId: r.id, after: { code, name: r.name, zoneId: zone.id }, userId: actorId });
   return r;
+}
+
+// A fee changed in Coop settings applies to the next collection at the teller (Phase 05 water_fees).
+for (const [key, code] of [
+  ["water.fee.connection", "CONNECTION"],
+  ["water.fee.meter_deposit", "METER_DEPOSIT"],
+  ["water.fee.reconnection", "RECONNECTION"],
+] as const) {
+  onSettingChange(key, async (tx, value) => {
+    await tx.update(waterFees).set({ amount: BigInt(String(value)) }).where(eq(waterFees.code, code));
+  });
 }

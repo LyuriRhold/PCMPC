@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fractionToPercent } from "@/lib/rates";
 
 /**
  * Every configurable setting: its zod schema (the stored JSON shape), its default and whether
@@ -8,12 +9,18 @@ import { z } from "zod";
  *   rate  → fraction as a decimal string ("0.02" = 2%)
  */
 
-const money = z.string().regex(/^\d+$/, "amount must be non-negative centavos as an integer string");
+const money = z.string().regex(/^\d+$/, "enter an amount in pesos, zero or more");
 const RATE_RE = /^\d+(\.\d+)?$/;
-const rate = z.string().regex(RATE_RE, "rate must be a decimal string such as 0.02");
+const rate = z.string().regex(RATE_RE, "enter a percentage, zero or more");
 const rateBetween = (min: string, max: string) =>
-  rate.refine((v) => !RATE_RE.test(v) || (cmp(v, min) >= 0 && cmp(v, max) <= 0), `must be between ${min} and ${max}`);
-const int = (min: number, max = 1_000_000) => z.number().int().min(min).max(max);
+  rate.refine((v) => !RATE_RE.test(v) || (cmp(v, min) >= 0 && cmp(v, max) <= 0), `must be between ${fractionToPercent(min)}% and ${fractionToPercent(max)}%`);
+const int = (min: number, max = 1_000_000) =>
+  z
+    .number({ error: "enter a whole number" })
+    .int("enter a whole number")
+    .min(min, `must be at least ${min}`)
+    .max(max, `must be at most ${max}`);
+
 const text = z.string().max(500);
 const numberFormat = z.string().regex(/\{0+\}/, "format needs a {000…} counter");
 

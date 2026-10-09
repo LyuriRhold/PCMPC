@@ -32,6 +32,10 @@ import {
   waterMeters,
   waterReadings,
 } from "@/modules/water/schema";
+import { ensureFiscalYear } from "@/modules/ledger/periods";
+import { updateSetting } from "@/modules/settings/service";
+import { billDetail, type BillDetail } from "@/modules/water/billing-queries";
+import { billsPdf, PAPER, type BillPaper } from "@/modules/water/pdf";
 import { billResponse, readingSheetResponse } from "@/modules/water/pdf-routes";
 import { makeUser, seedReference } from "../helpers/phase01";
 import { acct, P } from "../helpers/phase03";
@@ -231,6 +235,54 @@ describe("billing (T6.3–T6.8)", () => {
       const printed = await text(await billResponse(bill!.id));
       for (const s of ["WB-202610-000001", a.accountNo, "1,268", "18 m³", "₱400.00", "Oct 22, 2026", "TOTAL AMOUNT DUE"]) expect(printed).toContain(s);
       expect((await readingSheetResponse("not-a-uuid", null)).status).toBe(404);
+    });
+  });
+
+  describe("PCMPC answers (Q-06.2, Q-06.5, Q-06.7)", () => {
+    it("bill numbers keep counting across years (they never restart)", async () => {
+      await withTx((tx) => ensureFiscalYear(tx, 2027));
+      const a = await acc({ initialReading: 0 });
+      setClock(() => new Date("2026-12-07T01:00:00Z"));
+      const dec = await openPeriod(clerk, zoneId, "2026-12");
+      await readApproved(clerk, dec, a.accountId, 10);
+      expect((await runAs(clerk, () => postBillingAction({ periodId: dec }))).ok).toBe(true);
+      setClock(() => new Date("2027-01-07T01:00:00Z"));
+      const jan = await openPeriod(clerk, zoneId, "2027-01");
+      await readApproved(clerk, jan, a.accountId, 20);
+      expect((await runAs(clerk, () => postBillingAction({ periodId: jan }))).ok).toBe(true);
+      const nos = (await getDb().select({ no: waterBills.billNo }).from(waterBills)).map((b) => b.no).sort();
+      expect(nos).toEqual(["WB-202612-000001", "WB-202701-000002"]);
+    });
+
+    it("the senior discount can be switched off in settings", async () => {
+      const a = await acc({ initialReading: 0, senior: true });
+      await withTx((tx) => updateSetting(tx, "water.senior_discount", { enabled: false, rate: "0.05", maxM3: 30, appliesTo: "BASIC_CHARGE" }, manager));
+      const periodId = await openPeriod(clerk, zoneId, "2026-10");
+      await readApproved(clerk, periodId, a.accountId, 18);
+      const preview = await runAs(clerk, () => previewBillingAction({ periodId }));
+      expect(preview.ok && preview.data.bills[0]).toMatchObject({ seniorDiscount: "0", currentAmount: String(P(400)) });
+    });
+
+    it.each([
+      ["QUARTER_SHORT", 612, 792, 2],
+      ["QUARTER_LONG", 612, 936, 2],
+      ["HALF_SHORT", 612, 792, 3],
+      ["HALF_LONG", 612, 936, 3],
+    ] as const)("%s: bills print on %i × %i pt sheets, %i sheets for 5 bills", async (paper, w, h, sheets) => {
+      const accounts = [];
+      for (let i = 0; i < 5; i++) accounts.push(await acc({ initialReading: 0 }));
+      const periodId = await openPeriod(clerk, zoneId, "2026-10");
+      for (const a of accounts) await readApproved(clerk, periodId, a.accountId, 18);
+      await runAs(clerk, () => postBillingAction({ periodId }));
+      const bills = await getDb().select({ id: waterBills.id }).from(waterBills);
+      const details = (await Promise.all(bills.map((b) => billDetail(b.id)))) as BillDetail[];
+      const pdf = await getDocumentProxy(new Uint8Array(await billsPdf(details, "PCMPC", "Bills", paper as BillPaper)));
+      expect(pdf.numPages).toBe(sheets);
+      const view = (await pdf.getPage(1)).getViewport({ scale: 1 });
+      expect([view.width, view.height]).toEqual([w, h]);
+      expect(PAPER[paper].cols * PAPER[paper].rows).toBe(paper.startsWith("QUARTER") ? 4 : 2);
+      const text = (await extractText(pdf, { mergePages: true })).text;
+      expect(text.match(/TOTAL AMOUNT DUE/g)).toHaveLength(5);
     });
   });
 

@@ -5,9 +5,8 @@ import { format } from "@/lib/money";
 import type { BillDetail, GridRow } from "./billing-queries";
 
 /**
- * Printed documents (PHASE-06 T6.6): reading sheets per route (A4 landscape) and bills, one per
- * A5 page (CONFIRM: the bill layout and paper size are PCMPC inputs). DejaVu Sans is embedded so
- * the peso sign prints.
+ * Printed documents (PHASE-06 T6.6): reading sheets per route (A4 landscape) and bills on ¼ or
+ * ½-lengthwise short/long bond (water.bill_paper). DejaVu Sans is embedded so the peso sign prints.
  */
 
 const fonts = path.join(process.cwd(), "src", "assets", "fonts");
@@ -112,58 +111,70 @@ export async function readingSheetPdf(d: SheetInput): Promise<Buffer> {
 
 // ── Bills ──
 
-function Bill({ b, coopName }: { b: BillDetail; coopName: string }) {
+export type BillPaper = "QUARTER_SHORT" | "QUARTER_LONG" | "HALF_SHORT" | "HALF_LONG";
+
+/**
+ * Bills print on short (8.5 × 11 in) or long (8.5 × 13 in) bond, cut into quarters (2 × 2, four
+ * bills per sheet) or halves lengthwise (two side by side), per the water.bill_paper setting.
+ */
+export const PAPER: Record<BillPaper, { sheet: [number, number]; cols: number; rows: number; fontSize: number }> = {
+  QUARTER_SHORT: { sheet: [612, 792], cols: 2, rows: 2, fontSize: 6 },
+  QUARTER_LONG: { sheet: [612, 936], cols: 2, rows: 2, fontSize: 6.5 },
+  HALF_SHORT: { sheet: [612, 792], cols: 2, rows: 1, fontSize: 7.5 },
+  HALF_LONG: { sheet: [612, 936], cols: 2, rows: 1, fontSize: 8 },
+};
+
+function Bill({ b, coopName, fontSize }: { b: BillDetail; coopName: string; fontSize: number }) {
   const r = b.reading;
+  const big = { fontSize: fontSize + 2, fontWeight: "bold" as const };
+  const gap = { marginTop: fontSize * 0.6 };
   return (
-    <View style={{ marginBottom: 12 }} wrap={false}>
+    <View style={{ fontSize }}>
       <View style={s.between}>
-        <View>
-          <Text style={s.h1}>{coopName}</Text>
+        <View style={{ width: "58%" }}>
+          <Text style={big}>{coopName}</Text>
           <Text>Water Service Bill{b.bill.isFinal ? " (FINAL)" : ""}</Text>
         </View>
-        <View>
-          <Text style={s.right}>Bill no. {b.bill.billNo}</Text>
+        <View style={{ width: "42%" }}>
+          <Text style={s.right}>{b.bill.billNo}</Text>
           <Text style={s.right}>Period {b.period.period}</Text>
-          <Text style={s.right}>Bill date {formatDate(b.bill.billDate)}</Text>
+          <Text style={s.right}>Billed {formatDate(b.bill.billDate)}</Text>
         </View>
       </View>
 
-      <View style={[s.box, s.between]}>
-        <View style={{ width: "60%" }}>
-          <Text style={{ fontWeight: "bold" }}>{b.customer.name}</Text>
-          <Text>{b.account.serviceAddress}</Text>
-          <Text>
-            Account {b.account.accountNo} · {b.bill.classification} · {b.bill.customerType === "MEMBER" ? "Member" : "Non-member"}
-          </Text>
-          <Text>
-            Route {b.route.code} #{b.account.sequenceNo} · Meter {b.meterSerial}
-          </Text>
-        </View>
-        <View style={{ width: "38%" }}>
-          <View style={s.between}>
-            <Text>Previous reading</Text>
-            <Text>{n(r.previousReading)}</Text>
-          </View>
-          <View style={s.between}>
-            <Text>Present reading</Text>
-            <Text>{r.presentReading === null ? "Estimated" : n(r.presentReading)}</Text>
-          </View>
-          <View style={s.between}>
-            <Text style={{ fontWeight: "bold" }}>Consumption</Text>
-            <Text style={{ fontWeight: "bold" }}>{n(b.bill.consumption)} m³</Text>
-          </View>
-          {r.type !== "ACTUAL" ? <Text style={s.muted}>{r.type === "ESTIMATED" ? "Estimated: the meter couldn't be read" : r.type === "METER_CHANGE" ? "Meter changed this period" : "Final reading"}</Text> : null}
-          {r.remarks && r.type !== "ACTUAL" ? <Text style={s.muted}>{r.remarks}</Text> : null}
-        </View>
+      <View style={[{ borderWidth: 0.75, padding: 3 }, gap]}>
+        <Text style={{ fontWeight: "bold" }}>{b.customer.name}</Text>
+        <Text>{b.account.serviceAddress}</Text>
+        <Text>
+          {b.account.accountNo} · {b.bill.classification} · {b.bill.customerType === "MEMBER" ? "Member" : "Non-member"}
+        </Text>
+        <Text>
+          Route {b.route.code} #{b.account.sequenceNo} · Meter {b.meterSerial}
+        </Text>
       </View>
 
-      <Text style={s.h2}>Charges</Text>
-      {b.lines.map((l) => (
-        <View key={l.id} style={s.between}>
-          <Text>{l.description}</Text>
-          <Text>{format(l.amount)}</Text>
-        </View>
-      ))}
+      <View style={[s.between, gap]}>
+        <Text>Previous reading</Text>
+        <Text>{n(r.previousReading)}</Text>
+      </View>
+      <View style={s.between}>
+        <Text>Present reading</Text>
+        <Text>{r.presentReading === null ? "Estimated" : n(r.presentReading)}</Text>
+      </View>
+      <View style={s.between}>
+        <Text style={{ fontWeight: "bold" }}>Consumption</Text>
+        <Text style={{ fontWeight: "bold" }}>{n(b.bill.consumption)} m³</Text>
+      </View>
+      {r.type !== "ACTUAL" ? <Text style={s.muted}>{r.type === "ESTIMATED" ? "Estimated: the meter couldn't be read" : r.type === "METER_CHANGE" ? "Meter changed this period" : "Final reading"}</Text> : null}
+
+      <View style={gap}>
+        {b.lines.map((l) => (
+          <View key={l.id} style={s.between}>
+            <Text style={{ width: "72%" }}>{l.description}</Text>
+            <Text>{format(l.amount)}</Text>
+          </View>
+        ))}
+      </View>
       <View style={[s.between, { borderTopWidth: 0.5, marginTop: 2, paddingTop: 2 }]}>
         <Text>Current charges</Text>
         <Text>{format(b.bill.currentAmount - b.bill.advanceApplied)}</Text>
@@ -172,23 +183,20 @@ function Bill({ b, coopName }: { b: BillDetail; coopName: string }) {
         <Text>Previous balance</Text>
         <Text>{format(b.bill.previousBalance)}</Text>
       </View>
-      <View style={[s.box, s.between]}>
-        <Text style={s.total}>TOTAL AMOUNT DUE</Text>
-        <Text style={s.total}>{format(b.bill.totalAmountDue)}</Text>
+      <View style={[s.between, { borderWidth: 1, padding: 3, marginTop: 3 }]}>
+        <Text style={big}>TOTAL AMOUNT DUE</Text>
+        <Text style={big}>{format(b.bill.totalAmountDue)}</Text>
       </View>
-      <View style={[s.between, { marginTop: 2 }]}>
-        <Text style={{ fontWeight: "bold" }}>Due date: {formatDate(b.bill.dueDate)}</Text>
-        <Text style={s.muted}>Please pay on or before the due date.</Text>
-      </View>
+      <Text style={[{ fontWeight: "bold" }, { marginTop: 2 }]}>Due date: {formatDate(b.bill.dueDate)}</Text>
 
-      <Text style={s.h2}>Consumption history (m³)</Text>
-      <View style={{ flexDirection: "row" }}>
+      <Text style={[{ fontWeight: "bold" }, gap]}>Consumption history (m³)</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
         {[...b.history].reverse().map((h) => (
-          <View key={h.period} style={{ width: "16%", borderWidth: 0.5, padding: 2, marginRight: 2 }}>
+          <View key={h.period} style={{ width: "33%", borderWidth: 0.5, padding: 1.5 }}>
             <Text style={s.muted}>{h.period}</Text>
             <Text>
               {n(h.consumption)}
-              {h.type === "ESTIMATED" ? " (est.)" : ""}
+              {h.type === "ESTIMATED" ? " est." : ""}
             </Text>
           </View>
         ))}
@@ -197,12 +205,23 @@ function Bill({ b, coopName }: { b: BillDetail; coopName: string }) {
   );
 }
 
-export async function billsPdf(bills: BillDetail[], coopName: string, title: string): Promise<Buffer> {
+export async function billsPdf(bills: BillDetail[], coopName: string, title: string, paper: BillPaper = "QUARTER_SHORT"): Promise<Buffer> {
+  const p = PAPER[paper];
+  const perSheet = p.cols * p.rows;
+  const sheets: BillDetail[][] = [];
+  for (let i = 0; i < bills.length; i += perSheet) sheets.push(bills.slice(i, i + perSheet));
+  const [w, h] = p.sheet;
+  const slot = { width: w / p.cols, height: h / p.rows };
   return renderToBuffer(
     <Document title={title} author={coopName}>
-      {bills.map((b) => (
-        <Page key={b.bill.id} size="A5" style={s.page}>
-          <Bill b={b} coopName={coopName} />
+      {sheets.map((sheet, i) => (
+        <Page key={i} size={{ width: w, height: h }} style={{ fontFamily: "DejaVu", flexDirection: "row", flexWrap: "wrap" }}>
+          {sheet.map((b) => (
+            // Dashed edges are the cut lines.
+            <View key={b.bill.id} style={{ width: slot.width, height: slot.height, padding: 14, borderWidth: 0.5, borderStyle: "dashed", borderColor: "#999" }}>
+              <Bill b={b} coopName={coopName} fontSize={p.fontSize} />
+            </View>
+          ))}
         </Page>
       ))}
     </Document>,

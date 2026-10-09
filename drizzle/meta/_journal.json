@@ -85,6 +85,13 @@
       "when": 1791517541476,
       "tag": "0011_water_bills_immutable",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791526054302,
+      "tag": "0012_water_bill_numbers_continuous",
+      "breakpoints": true
     }
   ]
 }

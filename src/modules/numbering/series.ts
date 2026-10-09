@@ -18,7 +18,7 @@ export const NUMBER_SERIES: Array<{ code: string; format: string; resetsYearly: 
   { code: "WC", format: "WC-{000000}", resetsYearly: false },
   { code: "WA", format: "WA-{000000}", resetsYearly: false },
   { code: "WAPP", format: "WAPP-{YYYY}-{00000}", resetsYearly: true },
-  { code: "WB", format: "WB-{YYYYMM}-{000000}", resetsYearly: true },
+  { code: "WB", format: "WB-{YYYYMM}-{000000}", resetsYearly: false },
   { code: "DN", format: "DN-{YYYY}-{00000}", resetsYearly: true },
   { code: "SA", format: "SA-{000000}", resetsYearly: false },
   { code: "TD", format: "TD-{000000}", resetsYearly: false },

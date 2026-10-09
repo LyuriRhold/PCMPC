@@ -113,7 +113,7 @@ async function draftBill(
 
   let seniorDiscount = 0n;
   const senior = await getSetting("water.senior_discount", db);
-  if (account.classification === "RESIDENTIAL" && reading.consumption <= senior.maxM3 && (await isSeniorEligible(account.id, input.billDate, db))) {
+  if (senior.enabled && account.classification === "RESIDENTIAL" && reading.consumption <= senior.maxM3 && (await isSeniorEligible(account.id, input.billDate, db))) {
     seniorDiscount = mulRate(basicCharge, senior.rate, "HALF_UP");
     if (seniorDiscount > 0n) lines.push({ kind: "SENIOR_DISCOUNT", description: `Senior-citizen discount (${Number(senior.rate) * 100}% of basic charge)`, qty: null, rate: null, amount: -seniorDiscount });
   }

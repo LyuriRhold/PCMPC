@@ -50,7 +50,7 @@ export async function billsResponse(periodId: string, routeId: string | null): P
   if (bills.length === 0) return new Response("No bills", { status: 404 });
   const details = (await Promise.all(bills.map((b) => billDetail(b.id)))).filter((d): d is BillDetail => !!d);
   const period = details[0]!.period.period;
-  const body = await billsPdf(details, await getSetting("coop.name"), `Water bills ${period}`);
+  const body = await billsPdf(details, await getSetting("coop.name"), `Water bills ${period}`, await getSetting("water.bill_paper"));
   return pdf(body, `water-bills-${period}${routeId ? `-${details[0]!.route.code}` : ""}.pdf`);
 }
 
@@ -58,5 +58,5 @@ export async function billResponse(billId: string): Promise<Response> {
   if (!UUID.test(billId)) return new Response("Not found", { status: 404 });
   const d = await billDetail(billId);
   if (!d) return new Response("Not found", { status: 404 });
-  return pdf(await billsPdf([d], await getSetting("coop.name"), `Water bill ${d.bill.billNo}`), `${d.bill.billNo}.pdf`);
+  return pdf(await billsPdf([d], await getSetting("coop.name"), `Water bill ${d.bill.billNo}`, await getSetting("water.bill_paper")), `${d.bill.billNo}.pdf`);
 }

@@ -1,7 +1,7 @@
 /** Test-DB guard shared by the Vitest DB setup files. */
 
-/** Vitest workers for DB tests; each worker gets its own copy of the test database. */
-export const DB_WORKERS = 4;
+/** Vitest workers for DB tests (set in vitest.config.mts); each has its own copy of the test database. */
+export const DB_WORKERS = Number(process.env.VITEST_DB_WORKERS ?? "4");
 
 export function testDatabaseUrl(): string {
   const url = process.env.DATABASE_URL_TEST;

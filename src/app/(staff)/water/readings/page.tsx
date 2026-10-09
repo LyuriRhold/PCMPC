@@ -6,7 +6,8 @@ import { PageLoading } from "@/components/page-loading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { can } from "@/lib/auth-guard";
-import { businessToday, formatDate } from "@/lib/dates";
+import { businessToday, formatDate, monthEnd } from "@/lib/dates";
+import { getSetting } from "@/modules/settings/service";
 import { guardPageAny } from "@/lib/page-guard";
 import { listPeriods, listZones } from "@/modules/water/billing-queries";
 import { OpenPeriodForm } from "@/modules/water/ui/billing-forms";
@@ -17,8 +18,12 @@ export const metadata: Metadata = { title: "Meter readings · PCMPC MIS" };
 async function ReadingsContent() {
   const access = await guardPageAny(["water.bill", "water.review_readings"]);
   if (!access.ok) return <Forbidden permission={access.permission} />;
-  const [periods, zones] = await Promise.all([listPeriods(), listZones()]);
+  const [periods, zones, schedule] = await Promise.all([listPeriods(), listZones(), getSetting("water.reading_schedule")]);
   const today = businessToday();
+  // Pre-fill from the admin's schedule (Admin › Settings › Water); a day past the month's end = its last day.
+  const month = today.slice(0, 7);
+  const last = Number(monthEnd(`${month}-01`).slice(8));
+  const day = (d: number) => `${month}-${String(Math.min(d, last)).padStart(2, "0")}`;
 
   return (
     <div className="flex flex-col gap-5">
@@ -35,7 +40,7 @@ async function ReadingsContent() {
             <CardTitle>Open a billing period</CardTitle>
           </CardHeader>
           <CardContent>
-            <OpenPeriodForm zones={zones} defaults={{ period: today.slice(0, 7), readingFrom: `${today.slice(0, 7)}-01`, readingTo: today, billDate: today }} />
+            <OpenPeriodForm zones={zones} defaults={{ period: month, readingFrom: day(schedule.readingStartDay), readingTo: day(schedule.readingEndDay), billDate: day(schedule.billDay) }} />
           </CardContent>
         </Card>
       ) : null}

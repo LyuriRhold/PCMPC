@@ -115,7 +115,7 @@
 - [x] Exit checks passed (all automated checks green; the real-phone offline test was waived: PCMPC reads meters by hand and encodes them in the office)
 
 ### Phase 07 — Water: Collections, Penalties, Disconnection & Water Reports
-- [ ] T7.1 Schema + migrations
+- [x] T7.1 Schema + migrations
 - [ ] T7.2 `WATER_BILL` teller item (dues, allocation, advances, reverse)
 - [ ] T7.3 Daily cron runner + penalty job
 - [ ] T7.4 Disconnection list, notices, disconnect/reconnect orders, reconnection fee rule

@@ -365,7 +365,7 @@ async function countedRows(db: Db | Tx, memberId: string, to?: BusinessDate) {
     .leftJoin(receiptItems, eq(receiptItems.id, shareTransactions.receiptItemId))
     .leftJoin(receipts, eq(receipts.id, receiptItems.receiptId))
     .where(and(eq(shareTransactions.memberId, memberId), or(sql`${shareTransactions.receiptItemId} IS NULL`, eq(receipts.status, "VALID")), to ? lte(shareTransactions.txnDate, to) : undefined))
-    .orderBy(asc(shareTransactions.txnDate), asc(shareTransactions.createdAt), asc(shareTransactions.id));
+    .orderBy(asc(shareTransactions.txnDate), asc(shareTransactions.seq));
 }
 
 export type LedgerRow = {

@@ -50,6 +50,8 @@ export const shareTransactions = pgTable(
   "share_transactions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** Insertion order: rows written in one transaction share created_at. */
+    seq: bigint("seq", { mode: "number" }).generatedAlwaysAsIdentity(),
     memberId: uuid("member_id")
       .notNull()
       .references(() => members.id),

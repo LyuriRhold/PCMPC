@@ -108,7 +108,7 @@
 - [ ] T6.3 Periods + office reading-entry grid + flag review queue
 - [ ] T6.4 Mobile reading PWA with offline queue + idempotent sync
 - [ ] T6.5 Billing engine + billing run (preview → post) + GL + advances
-- [ ] T6.6 PDF printing: reading sheets and bills per route
+- [x] T6.6 PDF printing: reading sheets and bills per route
 - [x] T6.7 Credit/debit memos with SoD
 - [x] T6.8 Final reading + final bill on account closure (deposit refund handled in Phase 07)
 - [x] Acceptance tests written first (tests/acceptance/phase-06.test.ts)

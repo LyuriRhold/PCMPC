@@ -1,4 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
+import { extractText, getDocumentProxy } from "unpdf";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb, withTx } from "@/db/client";
 import { runAs, SodError } from "@/lib/auth-guard";
@@ -31,6 +32,7 @@ import {
   waterMeters,
   waterReadings,
 } from "@/modules/water/schema";
+import { billResponse, readingSheetResponse } from "@/modules/water/pdf-routes";
 import { makeUser, seedReference } from "../helpers/phase01";
 import { acct, P } from "../helpers/phase03";
 import { activeAccount, openPeriod, read, readApproved, setupBilling } from "../helpers/phase06";
@@ -205,6 +207,30 @@ describe("billing (T6.3–T6.8)", () => {
       await expect(getDb().execute(sql`DELETE FROM water_bills WHERE id = ${bill!.id}`)).rejects.toThrow();
       await expect(getDb().execute(sql`UPDATE water_bill_lines SET amount = 1 WHERE bill_id = ${bill!.id}`)).rejects.toThrow();
       await getDb().execute(sql`UPDATE water_bills SET status = 'PARTIAL' WHERE id = ${bill!.id}`);
+    });
+  });
+
+  describe("T6.6 PDFs", () => {
+    const text = async (res: Response) => {
+      expect(res.headers.get("content-type")).toBe("application/pdf");
+      const pdf = await getDocumentProxy(new Uint8Array(await res.arrayBuffer()));
+      return (await extractText(pdf, { mergePages: true })).text;
+    };
+
+    it("the reading sheet lists the route in order with previous readings; the bill shows the charge in pesos", async () => {
+      const a = await acc({ initialReading: 1250 });
+      const periodId = await openPeriod(clerk, zoneId, "2026-10");
+      const sheet = await text(await readingSheetResponse(periodId, routeId));
+      expect(sheet).toContain(a.accountNo);
+      expect(sheet).toContain("1,250");
+      expect(sheet).toContain("Route Z1-R1");
+
+      await readApproved(clerk, periodId, a.accountId, 1268);
+      await runAs(clerk, () => postBillingAction({ periodId }));
+      const [bill] = await getDb().select().from(waterBills).where(eq(waterBills.accountId, a.accountId));
+      const printed = await text(await billResponse(bill!.id));
+      for (const s of ["WB-202610-000001", a.accountNo, "1,268", "18 m³", "₱400.00", "Oct 22, 2026", "TOTAL AMOUNT DUE"]) expect(printed).toContain(s);
+      expect((await readingSheetResponse("not-a-uuid", null)).status).toBe(404);
     });
   });
 

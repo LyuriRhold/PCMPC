@@ -48,6 +48,7 @@ code,name,type,normal_balance,parent_code,postable,sca_code,mapping_keys
 42140,Penalty Income - Water,REVENUE,CR,42000,true,,penalty_income_water
 42150,Water Revenue Adjustments,REVENUE,DR,42000,true,,water_revenue_adjustments
 42160,Senior Citizen Discounts - Water,REVENUE,DR,42000,true,,senior_citizen_discounts
+42170,Reconnection Fee Income - Water,REVENUE,CR,42000,true,,water_reconnection_fee_income
 43000,Income from Store,REVENUE,CR,4,false,,
 43110,Sales,REVENUE,CR,43000,true,,sales
 43120,Sales Returns and Allowances,REVENUE,DR,43000,true,,sales_returns

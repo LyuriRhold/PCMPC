@@ -105,6 +105,7 @@ export function ReceiptBuilder({
   const [matches, setMatches] = useState<Match[]>([]);
   const [payor, setPayor] = useState<Match | null>(null);
   const [dues, setDues] = useState<Array<{ type: string; refId: string | null; description: string; amount: string; payable: boolean }>>([]);
+  const [loadingDues, setLoadingDues] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [nextKey, setNextKey] = useState(1);
   const [income, setIncome] = useState(incomeItems[0]?.code ?? "");
@@ -116,6 +117,8 @@ export function ReceiptBuilder({
 
   const freeText = payorTypes.find((p) => p.type === type)?.freeText ?? false;
   const total = cart.reduce((s, c) => s + (centavos(c.amount) ?? 0n), 0n);
+  // A due already in the cart is not offered again (remove it from the cart to get it back).
+  const openDues = dues.filter((d) => !cart.some((c) => c.type === d.type && c.refId === d.refId));
 
   const add = (item: Omit<CartItem, "key">) => {
     setCart((c) => [...c, { ...item, key: nextKey }]);
@@ -134,9 +137,14 @@ export function ReceiptBuilder({
   function choose(m: Match) {
     setPayor(m);
     setMatches([]);
+    setLoadingDues(true);
     startTransition(async () => {
-      const r = await duesAction({ payor: { type, id: m.id, name: m.name } });
-      setDues(r.ok ? r.data : []);
+      try {
+        const r = await duesAction({ payor: { type, id: m.id, name: m.name } });
+        setDues(r.ok ? r.data : []);
+      } finally {
+        setLoadingDues(false);
+      }
     });
   }
 
@@ -235,10 +243,10 @@ export function ReceiptBuilder({
         )}
       </div>
 
-      {dues.length ? (
+      {openDues.length ? (
         <div className="flex flex-col gap-1">
           <p className="text-xs font-medium text-muted-foreground">What this payor owes</p>
-          {dues.map((d, i) => (
+          {openDues.map((d, i) => (
             <div key={`${d.type}-${d.refId}-${i}`} className="flex items-center justify-between rounded border px-3 py-1.5 text-sm">
               <span>{d.description}</span>
               <span className="flex items-center gap-2">
@@ -254,7 +262,10 @@ export function ReceiptBuilder({
         </div>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-[14rem_9rem_1fr_auto] sm:items-end">
+      {loadingDues ? <p className="text-sm text-muted-foreground">Looking up what this payor owes…</p> : null}
+
+      {/* Manual items appear once the payor's dues are loaded, so the dues list is always above them. */}
+      <div className={`grid gap-3 sm:grid-cols-[14rem_9rem_1fr_auto] sm:items-end ${loadingDues ? "hidden" : ""}`}>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="incomeItem">Income item</Label>
           <select id="incomeItem" className={selectClass} value={income} onChange={(e) => setIncome(e.target.value)}>

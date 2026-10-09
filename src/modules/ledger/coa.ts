@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { eq, inArray } from "drizzle-orm";
 import type { Tx } from "@/db/client";
 import { accountMappings, accounts, ACCOUNT_TYPES, NORMAL_BALANCES, type AccountType, type NormalBalance } from "./schema";
-import { MEMBER_SUBSIDIARY_KEYS, PROVISIONAL_COA, REQUIRED_MAPPING_KEYS, type CoaRow } from "./provisional-coa";
+import { CUSTOMER_SUBSIDIARY_KEYS, MEMBER_SUBSIDIARY_KEYS, PROVISIONAL_COA, REQUIRED_MAPPING_KEYS, type CoaRow } from "./provisional-coa";
 
 export class CoaError extends Error {
   override name = "CoaError";
@@ -124,7 +124,12 @@ export async function importCoa(tx: Tx, rows: CoaRow[], opts: { provisional: boo
       if (!accountId) continue;
       const res = await tx
         .insert(accountMappings)
-        .values({ key, accountId, requiresMember: (MEMBER_SUBSIDIARY_KEYS as readonly string[]).includes(key) })
+        .values({
+          key,
+          accountId,
+          requiresMember: (MEMBER_SUBSIDIARY_KEYS as readonly string[]).includes(key),
+          requiresCustomer: (CUSTOMER_SUBSIDIARY_KEYS as readonly string[]).includes(key),
+        })
         .onConflictDoNothing({ target: accountMappings.key })
         .returning({ id: accountMappings.id });
       mapped += res.length;
@@ -146,4 +151,7 @@ export async function seedCoa(tx: Tx): Promise<void> {
   } else {
     await importCoa(tx, PROVISIONAL_COA, { provisional: true });
   }
+  // Keep the sub-ledger flags in step with the code on databases seeded by earlier phases.
+  await tx.update(accountMappings).set({ requiresMember: true }).where(inArray(accountMappings.key, [...MEMBER_SUBSIDIARY_KEYS]));
+  await tx.update(accountMappings).set({ requiresCustomer: true }).where(inArray(accountMappings.key, [...CUSTOMER_SUBSIDIARY_KEYS]));
 }

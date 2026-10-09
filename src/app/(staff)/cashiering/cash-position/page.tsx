@@ -12,7 +12,7 @@ import { businessToday, formatDate, isBusinessDate } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPageAny } from "@/lib/page-guard";
 import { cn } from "@/lib/utils";
-import "@/modules/cashiering/builtins";
+import "@/modules/plugins";
 import { cashPosition } from "@/modules/cashiering/cash-position";
 
 export const metadata: Metadata = { title: "Daily cash position · PCMPC MIS" };

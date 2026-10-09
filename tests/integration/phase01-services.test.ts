@@ -229,3 +229,12 @@ describe("T1.9 numbering", () => {
     await expect(withTx((tx) => nextNumber("NOPE", tx))).rejects.toBeInstanceOf(NumberingError);
   });
 });
+
+describe("settings round-trip (regression: jsonb strings that look numeric)", () => {
+  it("money and rate settings come back as strings, not numbers", async () => {
+    expect(await getSetting("member.fee")).toBe("50000");
+    expect(await getSetting("water.fee.connection")).toBe("350000");
+    expect(await getSetting("savings.regular.rate_pa")).toBe("0.02");
+    expect(await getSetting("coop.name")).toBe("Pipindan Community Multi-Purpose Cooperative");
+  });
+});

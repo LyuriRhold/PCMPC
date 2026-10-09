@@ -24,9 +24,16 @@ export class ForbiddenError extends Error {
   }
 }
 
-/** Segregation of duties was violated (the preparer tried to approve). */
-export class SodError extends Error {
+/**
+ * Segregation of duties was violated (the preparer tried to approve). It is a kind of Forbidden:
+ * the user may hold the permission, but not for a document they prepared.
+ */
+export class SodError extends ForbiddenError {
   override name = "SodError";
+  constructor(message: string) {
+    super("segregation_of_duties");
+    this.message = message;
+  }
 }
 
 export type CurrentUser = {

@@ -1,5 +1,6 @@
 "use server";
 
+import "@/modules/plugins";
 import { inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, withTx } from "@/db/client";

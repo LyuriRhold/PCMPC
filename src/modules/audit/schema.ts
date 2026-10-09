@@ -1,5 +1,5 @@
-import { bigint, index, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core";
-import { createdColumns, tstz } from "@/db/columns";
+import { bigint, index, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { createdColumns, jsonbValue, tstz } from "@/db/columns";
 import { users } from "@/modules/auth/schema";
 
 /** Append-only audit trail. A trigger (migration 0002) rejects UPDATE and DELETE. */
@@ -12,8 +12,8 @@ export const auditLog = pgTable(
     action: text("action").notNull(),
     entity: text("entity").notNull(),
     entityId: text("entity_id"),
-    before: jsonb("before"),
-    after: jsonb("after"),
+    before: jsonbValue("before"),
+    after: jsonbValue("after"),
     ip: text("ip"),
     userAgent: text("user_agent"),
     ...createdColumns(),

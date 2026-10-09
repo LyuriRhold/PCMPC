@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { businessToday, formatDate, formatDateTime } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPage } from "@/lib/page-guard";
-import "@/modules/cashiering/builtins";
+import "@/modules/plugins";
 import { approvedDvCount, sessionReceipts } from "@/modules/cashiering/queries";
 import { payorTypeList } from "@/modules/cashiering/registry";
 import { currentSession, sessionTotals } from "@/modules/cashiering/service";

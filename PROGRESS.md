@@ -15,7 +15,7 @@
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ✅ | phase-04-cashiering · tag `phase-04` | rldejoya (reviewer agent: SoD test gap + drawer check fixed) · 2026-10-08 |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ✅ | phase-05-water-connections · tag `phase-05` | rldejoya (merged on request without the reviewer agent) · 2026-10-09 |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ✅ | phase-06-water-billing · tag `phase-06` | rldejoya (reviewer agent: memo cap + phone re-read fixed) · 2026-10-09 |
-| 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ⬜ | | |
+| 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | 🔨 | phase-07-water-collections | |
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ⬜ | | |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ⬜ | | |
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ⬜ | | |
@@ -122,7 +122,7 @@
 - [ ] T7.5 Account closure settlement + deposit refund
 - [ ] T7.6 Customer ledger/SOA
 - [ ] T7.7 Water reports + dashboard tiles (+ optional NRW)
-- [ ] Acceptance tests written first (tests/acceptance/phase-07.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-07.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 08 — Share Capital & CBU

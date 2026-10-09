@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { assertNotSameUser } from "@/lib/auth-guard";
@@ -10,6 +10,7 @@ import { next as nextNumber } from "@/lib/numbering";
 import { journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal, type LineInput } from "@/modules/ledger/service";
 import { getSetting } from "@/modules/settings/service";
+import { billBalances, refreshBillStatuses, settleDeposit, type Settlement } from "./collections";
 import { computeWaterCharge } from "./rates";
 import { enterReading, lockPeriod, periodLabel, zoneAccounts } from "./readings";
 import {
@@ -65,22 +66,12 @@ export type Blocker = { accountId: string; accountNo: string; problem: string };
 // ── Balances ──
 
 /**
- * Unpaid balance of an account's bills before `period` (YYYY-MM): bills net of advances,
- * plus approved debit memos, minus approved credit memos. Payments arrive in Phase 07.
+ * Unpaid balance of an account's bills before `period` (YYYY-MM): what those bills and their
+ * penalties still owe after payments and approved memos. Shown on the bill only (memo).
  */
 export async function previousBalance(db: Db | Tx, accountId: string, period: string): Promise<Money> {
-  const bills = await db
-    .select({ id: waterBills.id, current: waterBills.currentAmount, advance: waterBills.advanceApplied })
-    .from(waterBills)
-    .innerJoin(waterBillingPeriods, eq(waterBillingPeriods.id, waterBills.periodId))
-    .where(and(eq(waterBills.accountId, accountId), lt(waterBillingPeriods.period, period), sql`${waterBills.status} <> 'CANCELLED'`));
-  if (bills.length === 0) return 0n;
-  const memos = await db
-    .select({ kind: waterBillAdjustments.kind, amount: waterBillAdjustments.amount })
-    .from(waterBillAdjustments)
-    .where(and(inArray(waterBillAdjustments.billId, bills.map((b) => b.id)), eq(waterBillAdjustments.status, "APPROVED")));
-  const total = bills.reduce((s, b) => s + b.current - b.advance, 0n) + memos.reduce((s, m) => s + (m.kind === "DEBIT" ? m.amount : -m.amount), 0n);
-  return total > 0n ? total : 0n;
+  const balances = await billBalances(db, { accountIds: [accountId] });
+  return balances.filter((b) => b.period < period).reduce((s, b) => s + b.outstanding, 0n);
 }
 
 /** A customer's unapplied advance credits (Customers' Advances sub-ledger). */
@@ -242,6 +233,7 @@ async function insertBills(tx: Tx, bills: DraftBill[], period: BillingPeriod, je
         billDate: period.billDate,
         dueDate: period.dueDate,
         isFinal,
+        status: b.currentAmount - b.advanceApplied === 0n ? "PAID" : "UNPAID",
         jeId,
         createdBy: actorId,
       })
@@ -306,16 +298,11 @@ export async function prepareAdjustment(tx: Tx, input: { billId: string; kind: A
   return row;
 }
 
-/** A credit memo can't take a bill below zero (net of advances and memos already approved). */
+/** A credit memo can't exceed what the bill still owes (after advances, memos and payments). */
 async function assertCreditFits(db: Db | Tx, bill: WaterBill, amount: Money) {
-  const done = await approvedMemoTotal(db, bill.id);
-  const maxCredit = bill.currentAmount - bill.advanceApplied + done.debit - done.credit;
+  const [b] = await billBalances(db, { billIds: [bill.id] });
+  const maxCredit = b?.billDue ?? 0n;
   if (amount > maxCredit) throw new WaterError(`A credit memo on ${bill.billNo} can be at most ${format(maxCredit)}`);
-}
-
-async function approvedMemoTotal(db: Db | Tx, billId: string) {
-  const rows = await db.select().from(waterBillAdjustments).where(and(eq(waterBillAdjustments.billId, billId), eq(waterBillAdjustments.status, "APPROVED")));
-  return { credit: rows.filter((r) => r.kind === "CREDIT").reduce((s, r) => s + r.amount, 0n), debit: rows.filter((r) => r.kind === "DEBIT").reduce((s, r) => s + r.amount, 0n) };
 }
 
 /** Approves (approver ≠ preparer) and posts a memo: credit = Dr Water Revenue Adjustments / Cr AR–Water; debit = the reverse. */
@@ -344,6 +331,7 @@ export async function approveAdjustment(tx: Tx, adjustmentId: string, actorId: s
     actorId,
   );
   await tx.update(waterBillAdjustments).set({ status: "APPROVED", approvedBy: actorId, approvedAt: now(), jeId: je.id }).where(eq(waterBillAdjustments.id, adj.id));
+  await refreshBillStatuses(tx, [bill.id]);
   await audit(tx, { action: "water.adjustment_approve", entity: "water_bill_adjustment", entityId: adj.id, after: { billNo: bill.billNo, kind: adj.kind, amount: format(adj.amount), jeId: je.id }, userId: actorId });
   return { jeId: je.id };
 }
@@ -409,5 +397,7 @@ export async function closeAccount(tx: Tx, input: { accountId: string; finalRead
   await tx.update(waterAccounts).set({ status: "CLOSED", closedAt: today, updatedAt: now() }).where(eq(waterAccounts.id, account.id));
   await tx.insert(waterAccountHistory).values({ accountId: account.id, event: "STATUS", fromValue: account.status, toValue: "CLOSED", ref: input.reason.trim(), at: now(), by: actorId, createdBy: actorId });
   await audit(tx, { action: "water.account_close", entity: "water_account", entityId: account.id, after: { accountNo: account.accountNo, finalReading: input.finalReading, billNo: bill?.billNo, amount: format(draft.currentAmount) }, userId: actorId });
-  return { billId: bill!.id, billNo: bill!.billNo, jeId: je.id, period: await periodLabel(open, tx) };
+  // Phase 07: the meter deposit offsets what's unpaid; the rest is refunded by DV.
+  const settlement: Settlement | null = await settleDeposit(tx, account, customer, actorId);
+  return { billId: bill!.id, billNo: bill!.billNo, jeId: je.id, period: await periodLabel(open, tx), settlement };
 }

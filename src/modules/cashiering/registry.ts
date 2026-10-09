@@ -55,6 +55,8 @@ export type ReceiptItemDef = {
    * by the receipt service with an exact mirror entry (reverseJournal).
    */
   reverse: (tx: Tx, item: StoredItem, ctx: ReceiptContext) => Promise<void>;
+  /** Optional: runs after the receipt and its item rows exist (e.g. to write rows that reference the item). */
+  recorded?: (tx: Tx, item: StoredItem, ctx: ReceiptContext) => Promise<void>;
 };
 
 export type CashOutDef = {

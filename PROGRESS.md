@@ -116,10 +116,10 @@
 
 ### Phase 07 — Water: Collections, Penalties, Disconnection & Water Reports
 - [x] T7.1 Schema + migrations
-- [ ] T7.2 `WATER_BILL` teller item (dues, allocation, advances, reverse)
-- [ ] T7.3 Daily cron runner + penalty job
+- [x] T7.2 `WATER_BILL` teller item (dues, allocation, advances, reverse)
+- [x] T7.3 Daily cron runner + penalty job
 - [ ] T7.4 Disconnection list, notices, disconnect/reconnect orders, reconnection fee rule
-- [ ] T7.5 Account closure settlement + deposit refund
+- [x] T7.5 Account closure settlement + deposit refund
 - [ ] T7.6 Customer ledger/SOA
 - [ ] T7.7 Water reports + dashboard tiles (+ optional NRW)
 - [x] Acceptance tests written first (tests/acceptance/phase-07.test.ts)

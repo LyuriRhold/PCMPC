@@ -267,7 +267,11 @@ export async function issueReceipt(tx: Tx, input: IssueReceiptInput, tellerId: s
     })
     .returning();
   if (!receipt) throw new Error("receipt insert returned no row");
-  await tx.insert(receiptItems).values(stored.map((s, i) => ({ receiptId, lineNo: i + 1, ...s, createdBy: tellerId })));
+  const rows = await tx.insert(receiptItems).values(stored.map((s, i) => ({ receiptId, lineNo: i + 1, ...s, createdBy: tellerId }))).returning();
+  for (const row of rows) {
+    const def = receiptItem(row.type);
+    if (def?.recorded) await def.recorded(tx, { id: row.id, type: row.type, refId: row.refId, amount: row.amount, breakdown: row.breakdown }, ctx);
+  }
   await audit(tx, {
     action: "receipt.issue",
     entity: "receipt",

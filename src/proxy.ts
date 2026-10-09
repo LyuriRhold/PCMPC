@@ -16,7 +16,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Everything except the login page, health check, auth API, static assets and the reading
+  // Everything except the login page, health check, auth API, cron (checks CRON_SECRET), static assets and the reading
   // app's service worker, manifest and icon (fetched by the browser without a page).
-  matcher: ["/((?!login|health|api/auth|_next/static|_next/image|favicon.ico|sw.js|manifest.webmanifest|reader-icon.svg).*)"],
+  matcher: ["/((?!login|health|api/auth|api/cron|_next/static|_next/image|favicon.ico|sw.js|manifest.webmanifest|reader-icon.svg).*)"],
 };

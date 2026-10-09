@@ -4,3 +4,4 @@
 import "@/modules/cashiering/builtins";
 import "@/modules/water/service";
 import "@/modules/water/teller";
+import "@/modules/water/jobs";

@@ -106,7 +106,7 @@
 - [x] T6.1 `job_runs` + `runOnce`; schema for periods, readings, bills, lines, memos
 - [x] T6.2 Consumption engine (normal, rollover, meter change, estimate, flags)
 - [x] T6.3 Periods + office reading-entry grid + flag review queue
-- [ ] T6.4 Mobile reading PWA with offline queue + idempotent sync
+- [x] T6.4 Mobile reading PWA with offline queue + idempotent sync
 - [x] T6.5 Billing engine + billing run (preview → post) + GL + advances
 - [x] T6.6 PDF printing: reading sheets and bills per route
 - [x] T6.7 Credit/debit memos with SoD

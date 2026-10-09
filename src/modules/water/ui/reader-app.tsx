@@ -86,8 +86,10 @@ export function ReaderApp({ initial, readerName }: { initial: Snapshot; readerNa
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (navigator.onLine) await snapshotSave(SNAPSHOT, initial);
-      else {
+      if (navigator.onLine) {
+        await snapshotSave(SNAPSHOT, initial);
+        if (!cancelled) setData(initial);
+      } else {
         const saved = await snapshotLoad<Snapshot>(SNAPSHOT);
         if (saved && !cancelled) setData(saved.value);
       }

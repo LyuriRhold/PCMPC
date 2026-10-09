@@ -4,6 +4,8 @@ import { defineConfig, devices } from "@playwright/test";
 if (existsSync(".env")) process.loadEnvFile(".env");
 
 const PORT = 3000;
+// E2E_SERVER=prod (npm run e2e:prod) runs the @prod tests against a production build instead of the dev server.
+const prod = process.env.E2E_SERVER === "prod";
 const baseURL = `http://localhost:${PORT}`;
 
 export default defineConfig({
@@ -17,6 +19,8 @@ export default defineConfig({
   // Multi-step flows (sign in as two users, several first-time compiles) need more than the 30 s default.
   timeout: 90_000,
   forbidOnly: !!process.env.CI,
+  // @prod tests need a production build (offline reading app); the dev-server run leaves them out.
+  grepInvert: prod ? undefined : /@prod/,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
@@ -27,9 +31,9 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "npm run dev",
+    command: prod ? "npm run build && npm run start" : "npm run dev",
     url: baseURL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
+    reuseExistingServer: !process.env.CI && !prod,
+    timeout: prod ? 600_000 : 180_000,
   },
 });

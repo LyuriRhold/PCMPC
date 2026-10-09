@@ -623,6 +623,7 @@ export function RateScheduleForm() {
           () =>
             addRateScheduleAction({
               classification: get(fd, "rsClass") as Class,
+              appliesTo: get(fd, "rsApplies") as "ALL" | "MEMBER" | "NON_MEMBER",
               effectiveFrom: get(fd, "effectiveFrom"),
               minCharge: get(fd, "minCharge"),
               minCubic: int(fd, "minCubic"),
@@ -633,7 +634,14 @@ export function RateScheduleForm() {
         )
       }
     >
-      <div className="grid gap-3 sm:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-6">
+        <Field id="rsApplies" label="Applies to">
+          <select id="rsApplies" name="rsApplies" defaultValue="ALL" className={selectClass}>
+            <option value="ALL">All customers</option>
+            <option value="MEMBER">Members only</option>
+            <option value="NON_MEMBER">Non-members only</option>
+          </select>
+        </Field>
         <Field id="rsClass" label="Classification">
           <select id="rsClass" name="rsClass" defaultValue="RESIDENTIAL" className={selectClass}>
             {CLASSES.map((c) => (

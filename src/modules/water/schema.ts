@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { bigint, boolean, check, date, index, integer, jsonb, pgTable, serial, text, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { createdColumns, tstz } from "@/db/columns";
 import { users } from "@/modules/auth/schema";
+import { journalEntries } from "@/modules/ledger/schema";
 import { members } from "@/modules/members/schema";
 
 export const CUSTOMER_TYPES = ["MEMBER", "NON_MEMBER"] as const;
@@ -9,12 +10,15 @@ export const CLASSIFICATIONS = ["RESIDENTIAL", "COMMERCIAL", "INSTITUTIONAL", "B
 export const ACCOUNT_STATUSES = ["PENDING", "ACTIVE", "DISCONNECTED", "CLOSED"] as const;
 export const APPLICATION_STATUSES = ["APPLIED", "INSPECTED", "APPROVED", "INSTALLED", "REJECTED"] as const;
 export const METER_STATUSES = ["IN_STOCK", "INSTALLED", "DEFECTIVE", "RETIRED"] as const;
+/** Who a tariff version applies to: everyone, or only members / non-members (separate rates). */
+export const TARIFF_APPLIES_TO = ["ALL", "MEMBER", "NON_MEMBER"] as const;
 
 export type CustomerType = (typeof CUSTOMER_TYPES)[number];
 export type Classification = (typeof CLASSIFICATIONS)[number];
 export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 export type ApplicationStatus = (typeof APPLICATION_STATUSES)[number];
 export type MeterStatus = (typeof METER_STATUSES)[number];
+export type TariffAppliesTo = (typeof TARIFF_APPLIES_TO)[number];
 /** Rate block: m³ from..to (inclusive; to null = no upper limit) at `rate` centavos per m³. */
 export type RateBlock = { from: number; to: number | null; rate: string };
 
@@ -186,6 +190,8 @@ export const waterRateSchedules = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     classification: text("classification").$type<Classification>().notNull(),
+    /** ALL, or a members-only / non-members-only version (PCMPC: members pay a lower minimum). */
+    appliesTo: text("applies_to").$type<TariffAppliesTo>().notNull().default("ALL"),
     effectiveFrom: date("effective_from", { mode: "string" }).notNull(),
     minCharge: money("min_charge").notNull(),
     minCubic: integer("min_cubic").notNull(),
@@ -195,8 +201,9 @@ export const waterRateSchedules = pgTable(
     ...createdColumns(),
   },
   (t) => [
-    unique("water_rate_schedules_version_uq").on(t.classification, t.effectiveFrom),
+    unique("water_rate_schedules_version_uq").on(t.classification, t.appliesTo, t.effectiveFrom),
     check("water_rate_schedules_class_chk", inList("classification", CLASSIFICATIONS)),
+    check("water_rate_schedules_applies_chk", inList("applies_to", TARIFF_APPLIES_TO)),
     check("water_rate_schedules_amounts_chk", sql`${t.minCharge} >= 0 AND ${t.minCubic} >= 0`),
   ],
 );
@@ -251,3 +258,218 @@ export type WaterAccount = typeof waterAccounts.$inferSelect;
 export type WaterApplication = typeof waterApplications.$inferSelect;
 export type WaterMeter = typeof waterMeters.$inferSelect;
 export type RateSchedule = typeof waterRateSchedules.$inferSelect;
+
+// ── Meter reading & billing (Phase 06) ──────────────────────────────────────────────────────
+
+export const BILLING_PERIOD_STATUSES = ["OPEN", "READING", "REVIEW", "BILLED", "CLOSED"] as const;
+export const READING_TYPES = ["ACTUAL", "ESTIMATED", "METER_CHANGE", "FINAL"] as const;
+export const READING_FLAGS = ["LOWER", "HIGH", "LOW", "ZERO"] as const;
+export const READING_STATUSES = ["ENTERED", "APPROVED", "REJECTED"] as const;
+export const BILL_STATUSES = ["UNPAID", "PARTIAL", "PAID", "CANCELLED"] as const;
+export const BILL_LINE_KINDS = ["MIN_CHARGE", "BLOCK", "SENIOR_DISCOUNT", "OTHER_FEE", "ADVANCE_APPLIED", "ADJUSTMENT"] as const;
+export const ADJUSTMENT_KINDS = ["CREDIT", "DEBIT"] as const;
+export const ADJUSTMENT_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
+
+export type BillingPeriodStatus = (typeof BILLING_PERIOD_STATUSES)[number];
+export type ReadingType = (typeof READING_TYPES)[number];
+export type ReadingFlag = (typeof READING_FLAGS)[number];
+export type ReadingStatus = (typeof READING_STATUSES)[number];
+export type BillStatus = (typeof BILL_STATUSES)[number];
+export type BillLineKind = (typeof BILL_LINE_KINDS)[number];
+export type AdjustmentKind = (typeof ADJUSTMENT_KINDS)[number];
+export type AdjustmentStatus = (typeof ADJUSTMENT_STATUSES)[number];
+
+/** A monthly billing cycle of one zone. */
+export const waterBillingPeriods = pgTable(
+  "water_billing_periods",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** YYYY-MM */
+    period: text("period").notNull(),
+    zoneId: integer("zone_id")
+      .notNull()
+      .references(() => waterZones.id),
+    readingFrom: date("reading_from", { mode: "string" }).notNull(),
+    readingTo: date("reading_to", { mode: "string" }).notNull(),
+    billDate: date("bill_date", { mode: "string" }).notNull(),
+    dueDate: date("due_date", { mode: "string" }).notNull(),
+    status: text("status").$type<BillingPeriodStatus>().notNull().default("OPEN"),
+    ...createdColumns(),
+  },
+  (t) => [
+    unique("water_periods_period_zone_uq").on(t.period, t.zoneId),
+    check("water_periods_status_chk", inList("status", BILLING_PERIOD_STATUSES)),
+    check("water_periods_period_chk", sql`${t.period} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
+    check("water_periods_dates_chk", sql`${t.readingFrom} <= ${t.readingTo} AND ${t.readingTo} <= ${t.billDate} AND ${t.billDate} <= ${t.dueDate}`),
+  ],
+);
+
+/**
+ * One reading per (period, account). ESTIMATED readings have no present reading; the next
+ * actual reading subtracts the estimated m³ already billed. Readings are not financial rows:
+ * one that hasn't been billed can be re-entered.
+ */
+export const waterReadings = pgTable(
+  "water_readings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    periodId: uuid("period_id")
+      .notNull()
+      .references(() => waterBillingPeriods.id),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => waterAccounts.id),
+    meterId: uuid("meter_id")
+      .notNull()
+      .references(() => waterMeters.id),
+    previousReading: integer("previous_reading").notNull(),
+    presentReading: integer("present_reading"),
+    consumption: integer("consumption").notNull(),
+    type: text("type").$type<ReadingType>().notNull(),
+    rollover: boolean("rollover").notNull().default(false),
+    flags: text("flags").array().$type<ReadingFlag[]>().notNull().default(sql`'{}'::text[]`),
+    status: text("status").$type<ReadingStatus>().notNull(),
+    readerId: uuid("reader_id").references(() => users.id),
+    readAt: tstz("read_at").notNull(),
+    clientUuid: uuid("client_uuid").unique(),
+    photoUrl: text("photo_url"),
+    remarks: text("remarks"),
+    approvedBy: uuid("approved_by").references(() => users.id),
+    approvedAt: tstz("approved_at"),
+    ...createdColumns(),
+  },
+  (t) => [
+    unique("water_readings_period_account_uq").on(t.periodId, t.accountId),
+    check("water_readings_type_chk", inList("type", READING_TYPES)),
+    check("water_readings_status_chk", inList("status", READING_STATUSES)),
+    check("water_readings_values_chk", sql`${t.previousReading} >= 0 AND ${t.consumption} >= 0 AND (${t.presentReading} IS NULL OR ${t.presentReading} >= 0)`),
+    check("water_readings_present_chk", sql`(${t.type} = 'ESTIMATED') = (${t.presentReading} IS NULL)`),
+    index("water_readings_account_idx").on(t.accountId),
+  ],
+);
+
+/** An ACTIVE account left out of one period's billing run, with the reason and its approver. */
+export const waterBillingExclusions = pgTable(
+  "water_billing_exclusions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    periodId: uuid("period_id")
+      .notNull()
+      .references(() => waterBillingPeriods.id),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => waterAccounts.id),
+    reason: text("reason").notNull(),
+    approvedBy: uuid("approved_by")
+      .notNull()
+      .references(() => users.id),
+    ...createdColumns(),
+  },
+  (t) => [unique("water_exclusions_period_account_uq").on(t.periodId, t.accountId)],
+);
+
+/** Posted bills. Never edited after posting: corrections are approved credit/debit memos. */
+export const waterBills = pgTable(
+  "water_bills",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    billNo: text("bill_no").notNull().unique(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => waterAccounts.id),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => waterCustomers.id),
+    periodId: uuid("period_id")
+      .notNull()
+      .references(() => waterBillingPeriods.id),
+    readingId: uuid("reading_id")
+      .notNull()
+      .references(() => waterReadings.id),
+    customerType: text("customer_type").$type<CustomerType>().notNull(),
+    classification: text("classification").$type<Classification>().notNull(),
+    consumption: integer("consumption").notNull(),
+    basicCharge: money("basic_charge").notNull(),
+    seniorDiscount: money("senior_discount").notNull(),
+    otherCharges: money("other_charges").notNull(),
+    advanceApplied: money("advance_applied").notNull(),
+    /** basic − senior discount + other charges (before advances). */
+    currentAmount: money("current_amount").notNull(),
+    /** Unpaid balance of earlier bills, shown on the bill only (memo, never re-posted). */
+    previousBalance: money("previous_balance").notNull(),
+    totalAmountDue: money("total_amount_due").notNull(),
+    billDate: date("bill_date", { mode: "string" }).notNull(),
+    dueDate: date("due_date", { mode: "string" }).notNull(),
+    status: text("status").$type<BillStatus>().notNull().default("UNPAID"),
+    isFinal: boolean("is_final").notNull().default(false),
+    jeId: uuid("je_id")
+      .notNull()
+      .references(() => journalEntries.id),
+    ...createdColumns(),
+  },
+  (t) => [
+    unique("water_bills_period_account_uq").on(t.periodId, t.accountId),
+    check("water_bills_status_chk", inList("status", BILL_STATUSES)),
+    check("water_bills_customer_type_chk", inList("customer_type", CUSTOMER_TYPES)),
+    check(
+      "water_bills_amounts_chk",
+      sql`${t.basicCharge} >= 0 AND ${t.seniorDiscount} >= 0 AND ${t.otherCharges} >= 0 AND ${t.advanceApplied} >= 0 AND ${t.previousBalance} >= 0 AND ${t.currentAmount} = ${t.basicCharge} - ${t.seniorDiscount} + ${t.otherCharges} AND ${t.advanceApplied} <= ${t.currentAmount} AND ${t.totalAmountDue} = ${t.currentAmount} - ${t.advanceApplied} + ${t.previousBalance}`,
+    ),
+    index("water_bills_account_idx").on(t.accountId),
+  ],
+);
+
+/** Itemized bill lines; discounts and advances are negative amounts. */
+export const waterBillLines = pgTable(
+  "water_bill_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    billId: uuid("bill_id")
+      .notNull()
+      .references(() => waterBills.id),
+    lineNo: integer("line_no").notNull(),
+    kind: text("kind").$type<BillLineKind>().notNull(),
+    description: text("description").notNull(),
+    qty: integer("qty"),
+    rate: money("rate"),
+    amount: money("amount").notNull(),
+    ...createdColumns(),
+  },
+  (t) => [unique("water_bill_lines_no_uq").on(t.billId, t.lineNo), check("water_bill_lines_kind_chk", inList("kind", BILL_LINE_KINDS))],
+);
+
+/** Credit/debit memos on a posted bill; posted only when approved by someone other than the preparer. */
+export const waterBillAdjustments = pgTable(
+  "water_bill_adjustments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    billId: uuid("bill_id")
+      .notNull()
+      .references(() => waterBills.id),
+    kind: text("kind").$type<AdjustmentKind>().notNull(),
+    amount: money("amount").notNull(),
+    reason: text("reason").notNull(),
+    status: text("status").$type<AdjustmentStatus>().notNull().default("PENDING"),
+    preparedBy: uuid("prepared_by")
+      .notNull()
+      .references(() => users.id),
+    approvedBy: uuid("approved_by").references(() => users.id),
+    approvedAt: tstz("approved_at"),
+    rejectedReason: text("rejected_reason"),
+    jeId: uuid("je_id").references(() => journalEntries.id),
+    ...createdColumns(),
+  },
+  (t) => [
+    check("water_adjustments_kind_chk", inList("kind", ADJUSTMENT_KINDS)),
+    check("water_adjustments_status_chk", inList("status", ADJUSTMENT_STATUSES)),
+    check("water_adjustments_amount_chk", sql`${t.amount} > 0`),
+    check("water_adjustments_posted_chk", sql`(${t.status} = 'APPROVED') = (${t.jeId} IS NOT NULL)`),
+    index("water_adjustments_bill_idx").on(t.billId),
+  ],
+);
+
+export type BillingPeriod = typeof waterBillingPeriods.$inferSelect;
+export type WaterReading = typeof waterReadings.$inferSelect;
+export type WaterBill = typeof waterBills.$inferSelect;
+export type WaterBillLine = typeof waterBillLines.$inferSelect;
+export type WaterBillAdjustment = typeof waterBillAdjustments.$inferSelect;

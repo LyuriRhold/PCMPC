@@ -237,7 +237,7 @@ export async function listRoutes(db: Db | Tx = getDb()) {
 }
 
 export async function listRateSchedules(db: Db | Tx = getDb()) {
-  return db.select().from(waterRateSchedules).orderBy(asc(waterRateSchedules.classification), desc(waterRateSchedules.effectiveFrom));
+  return db.select().from(waterRateSchedules).orderBy(asc(waterRateSchedules.classification), asc(waterRateSchedules.appliesTo), desc(waterRateSchedules.effectiveFrom));
 }
 
 export async function listFees(db: Db | Tx = getDb()) {

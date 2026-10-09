@@ -17,6 +17,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "e2e": "playwright test",
+    "e2e:prod": "node scripts/e2e-prod.mjs",
     "scan": "node scripts/scan-placeholders.mjs",
     "gate": "npm run typecheck && npm run lint && npm run test && npm run scan",
     "db:seed:dev": "tsx scripts/db-seed-dev.mts"
@@ -24,6 +25,7 @@
   "dependencies": {
     "@base-ui/react": "^1.8.0",
     "@date-fns/tz": "^1.5.0",
+    "@react-pdf/renderer": "^4.9.0",
     "better-auth": "^1.7.7",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
@@ -53,6 +55,7 @@
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5",
+    "unpdf": "^1.8.1",
     "vitest": "^5.0.3"
   },
   "engines": {

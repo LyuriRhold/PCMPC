@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 06
+**Current phase:** 07
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -14,7 +14,7 @@
 | 03 | [Accounting Core (GL engine)](docs/phases/PHASE-03-accounting-core.md) | ✅ | phase-03-accounting-core · tag `phase-03` | rldejoya (reviewer agent: no blockers; follow-ups fixed) · 2026-10-08 |
 | 04 | [Cashiering Core (Teller) & Daily Cash Position](docs/phases/PHASE-04-cashiering.md) | ✅ | phase-04-cashiering · tag `phase-04` | rldejoya (reviewer agent: SoD test gap + drawer check fixed) · 2026-10-08 |
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ✅ | phase-05-water-connections · tag `phase-05` | rldejoya (merged on request without the reviewer agent) · 2026-10-09 |
-| 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ⬜ | | |
+| 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ✅ | phase-06-water-billing · tag `phase-06` | rldejoya (reviewer agent: memo cap + phone re-read fixed) · 2026-10-09 |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ⬜ | | |
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ⬜ | | |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ⬜ | | |
@@ -103,16 +103,16 @@
 - [x] Exit checks passed
 
 ### Phase 06 — Water: Meter Reading & Billing
-- [ ] T6.1 `job_runs` + `runOnce`; schema for periods, readings, bills, lines, memos
-- [ ] T6.2 Consumption engine (normal, rollover, meter change, estimate, flags)
-- [ ] T6.3 Periods + office reading-entry grid + flag review queue
-- [ ] T6.4 Mobile reading PWA with offline queue + idempotent sync
-- [ ] T6.5 Billing engine + billing run (preview → post) + GL + advances
-- [ ] T6.6 PDF printing: reading sheets and bills per route
-- [ ] T6.7 Credit/debit memos with SoD
-- [ ] T6.8 Final reading + final bill on account closure (deposit refund handled in Phase 07)
-- [ ] Acceptance tests written first (tests/acceptance/phase-06.test.ts)
-- [ ] Exit checks passed
+- [x] T6.1 `job_runs` + `runOnce`; schema for periods, readings, bills, lines, memos
+- [x] T6.2 Consumption engine (normal, rollover, meter change, estimate, flags)
+- [x] T6.3 Periods + office reading-entry grid + flag review queue
+- [x] T6.4 Mobile reading PWA with offline queue + idempotent sync
+- [x] T6.5 Billing engine + billing run (preview → post) + GL + advances
+- [x] T6.6 PDF printing: reading sheets and bills per route
+- [x] T6.7 Credit/debit memos with SoD
+- [x] T6.8 Final reading + final bill on account closure (deposit refund handled in Phase 07)
+- [x] Acceptance tests written first (tests/acceptance/phase-06.test.ts)
+- [x] Exit checks passed (all automated checks green; the real-phone offline test was waived: PCMPC reads meters by hand and encodes them in the office)
 
 ### Phase 07 — Water: Collections, Penalties, Disconnection & Water Reports
 - [ ] T7.1 Schema + migrations
@@ -278,6 +278,15 @@
 - [ ] Q-05.4 (phase 05) Must the connection fee and meter deposit be paid before installation? | default used: yes, installation is refused until both are paid | answer:
 - [ ] Q-05.5 (phase 05) Should billing clerks see full customer mobile and ID numbers? | default used: masked unless the user has `members.read_sensitive` (same rule as members) | answer:
 - [ ] Q-05.6 (phase 05) When a member is TERMINATED or DECEASED, does their water customer become NON_MEMBER (spec CONFIRM)? | default used: yes, on termination or death, with the change kept in the customer's history | answer:
+- [x] Q-06.1 (phase 06) Billing cycle and reading schedule per zone (reading window, bill date). | default used: the clerk opens each zone's period by hand with its reading window and bill date; nothing is scheduled automatically | answer: the schedule is set by the admin → setting water.reading_schedule (reading start/end day, bill day) in Admin › Settings › Water; it pre-fills every new period (Rhold, 2026-10-09)
+- [x] Q-06.2 (phase 06) Bill layout and paper size. | default used: one bill per A5 page (PDF), with readings, charge lines, previous balance, total due, due date and 6-month history | answer: ¼ of short or long bond, or ½ lengthwise of short or long → setting water.bill_paper (default ¼ short): 4 bills per sheet, or 2 side by side, with cut lines (Rhold, 2026-10-09)
+- [x] Q-06.3 (phase 06) LOW and ZERO consumption flags (spec says "per settings"; DOMAIN has no values). | default used: new setting `water.low_flag` = LOW below 0.3 × the 3-month average, ZERO flagged; both need approval before billing | answer: minimum consumption is set by the admin on each tariff version; low and zero consumption still pay the minimum (₱160 members, ₱200 non-members). LOW/ZERO flags stay only as a review prompt (Rhold, 2026-10-09)
+- [x] Q-06.4 (phase 06) When estimates already billed exceed the next actual use (e.g. 15 m³ estimated, only 10 m³ metered), what happens to the excess? | default used: that month bills 0 m³ (the minimum charge), the reading is flagged for review, and the excess is not carried forward; a credit memo can refund it | answer: the estimate is entered (and corrected) by the clerk, not defaulted: the Estimate action asks for the m³ and shows the 3-month average as a hint; over-estimates are corrected by changing the estimate / a credit memo (Rhold, 2026-10-09)
+- [x] Q-06.5 (phase 06) Senior-citizen discount applicability (RA 9994 on the coop's water system). | default used: 5% of the basic charge, RESIDENTIAL only, consumption ≤ 30 m³, eligibility valid on the bill date, rounded HALF-UP per bill | answer: the admin decides → on/off switch in Admin › Settings (water.senior_discount.enabled) (Rhold, 2026-10-09)
+- [x] Q-06.6 (phase 06) Separate Water Revenue – Non-members account (spec: CONFIRM with the bookkeeper). | default used: yes, members' and non-members' revenue split by the bill's customer-type snapshot | answer: keep the separate revenue accounts; what differs for non-members is the rate (see Q-06.9) (Rhold, 2026-10-09)
+- [x] Q-06.7 (phase 06) Bill numbers WB-{YYYYMM}-{000000}: should the counter restart every month? | default used: it restarts every year (DOMAIN §5 series resets yearly), so November continues from October's last number | answer: bill numbers are a running log and never restart, like the meters → WB series no longer resets yearly (migration 0012 carries the counter over) (Rhold, 2026-10-09)
+- [x] Q-06.8 (phase 06) May the clerk who encodes a flagged reading also approve it? | default used: yes (no SoD rule in the spec); approval needs water.review_readings | answer: readings are encoded by hand → no SoD between encoding and approving (Rhold, 2026-10-09)
+- [x] Q-06.9 (phase 06) PCMPC: "non-member does not have revenue". The spec and golden test A6.8 post non-members' bills to Water Revenue – Non-members (925.00 in the example). Does this mean (a) one Water Revenue account for everyone (then A6.8 and DOMAIN §6 must change), or (b) something else? | default used: as specified (separate account), since acceptance tests can't be changed without a spec change | answer: it meant a separate RATE: non-members pay the general minimum (₱200), members a lower one (₱160) → tariff versions can now apply to all customers, members only, or non-members only (migration 0013); the admin adds the members-only version on Tariffs & fees. Revenue accounts stay as specified (Rhold, 2026-10-09)
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -292,6 +301,9 @@
 - 2026-10-08 · phase 02 · The duplicate rule ignores TERMINATED and DECEASED members (both terminal), so a deceased member's record never blocks a new applicant with the same name and birthdate · spec says "non-terminated"; DECEASED is treated the same way as the other terminal status (reviewer follow-up)
 - 2026-10-08 · phase 03 · Excel exports write amounts as spreadsheet numbers (pesos, 2 decimals). It's the one place a bigint amount becomes a JS number, only to fill a cell; ledger math stays bigint · the bookkeeper needs numeric cells to work in Excel
 - 2026-10-08 · phase 03 · The ledger table is `gl_accounts` (Drizzle export `accounts`); Better Auth's `accounts` table export was renamed `authAccounts` · both tables can't be called `accounts`
+- 2026-10-09 · phase 06 · Members and non-members can have separate water tariffs (members-only / non-members-only versions take precedence over the version for all customers); seeded default stays one tariff for all (DOMAIN §2 water.member_rate_difference = none) · PCMPC: members' minimum ₱160, non-members' ₱200, entered by the admin
+- 2026-10-09 · phase 06 · Meters are read by hand on the printed route sheets and encoded in the office; the reading app (/read) stays available but is optional, so the real-phone offline exit check is waived · PCMPC answer
+- 2026-10-09 · phases 08+ · Only members may file loans or hold share capital (equity); non-members are water customers only · PCMPC answer, for the share-capital and loan phases
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)
@@ -587,3 +599,119 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - The real COA with water accounts (Q-03.x) before Phase 06 posts water revenue.
 
 **Exit checks / counts:** `npm run gate` green: 295 tests (unit 167, integration 69, acceptance 59: A0 10 + A1 9 + A2 9 + A3 10 + A4 10 + A5 11). `npm run build` green. `npm run e2e` green: 8 specs including A5.12. Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.
+
+### Phase 06 summary
+**Built**
+- **Jobs and schema (T6.1):**
+  - `job_runs` plus `runOnce(tx, job, key, …)` in `src/lib/jobs.ts`. The claim is made inside the caller's transaction, so a failed run rolls back and can be retried, and two runs racing on the same key are tested.
+  - Migration `0010` adds the tables:
+    - `water_billing_periods`: unique per period and zone; OPEN → READING → REVIEW → BILLED → CLOSED; due date = bill date + `water.due_days`.
+    - `water_readings`: unique per period and account, and per `client_uuid`.
+    - `water_billing_exclusions`.
+    - `water_bills`: CHECKs tie the amounts together.
+    - `water_bill_lines`.
+    - `water_bill_adjustments`.
+  - Migration `0011` adds triggers: bills can't be deleted and only their status can change (for Phase 07 payments); bill lines are immutable; approved memos are immutable.
+- **Consumption engine (T6.2):** `consumption.ts` is pure. It covers:
+  - normal reads;
+  - marked rollover: 10^digits − previous + present;
+  - a lower reading without rollover, rejected with "Reading is lower than previous (1,250)";
+  - chained meter changes;
+  - estimates: the average of recent actual months, HALF-UP;
+  - reconciling estimates at the next actual reading (present − last actual − estimated m³);
+  - flags: HIGH, LOW, ZERO, and LOWER on rollover.
+  - 27 unit tests.
+- **Periods, readings and review (T6.3):**
+  - Open a period per zone.
+  - Keyboard-fast reading grid by route: Enter saves and jumps to the next account, R marks a rollover. It shows the previous reading and the 3-month average.
+  - Re-entering a reading replaces any reading that hasn't been billed.
+  - Flagged readings wait for approval or rejection. Estimates and exclusions record a reason.
+  - "Flagged only" filter.
+- **Reading app (T6.4):** `/read` is a phone layout for meter readers. It shows only their assigned routes, in sequence, with:
+  - previous reading and 3-month average;
+  - a large keypad, with consumption and flag warnings as you type;
+  - an IndexedDB offline queue that syncs on reconnect, every minute and on demand.
+  - Sync is idempotent (dedupe by `client_uuid`, then by period + account) and refuses accounts outside the reader's routes.
+  - The service worker (`public/sw.js`) loads `/read` from the network first, falls back to the cached copy, and caches static assets.
+  - Web app manifest and icon.
+  - Clerks now add zones and routes and assign readers on the Zones & routes page.
+- **Billing (T6.5):**
+  - Preview, then post per (period, zone) with `runOnce("water-billing", "{period}:{zone}")`. Posting is blocked, naming each account and its problem, until every billable account has an APPROVED reading or an approved exclusion.
+  - Basic charge from the Phase 05 rate engine, using the schedule effective on `reading_to`.
+  - Senior discount: 5% when eligible on the bill date and ≤ 30 m³.
+  - Customer advances are applied automatically.
+  - Previous balance is shown on the bill only, never re-posted.
+  - Bills are numbered WB-YYYYMM-000000 in route order.
+  - ONE SJ entry per run: Dr AR–Water (per customer, net of discount) + Dr Senior Citizen Discounts / Cr Water Revenue–Members and –Non-members (by customer-type snapshot). Advances are in the same entry: Dr Customers' Advances / Cr AR–Water.
+- **PDFs (T6.6):** built with `@react-pdf/renderer` and an embedded DejaVu Sans font, so ₱ prints.
+  - Reading sheets per route (A4 landscape), with blank Present column for hand-written readings.
+  - Bills one per A5 page, single or batched per route in sequence order. Each bill has readings, charge lines, previous balance, total due, due date and a 6-month history.
+- **Memos (T6.7):** credit and debit memos on a posted bill. The approver can't be the preparer, and a credit can't exceed what the bill still owes. Approval posts a GJ entry: Dr Water Revenue Adjustments / Cr AR–Water (customer-tagged), or the reverse for a debit memo. Memos appear in the queue, on the bill and in the previous balance.
+- **Final bill (T6.8):** closing an account takes a FINAL reading in the zone's open period and posts the final bill at once (its own SJ entry). It also returns the meter to stock, closes the account and records the history. The zone's run then skips the account.
+- **Screens:** Meter readings (periods and reading grid), Billing runs (preview and post, bill PDFs per route), Bills & adjustments (search, memo queue, bill detail with memos), a closure form and bill list on the account profile, and a "Reading app (phone)" nav item for readers.
+
+**Decisions** (see Questions Q-06.1–Q-06.8)
+- Periods are opened by hand per zone.
+- Bills print one per A5 page.
+- LOW and ZERO flags come from a new setting, `water.low_flag` (0.3 × average, zero flagged).
+- When estimates exceed the next actual use, that month bills 0 m³ and is flagged; the excess isn't carried forward.
+- The senior discount applies as in DOMAIN §2.
+- Non-member revenue is kept separate.
+- The bill-number counter resets yearly.
+- The clerk who encodes a flagged reading may also approve it.
+- Bills are posted in the SJ (sales journal) and memos in the GJ.
+
+**Deviations from spec (with reason)**
+- **Extra table and columns:** `water_billing_exclusions` (for the spec's "approved exclusion with a reason"), plus `water_bills.customer_id`, `reading_id`, `bill_date` and `is_final`, and status and approval columns on adjustments. The spec's data model doesn't list them, but the rules need them.
+- **Zone/route maintenance and reader assignment** were built here. They were deferred from Phase 05, and T6.4 needs them for "assigned routes".
+- **Readings stay editable until billed**, since they aren't financial rows. Bills and lines are locked by trigger.
+- **E2E:** the UI-shell test's "coming soon" examples moved to Phase 07, and Teller dues now hide items already in the cart (Phase 05 change, kept).
+- **Opening the reading app with no signal needs a production build:** `next dev` can't hydrate from the cache. That test is tagged `@prod`, the dev E2E run leaves it out (config `grepInvert`), and the new `npm run e2e:prod` builds, starts and runs it.
+
+**Follow-ups**
+- **Real-phone exit check is still to do.** Install `/read` on a phone, use airplane mode to read a meter, reconnect, and confirm it synced. Automated Chromium offline emulation passes against the production build (`npm run e2e:prod`), but nobody has done this on a real phone yet.
+- Answer Q-06.1–Q-06.8, plus the bill layout and paper size from PCMPC.
+- Phase 07: payments update bill status (UNPAID/PARTIAL/PAID), add penalties, and refund deposits on closure.
+- The reading grid computes context per account. If a zone grows past a few hundred accounts, batch those queries.
+
+**Exit checks / counts:**
+- `npm run gate` is green: 351 tests:
+  - unit 194;
+  - integration 86;
+  - acceptance 71: A0 10 + A1 9 + A2 9 + A3 10 + A4 10 + A5 11 + A6 12.
+- `npm run build` is green.
+- `npm run e2e` is green: 10 tests, including A6.13 and the offline-queue test.
+- `npm run e2e:prod -- phase-06-reader` is green: reopening with no signal.
+- Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.
+- Real-phone offline test: pending (needs a person and a phone).
+
+**Addendum (2026-10-09): changes after PCMPC's answers and a gate fix**
+- **Gate fix:** the test suite had grown to 16 min and timed out the Stop-hook gate (14 min limit). Tests now reset the DB with DELETE under `session_replication_role = replica` instead of TRUNCATE (TRUNCATE alone was ~2.5 s per test), and run on 4 workers, each with its own copy of the test database. The full suite takes about 3 min; no assertion changed.
+- **Reading schedule (Q-06.1):** set by the admin in the setting `water.reading_schedule` (reading start/end day, bill day of the month). It pre-fills each new billing period.
+- **Bill paper (Q-06.2):** setting `water.bill_paper`: ¼ of short or long bond (4 bills per sheet, 2 × 2) or ½ lengthwise (2 bills side by side), with dashed cut lines. The default is ¼ short.
+- **Minimum consumption (Q-06.3):** set by the admin on each tariff version (min m³ and min charge); the ADMIN role now has `water.rates`.
+- **Estimation (Q-06.4):** the number of months averaged (`water.estimate_basis`) is editable in settings. Readers type readings by hand on the keypad.
+- **Senior discount (Q-06.5):** kept, with an on/off switch (`enabled`, default on, as DOMAIN §2 and golden A6.7/A6.8 expect).
+- **Bill numbers (Q-06.7):** the WB series never restarts. Migration `0012` folds the yearly counter into one running counter.
+- **Open:** Q-06.9 asks what "non-member does not have revenue" means for the posting, because golden A6.8 requires a separate non-member revenue account.
+
+**Addendum 2 (2026-10-09): more PCMPC answers**
+- **Member vs non-member rates (Q-06.9):** a tariff version applies to all customers, members only, or non-members only (migration `0013`). A bill uses its customer type's own version when one is in effect, otherwise the version for all. The admin adds e.g. a members-only RESIDENTIAL version with a ₱160 minimum on Tariffs & fees; non-members keep ₱200. Low or zero consumption still pays the minimum.
+- **Estimates (Q-06.4):** the clerk enters the estimated m³ (the 3-month average is shown as a hint, not used as a default). The API still falls back to the average when no m³ is given (golden A6.6).
+- **Reading app:** PCMPC reads meters by hand and encodes them in the office, so the app is optional and the real-phone check is waived.
+- **For later phases:** only members may file loans or hold share capital.
+
+**Review follow-ups (reviewer agent, 2026-10-09; merged at Rhold's request)**
+- **Fixed:** a credit memo's cap is checked again when it is approved, with the bill row locked, so two pending credits can't together exceed the bill. Tested.
+- **Fixed:** a reading the office rejected can be re-sent from the phone; other readings are still never overwritten by a sync. Tested.
+- **Fixed (nits):** the senior-discount percentage is printed without float maths; the grid's 3-month average rounds HALF-UP like estimates; an unneeded dynamic import was removed.
+- **Added:** a test that the seeded water bill series never resets (year 0).
+- **Acceptance file note:** after the test commit, `tests/acceptance/phase-06.test.ts` got one type-only fix: `let zoneId = ""` → `let zoneId = 0`, because zone ids are serial numbers. No golden value or assertion changed. It is recorded here for the human reviewer.
+- **Deviations from the spec made on PCMPC's answers (2026-10-09)**, to be folded into PHASE-06 / DOMAIN by a human:
+  - tariff versions by customer group (`water_rate_schedules.applies_to`, migration 0013);
+  - the settings `water.reading_schedule` and `water.bill_paper`, and `water.senior_discount.enabled`;
+  - ADMIN gets `water.rates` (the admin sets the minimum m³ and minimum charge: 10 m³ per house, PCMPC);
+  - the WB bill series never resets (migration 0012);
+  - clerk-entered estimates.
+- **Follow-up for Phase 07:** `previousBalance` skips CANCELLED bills, but cancellation arrives in Phase 07, so add a test there.
+- **Follow-up:** the test reset deletes all rows in `public` (as superuser, `session_replication_role = replica`). Data a migration inserts is therefore checked through the seed, not directly.

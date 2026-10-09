@@ -17,6 +17,14 @@ const TONE: Record<string, "default" | "secondary" | "outline" | "destructive"> 
   DEFECTIVE: "destructive",
   CLOSED: "secondary",
   RETIRED: "secondary",
+  OPEN: "outline",
+  READING: "outline",
+  REVIEW: "outline",
+  BILLED: "default",
+  UNPAID: "outline",
+  PARTIAL: "outline",
+  PAID: "default",
+  CANCELLED: "secondary",
 };
 
 export function WaterStatusBadge({ status }: { status: string }) {

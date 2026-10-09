@@ -7,3 +7,4 @@ export * from "@/modules/members/schema";
 export * from "@/modules/ledger/schema";
 export * from "@/modules/cashiering/schema";
 export * from "@/modules/water/schema";
+export * from "@/modules/jobs/schema";

@@ -126,7 +126,7 @@
 - [x] Exit checks passed
 
 ### Phase 08 — Share Capital & CBU
-- [ ] T8.1 Schema, migrations, view, mappings check
+- [x] T8.1 Schema, migrations, view, mappings check
 - [ ] T8.2 Share service (subscribe, pay, fee, transfer, withdraw, retainCbu, isGoodStanding, ASM)
 - [ ] T8.3 GL integration via `postJournal` in the same transaction
 - [ ] T8.4 Actions, UI tab/forms, teller registrations (fee, share payment, withdrawal)

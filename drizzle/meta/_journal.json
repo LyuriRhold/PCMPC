@@ -120,6 +120,20 @@
       "when": 1791534248548,
       "tag": "0016_drop_advance_applied_bill",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791572997773,
+      "tag": "0017_share_capital",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791573006931,
+      "tag": "0018_share_view_immutable",
+      "breakpoints": true
     }
   ]
 }

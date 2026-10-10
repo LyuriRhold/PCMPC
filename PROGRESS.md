@@ -878,6 +878,10 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - A8.6 builds 37 paying members through the real actions. Under load it took 6 s, over Vitest's 5 s default.
   - A test that times out keeps querying while the next test resets the database, which caused a deadlock.
   - No assertion changed.
+- **Vitest DB worker count now follows free memory** (1–4, about 0.75 GB each; `PCMPC_TEST_WORKERS=<n>` overrides).
+  - The Stop-hook gate went red twice with only timeouts, when the PC had ~2.6 GB free (30 GB committed on 16 GB RAM, ~4,000 pages/s): 474 s, then 532 s.
+  - With 2 workers the same suite was green in 360 s.
+  - A healthy PC still gets 4 workers.
 
 **Follow-ups**
 - Answer Q-08.1–Q-08.4.

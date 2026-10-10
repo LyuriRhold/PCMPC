@@ -4,11 +4,13 @@ import "@/modules/plugins";
 import { GET as ledgerRoute } from "@/app/api/share/ledger/route";
 import { runAs } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
+import { trialBalance } from "@/modules/ledger/service";
+import { transferAction, withdrawSharesAction } from "@/modules/share/actions";
 import { shareLedgerWorkbook } from "@/modules/share/export";
 import { memberShareLedger, shareRegistry, shareTotals } from "@/modules/share/service";
 import { makeUser } from "../helpers/phase01";
-import { P } from "../helpers/phase03";
-import { at, member, pay, setupShares, subscribe } from "../helpers/phase08";
+import { acct, P } from "../helpers/phase03";
+import { at, member, pay, receipt, setupShares, subscribe, tellerToday } from "../helpers/phase08";
 
 let manager = "";
 beforeEach(async () => {
@@ -71,6 +73,32 @@ describe("T8.5 member share ledger report", () => {
     expect(ok.status).toBe(200);
     expect(ok.headers.get("content-disposition")).toMatch(/share-ledger-M-\d{6}\.xlsx/);
     expect((await rows(await ok.arrayBuffer())).at(-1)?.slice(6)).toEqual([10000, 2500]);
+  });
+});
+
+describe("Exit check: TB balances after the fixture", () => {
+  it("subscribe, pay, fee, transfer and withdraw keep the trial balance balanced and the GL equal to the share ledger", async () => {
+    const a = await member("Alpha");
+    const b = await member("Bravo");
+    await subscribe(a, 100);
+    await subscribe(b, 100);
+    expect((await receipt(a, [{ type: "SHARE_PAYMENT", amount: "2,500.00" }, { type: "MEMBERSHIP_FEE", amount: "500.00" }])).ok).toBe(true);
+    expect((await pay(b, "2,000.00")).ok).toBe(true);
+    expect((await runAs(manager, () => transferAction({ fromMemberId: a, toMemberId: b, amount: "500.00", bodRef: "BOD 9" }))).ok).toBe(true);
+    const w = await runAs(await tellerToday(), () => withdrawSharesAction({ memberId: a, reason: "Resignation" }));
+    if (!w.ok) throw new Error(w.error);
+
+    const tb = await trialBalance("2026-12-31");
+    expect(tb.totalDebit).toBe(tb.totalCredit);
+    const [cap, rec] = await Promise.all([acct("subscribed_share_capital_common"), acct("subscription_receivable_common")]);
+    const net = (accountId: string) => {
+      const row = tb.rows.find((r) => r.accountId === accountId);
+      return (row?.credit ?? 0n) - (row?.debit ?? 0n);
+    };
+    // GL paid-up (capital − receivable) = the share ledgers' paid-up total: A 0, B 2,000 + 500 transferred in.
+    // Subscribed: B's 100 shares + the ₱500.00 of fully paid capital transferred in.
+    expect(net(cap) + net(rec)).toBe(P(2500));
+    expect(await shareTotals()).toMatchObject({ paidUp: P(2500), subscribed: P(10500) });
   });
 });
 

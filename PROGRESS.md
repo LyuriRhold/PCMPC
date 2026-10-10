@@ -16,7 +16,7 @@
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ✅ | phase-05-water-connections · tag `phase-05` | rldejoya (merged on request without the reviewer agent) · 2026-10-09 |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ✅ | phase-06-water-billing · tag `phase-06` | rldejoya (reviewer agent: memo cap + phone re-read fixed) · 2026-10-09 |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ✅ | phase-07-water-collections · tag `phase-07` | rldejoya (reviewer agent: reconnection-fee rules fixed) · 2026-10-09 |
-| 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | 🔨 | phase-08-share-capital | |
+| 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | 🟡 awaiting review | phase-08-share-capital | |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ⬜ | | |
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ⬜ | | |
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ⬜ | | |
@@ -831,3 +831,70 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - **Not changed (noted):**
   - The Excel export turns peso amounts into spreadsheet numbers. They are exact for any realistic amount and used for display only.
   - `dv_lines.customer_id` makes cashiering reference water customers, the same way journal lines already do.
+
+### Phase 08 summary
+**Built**
+- **Schema (T8.1):** `share_subscriptions`, `share_transactions` (the member share ledger) and `member_fees`, plus the view `v_member_share_balance` (subscribed, paid-up, unpaid). The view leaves out rows whose receipt was cancelled. Share rows and fees are immutable (triggers); a subscription can only change status. A unit test checks that every GL key the module posts to is mapped.
+- **Share service (T8.2/T8.3):** every money movement posts its journal entry in the same transaction as its share rows.
+  - **Subscribe:** the first subscription must reach `share.min_subscription_shares` (100 shares). GJ Dr Subscription Receivable / Cr Subscribed Share Capital, member-tagged.
+  - **Pay** (teller item `SHARE_PAYMENT`): the teller sees the unpaid subscription as a due. A payment above it is rejected ("Payment exceeds unpaid subscription (₱…)"), unless `share.auto_subscribe_excess` is on (then whole shares are subscribed first). The holding cap (10%) is checked.
+  - **Membership fee** (teller item `MEMBERSHIP_FEE`): a due until paid; it must be the exact fee and is paid once. `isGoodStanding()` = paid-up ≥ minimum paid-up and fee paid.
+  - **Transfer:** needs both members ACTIVE, a Board resolution no., and an amount ≤ the transferor's paid-up. GL Dr capital (from) / Cr capital (to) nets to zero; both members' ledgers move.
+  - **Withdrawal** (termination only): cancels the unpaid subscription and pays out the paid-up in cash from the teller's drawer (cash-out `SHARE_WITHDRAWAL`, through the new generic `payOut()` in cashiering). `registerShareOffset()` is the hook Phase 11 uses to deduct loans first.
+  - **Termination rule:** "share capital must be fully withdrawn/settled first (paid-up ₱…, unpaid subscription ₱…)".
+  - **For Phase 11:** `cbuLines()` + `retainCbu()` credit CBU retention to paid-up.
+  - **ASM:** Σ of the 12 month-end paid-up balances ÷ 12, HALF-UP (new `divide()` in `src/lib/money.ts`).
+  - **Cancelling a receipt:** cancelling a share payment or fee receipt takes it off the balances. It's refused if that capital was already transferred or paid out.
+- **Screens (T8.4):**
+  - **Member profile → "Share capital" tab** (needs `share.read`):
+    - subscribed, paid-up, unpaid and the ASM for a chosen year;
+    - membership fee and good-standing badges;
+    - subscriptions, and the share ledger with running balances.
+  - **Forms on the tab:**
+    - Subscribe (membership staff);
+    - Transfer (manager; finds the other member by member no.);
+    - Pay out share capital (teller, with a confirmation).
+  - **`/share` registry:** coop totals plus each member's subscribed, paid-up and unpaid, with search. The nav item is live.
+  - **Teller desk:** cart amounts can be edited, so a due can be paid in part (e.g. ₱2,500.00 of a ₱10,000.00 unpaid subscription). The server re-checks every amount.
+- **Report (T8.5):** the member share ledger for a date range, with the opening balance carried, exported to Excel at `/api/share/ledger?member=&from=&to=` (needs `share.read`).
+
+**Decisions** (see Questions Q-08.1–Q-08.4)
+- **Holding cap:** applies only above the minimum paid-up (₱2,500.00). Otherwise no early member could pay the minimum. Transfers don't check the cap.
+- **CBU retention above the unpaid subscription:** subscribes whole shares first.
+- **Who does what:** subscriptions by membership staff (`members.write`); transfers by the manager (`members.approve`); payouts by the teller (`cash.session`); payments and fees only at the teller.
+- **Partial payments:** made by editing the cart amount.
+
+**Deviations from spec (with reason)**
+- **Extra columns:**
+  - `share_transactions.seq`: same-day rows keep their order in the ledger;
+  - `share_transactions.subscription_id` and `receipt_item_id`, plus `member_fees.receipt_item_id`: tie rows to their source, so a cancelled receipt drops out of the balances.
+- **Withdrawal is paid out at the teller,** as a cash-out from the open session, not by a DV. The spec says "pays out paid-up"; the teller already handles cash and the drawer check.
+- **Phase 08 E2E:** I wrote this file in the tests-first commit; three selectors were fixed since, assertions unchanged:
+  - the tab link is matched exactly, because the main nav also has "Share capital & CBU";
+  - the "Add" button is taken from the share-capital due row, not the first due.
+- **Phase 04 E2E:** the manual item's "Amount" field is now matched exactly. The new cart inputs are labelled "Amount for …".
+- **UI-shell E2E / nav unit test:** the "coming soon" example moved to Phase 09 (`/savings`), since `/share` is now live.
+- **Vitest DB projects:** test and hook timeout raised to 30 s.
+  - A8.6 builds 37 paying members through the real actions. Under load it took 6 s, over Vitest's 5 s default.
+  - A test that times out keeps querying while the next test resets the database, which caused a deadlock.
+  - No assertion changed.
+
+**Follow-ups**
+- Answer Q-08.1–Q-08.4.
+- **Phase 11:** register the loan offset (`registerShareOffset`) and call `retainCbu()` on loan release.
+- **Phase 15:** `ISC_CAPITALIZED` and `PR_CAPITALIZED` ledger types are ready; nothing posts them yet.
+- **Older code** (cashiering, water) runs `Promise.all` on one transaction. pg 9 will refuse this; it now logs a deprecation warning. Fixed in the share module; offered as a separate task.
+- **Full E2E on `next dev`:** timing-sensitive on this PC (cold route compiles against the 15 s expect timeout). The full suite is more reliable against a production build: `E2E_SERVER=prod npx playwright test`.
+
+**Exit checks / counts:**
+- `npm run gate` is green: 422 tests (35 files), scan clean.
+- `npm run build` is green (`/share`, `/api/share/ledger`).
+- `npm run e2e -- phase-08` is green (A8.10).
+- Full E2E:
+  - **Production build:** 13 of 14 green in one run. A3.11 timed out once waiting for the dashboard after sign-in, then passed on rerun.
+  - **Dev server:** two full runs each had 2 different 15 s timeouts (slow first-time page renders); every spec passed in at least one run.
+- **TB balances after the fixture:**
+  - The integration test (subscribe, pay, fee, transfer, withdraw) checks that the TB balances and that GL paid-up equals the share ledgers.
+  - A8.7 checks that the TB control totals are unchanged.
+  - A8.9 checks that the ledger equals the GL subsidiary at every row.
+- Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK; the sample trial balance balances.

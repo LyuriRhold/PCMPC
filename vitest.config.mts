@@ -12,6 +12,10 @@ process.env.VITEST_DB_WORKERS = String(DB_WORKERS);
 const alias = { "@": fileURLToPath(new URL("./src", import.meta.url)) };
 // DB tests (integration + acceptance) always run against the test database.
 const dbEnv = { DATABASE_URL: process.env.DATABASE_URL_TEST ?? "", TZ: "UTC" };
+// DB tests build real fixtures through the actions (e.g. A8.6 makes 37 paying members); on a busy
+// machine that can pass Vitest's 5 s default. A timed-out test keeps querying while the next test
+// resets the database, so it must not time out early.
+const dbTimeouts = { testTimeout: 30_000, hookTimeout: 30_000 };
 
 export default defineConfig({
   resolve: { alias },
@@ -38,6 +42,7 @@ export default defineConfig({
           globalSetup: ["tests/global-setup-db.ts"],
           setupFiles: ["tests/setup-db.ts"],
           env: dbEnv,
+          ...dbTimeouts,
         },
       },
       {
@@ -49,6 +54,7 @@ export default defineConfig({
           globalSetup: ["tests/global-setup-db.ts"],
           setupFiles: ["tests/setup-db.ts"],
           env: dbEnv,
+          ...dbTimeouts,
         },
       },
     ],

@@ -92,7 +92,9 @@ export async function subscribe(tx: Tx, input: { memberId: string; shares: numbe
   const m = await lockMember(tx, input.memberId);
   assertMember(m, "subscribe to shares");
   if (!Number.isInteger(input.shares) || input.shares <= 0) throw new ShareError("Enter the number of shares (a whole number)");
-  const [par, minShares] = await Promise.all([getSetting("share.par_value", tx).then(BigInt), getSetting("share.min_subscription_shares", tx)]);
+  // One transaction = one connection: its queries run one after another.
+  const par = BigInt(await getSetting("share.par_value", tx));
+  const minShares = await getSetting("share.min_subscription_shares", tx);
   const amount = par * BigInt(input.shares);
   const balance = await shareBalance(m.id, tx);
   if (balance.subscribed + amount < par * BigInt(minShares)) {
@@ -129,7 +131,8 @@ export async function subscribe(tx: Tx, input: { memberId: string; shares: numbe
  * Q-08.1): otherwise no early member could ever pay the minimum.
  */
 async function assertHoldingCap(tx: Tx, m: MemberRow, currentPaidUp: Money, increase: Money): Promise<void> {
-  const [cap, minPaidUp] = await Promise.all([getSetting("share.max_holding_pct", tx), getSetting("share.min_paid_up_regular", tx).then(BigInt)]);
+  const cap = await getSetting("share.max_holding_pct", tx);
+  const minPaidUp = BigInt(await getSetting("share.min_paid_up_regular", tx));
   const after = currentPaidUp + increase;
   if (after <= minPaidUp) return;
   const total = (await totalPaidUp(tx)) + increase;
@@ -165,7 +168,8 @@ export async function planPayment(tx: Tx, memberId: string, amount: Money, pendi
 
 /** Credit lines of a share payment for the receipt's entry (plus the auto-subscription, if any). */
 export async function paymentLines(tx: Tx, plan: PaymentPlan): Promise<LineInput[]> {
-  const [rec, cap] = await Promise.all([accountIdFor(KEYS.receivable, tx), accountIdFor(KEYS.capital, tx)]);
+  const rec = await accountIdFor(KEYS.receivable, tx);
+  const cap = await accountIdFor(KEYS.capital, tx);
   const lines: LineInput[] = [];
   if (plan.autoSubscribe) {
     lines.push({ accountId: rec, debit: plan.autoSubscribe.amount, memberId: plan.memberId, memo: "Auto-subscription" });
@@ -208,7 +212,9 @@ export async function recordMembershipFee(tx: Tx, input: { memberId: string; amo
 
 /** Good standing (for loans, Phase 10): paid-up ≥ share.min_paid_up_regular and the membership fee is paid. */
 export async function isGoodStanding(memberId: string, db: Db | Tx = getDb()): Promise<boolean> {
-  const [balance, minPaidUp, fee] = await Promise.all([shareBalance(memberId, db), getSetting("share.min_paid_up_regular", db).then(BigInt), membershipFeePaid(memberId, db)]);
+  const balance = await shareBalance(memberId, db);
+  const minPaidUp = BigInt(await getSetting("share.min_paid_up_regular", db));
+  const fee = await membershipFeePaid(memberId, db);
   return balance.paidUp >= minPaidUp && fee;
 }
 
@@ -282,7 +288,8 @@ export async function withdraw(tx: Tx, input: { memberId: string; reason: string
   if (!input.reason.trim()) throw new ShareError("Enter the reason (the member's termination)");
   const balance = await shareBalance(m.id, tx);
   if (balance.subscribed <= 0n) throw new ShareError(`${nameOf(m)} has no share capital to withdraw`);
-  const [rec, cap] = await Promise.all([accountIdFor(KEYS.receivable, tx), accountIdFor(KEYS.capital, tx)]);
+  const rec = await accountIdFor(KEYS.receivable, tx);
+  const cap = await accountIdFor(KEYS.capital, tx);
 
   const offsetLines: LineInput[] = [];
   let available = balance.paidUp;

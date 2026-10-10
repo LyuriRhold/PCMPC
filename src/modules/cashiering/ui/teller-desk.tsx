@@ -311,7 +311,17 @@ export function ReceiptBuilder({
                 {c.label}
                 {c.description ? <span className="text-muted-foreground">: {c.description}</span> : null}
               </td>
-              <td className="py-1.5 text-right tabular-nums">{centavos(c.amount) === null ? c.amount : format(centavos(c.amount) ?? 0n)}</td>
+              <td className="py-1.5 text-right">
+                {/* Editable so a due can be paid in part (the server re-checks every amount). */}
+                <Input
+                  aria-label={`Amount for ${c.label}`}
+                  value={c.amount}
+                  onChange={(e) => setCart((cs) => cs.map((x) => (x.key === c.key ? { ...x, amount: e.target.value } : x)))}
+                  inputMode="decimal"
+                  aria-invalid={centavos(c.amount) === null || undefined}
+                  className="ml-auto w-32 text-right tabular-nums"
+                />
+              </td>
               <td className="py-1.5 text-right">
                 <Button type="button" variant="ghost" size="sm" aria-label={`Remove ${c.label}`} onClick={() => setCart((cs) => cs.filter((x) => x.key !== c.key))}>
                   <Trash2 className="size-4" aria-hidden />
@@ -352,7 +362,7 @@ export function ReceiptBuilder({
           <Label htmlFor="birNo">BIR receipt no.{requireBir ? "" : " (optional)"}</Label>
           <Input id="birNo" value={bir} onChange={(e) => setBir(e.target.value)} maxLength={40} />
         </div>
-        <Button type="button" onClick={issue} disabled={pending || cart.length === 0}>
+        <Button type="button" onClick={issue} disabled={pending || cart.length === 0 || cart.some((c) => (centavos(c.amount) ?? 0n) <= 0n)}>
           {pending ? "Issuing…" : "Issue receipt"}
         </Button>
       </div>

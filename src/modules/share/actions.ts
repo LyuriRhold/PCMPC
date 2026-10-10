@@ -2,12 +2,14 @@
 
 import "@/modules/plugins";
 import { z } from "zod";
-import { withTx } from "@/db/client";
+import { eq } from "drizzle-orm";
+import { getDb, withTx } from "@/db/client";
 import { failFrom, ok, type ActionResult } from "@/lib/action-result";
 import { requirePermission } from "@/lib/auth-guard";
 import { parse as parseMoney } from "@/lib/money";
 import { CashieringError } from "@/modules/cashiering/builtins";
 import { LedgerError } from "@/modules/ledger/service";
+import { members } from "@/modules/members/schema";
 import { ShareError, subscribe, transfer, withdraw } from "./service";
 
 const EXPECTED = [ShareError, LedgerError, CashieringError];
@@ -53,6 +55,20 @@ export async function withdrawSharesAction(input: z.input<typeof withdrawSchema>
     const data = withdrawSchema.parse(input);
     const r = await withTx((tx) => withdraw(tx, data, actor.id));
     return ok({ jeId: r.jeId, cash: String(r.cash) });
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const memberNoSchema = z.object({ memberNo: z.string().trim().min(1, "Enter the member no.").max(20) });
+/** Finds a member by member no. (e.g. the other member of a transfer). */
+export async function memberByNoAction(input: z.input<typeof memberNoSchema>): Promise<ActionResult<{ id: string; name: string; status: string }>> {
+  await requirePermission("members.read");
+  try {
+    const { memberNo } = memberNoSchema.parse(input);
+    const [m] = await getDb().select().from(members).where(eq(members.memberNo, memberNo.toUpperCase()));
+    if (!m) throw new ShareError(`No member ${memberNo.toUpperCase()}`);
+    return ok({ id: m.id, name: `${m.lastName}, ${m.firstName}`, status: m.status });
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

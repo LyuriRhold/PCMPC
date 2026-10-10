@@ -1,9 +1,10 @@
 import Decimal from "decimal.js";
-import { and, asc, eq, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, like, lte, or, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { businessToday, monthEnd, type BusinessDate } from "@/lib/dates";
 import { divide, format, type Money } from "@/lib/money";
+import { normalizeName } from "@/lib/names";
 import { receiptItems, receipts } from "@/modules/cashiering/schema";
 import { payOut } from "@/modules/cashiering/service";
 import { journalEntries } from "@/modules/ledger/schema";
@@ -428,9 +429,54 @@ export async function averageShareMonth(memberId: string, year: number, db: Db |
   return divide(total, 12n);
 }
 
-/** Subscriptions of a member, newest first. */
+/** Subscriptions of a member, oldest first. */
 export async function memberSubscriptions(memberId: string, db: Db | Tx = getDb()) {
   return db.select().from(shareSubscriptions).where(eq(shareSubscriptions.memberId, memberId)).orderBy(asc(shareSubscriptions.subDate));
+}
+
+/** Coop-wide totals (share registry header). */
+export async function shareTotals(db: Db | Tx = getDb()): Promise<ShareBalance & { holders: number }> {
+  const [r] = await db
+    .select({
+      subscribed: sql<string>`coalesce(sum(${memberShareBalance.subscribed}), 0)::text`,
+      paidUp: sql<string>`coalesce(sum(${memberShareBalance.paidUp}), 0)::text`,
+      unpaid: sql<string>`coalesce(sum(${memberShareBalance.unpaid}), 0)::text`,
+      holders: sql<number>`count(*) filter (where ${memberShareBalance.paidUp} > 0)::int`,
+    })
+    .from(memberShareBalance);
+  return { subscribed: BigInt(r?.subscribed ?? "0"), paidUp: BigInt(r?.paidUp ?? "0"), unpaid: BigInt(r?.unpaid ?? "0"), holders: r?.holders ?? 0 };
+}
+
+/** Members with share transactions and their balances, by member no. (share registry). */
+export async function shareRegistry(filters: { q?: string; page?: number }, db: Db | Tx = getDb()) {
+  const conds = normalizeName(filters.q)
+    .split(" ")
+    .filter(Boolean)
+    .map((token) => like(members.searchText, `%${token}%`));
+  const where = conds.length ? and(...conds) : undefined;
+  const pageSize = 50;
+  const page = Math.max(filters.page ?? 1, 1);
+  const [rows, [count]] = await Promise.all([
+    db
+      .select({
+        id: members.id,
+        memberNo: members.memberNo,
+        lastName: members.lastName,
+        firstName: members.firstName,
+        status: members.status,
+        subscribed: memberShareBalance.subscribed,
+        paidUp: memberShareBalance.paidUp,
+        unpaid: memberShareBalance.unpaid,
+      })
+      .from(memberShareBalance)
+      .innerJoin(members, eq(members.id, memberShareBalance.memberId))
+      .where(where)
+      .orderBy(asc(members.memberNo), asc(members.lastName))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize),
+    db.select({ n: sql<number>`count(*)::int` }).from(memberShareBalance).innerJoin(members, eq(members.id, memberShareBalance.memberId)).where(where),
+  ]);
+  return { rows, total: count?.n ?? 0, page, pageSize };
 }
 
 /** Several members' balances at once (for lists). */

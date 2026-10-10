@@ -33,7 +33,7 @@ test("A8.10 subscribe → pay at the teller → ledger shows paid-up", async ({ 
   await page.getByRole("button", { name: "Approve membership" }).click();
   await expect(page.getByText(/Approved as M-\d{6}/)).toBeVisible();
 
-  await page.getByRole("link", { name: "Share capital" }).click();
+  await page.getByRole("link", { name: "Share capital", exact: true }).click();
   await page.getByLabel("Shares to subscribe").fill("100");
   await page.getByRole("button", { name: "Subscribe" }).click();
   await expect(page.getByTestId("share-subscribed")).toHaveText("₱10,000.00");
@@ -51,7 +51,7 @@ test("A8.10 subscribe → pay at the teller → ledger shows paid-up", async ({ 
   await page.getByRole("button", { name: "Search" }).click();
   await page.getByRole("button", { name: new RegExp(lastName) }).click();
   await expect(page.getByText(/Share capital · unpaid subscription/)).toBeVisible();
-  await page.getByRole("button", { name: "Add", exact: true }).first().click();
+  await page.locator("div", { hasText: /^Share capital · unpaid subscription/ }).getByRole("button", { name: "Add", exact: true }).click();
   // Pay part of it: edit the cart amount to ₱2,500.00.
   await page.getByLabel(/Amount for Share capital/).fill("2500.00");
   await expect(page.getByTestId("cart-total")).toHaveText("₱2,500.00");
@@ -64,7 +64,7 @@ test("A8.10 subscribe → pay at the teller → ledger shows paid-up", async ({ 
   await signIn(page, mgr.user, mgr.pass);
   await page.goto(`/members?q=${lastName}`);
   await page.getByRole("link", { name: new RegExp(lastName) }).click();
-  await page.getByRole("link", { name: "Share capital" }).click();
+  await page.getByRole("link", { name: "Share capital", exact: true }).click();
   await expect(page.getByTestId("share-paid-up")).toHaveText("₱2,500.00");
   await expect(page.getByRole("row", { name: /Payment/ })).toContainText("₱2,500.00");
 });

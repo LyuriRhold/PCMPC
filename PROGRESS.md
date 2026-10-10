@@ -129,8 +129,8 @@
 - [x] T8.1 Schema, migrations, view, mappings check
 - [x] T8.2 Share service (subscribe, pay, fee, transfer, withdraw, retainCbu, isGoodStanding, ASM)
 - [x] T8.3 GL integration via `postJournal` in the same transaction
-- [ ] T8.4 Actions, UI tab/forms, teller registrations (fee, share payment, withdrawal)
-- [ ] T8.5 Member share ledger report (per member, date range) + Excel export
+- [x] T8.4 Actions, UI tab/forms, teller registrations (fee, share payment, withdrawal)
+- [x] T8.5 Member share ledger report (per member, date range) + Excel export
 - [x] Acceptance tests written first (tests/acceptance/phase-08.test.ts)
 - [ ] Exit checks passed
 
@@ -294,6 +294,10 @@
 - [ ] Q-07.5 (phase 07) Deposit refund on closure. | default used: automatic when the account is closed: the deposit offsets everything the account still owes (oldest bill first) and the rest is refunded by a DV (DRAFT, then approved and released as usual) | answer:
 - [ ] Q-07.6 (phase 07) Collection efficiency: do advances applied to a bill count as collected? | default used: yes (cash received earlier, applied to the bill); penalties are not counted | answer:
 - [ ] Q-07.7 (phase 07) Report formats used today (billing summary, collection report, aging, notices). | default used: on-screen tables that print and export to Excel; the notice is a one-page PDF | answer:
+- [ ] Q-08.1 (phase 08) Holding cap (10% of the coop's total paid-up) for new members: with few members, any first payment is a large share of the total. | default used: the cap is checked only when the member's paid-up would go above the minimum paid-up (`share.min_paid_up_regular`, ₱2,500.00); payments up to the minimum are always allowed. Transfers don't check the cap (Board-approved) | answer:
+- [ ] Q-08.2 (phase 08) CBU retention on a loan (Phase 11) when the member's unpaid subscription is smaller than the retention. | default used: whole shares are subscribed first for the excess (as `share.auto_subscribe_excess`), then the retention is credited to paid-up | answer:
+- [ ] Q-08.3 (phase 08) Who encodes subscriptions, transfers and withdrawals? | default used: subscriptions by membership staff (members.write: manager, loan officer); transfers by the manager (members.approve) with the Board resolution no.; withdrawal paid out by the teller from the open session (cash.session), only to terminate a member; payments and the membership fee only at the teller | answer:
+- [ ] Q-08.4 (phase 08) Partial payments at the teller. | default used: the teller can change the amount of any item in the cart (e.g. ₱2,500.00 of a ₱10,000.00 unpaid subscription); the server re-checks each amount against the module's rules | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->

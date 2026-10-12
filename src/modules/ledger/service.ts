@@ -195,14 +195,24 @@ export async function reverseJournal(tx: Tx, jeId: string, date: BusinessDate, r
 }
 
 /**
- * A reversal requested by a person (Journal vouchers screen): same as reverseJournal, but the
- * user who prepared the entry can't reverse it (segregation of duties, reviewer follow-up).
+ * Entries a person may reverse on the Journal vouchers screen: manual JVs and entries with no business
+ * record. An entry posted by a module (a receipt, a bill, a loan, a savings or share posting) is
+ * corrected in that module, so the module's own records follow (reviewer follow-up, Phase 11).
+ */
+export const USER_REVERSIBLE_SOURCES: readonly string[] = ["manual_jv", "ledger"];
+
+/**
+ * A reversal requested by a person (Journal vouchers screen): same as reverseJournal, but only for
+ * USER_REVERSIBLE_SOURCES, and the user who prepared the entry can't reverse it (segregation of duties).
  */
 export async function reverseEntryByUser(tx: Tx, jeId: string, date: BusinessDate, reason: string, userId: string): Promise<JournalEntry> {
   const [je] = await tx
-    .select({ preparedBy: journalEntries.preparedBy, status: journalEntries.status, reversalOfId: journalEntries.reversalOfId })
+    .select({ preparedBy: journalEntries.preparedBy, status: journalEntries.status, reversalOfId: journalEntries.reversalOfId, sourceModule: journalEntries.sourceModule })
     .from(journalEntries)
     .where(eq(journalEntries.id, jeId));
+  if (je?.status === "POSTED" && !je.reversalOfId && !USER_REVERSIBLE_SOURCES.includes(je.sourceModule)) {
+    throw new LedgerError(`This entry was posted by the ${je.sourceModule} module; correct it there (e.g. cancel the receipt) so its records follow`);
+  }
   // Entries that can't be reversed at all get reverseJournal's specific message first.
   if (je?.status === "POSTED" && !je.reversalOfId && je.preparedBy === userId) {
     throw new SodError("Segregation of duties: the preparer of an entry can't reverse it");

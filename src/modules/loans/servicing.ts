@@ -25,12 +25,13 @@ import {
   loanSchedule,
   type Disbursement,
   type Loan,
+  type LoanApplication,
   type LoanScheduleRow,
   type LoanStatus,
   type PaymentAllocation,
   type PaymentKind,
 } from "./schema";
-import { LoanError } from "./service";
+import { assertStillEligible, LoanError } from "./service";
 
 /**
  * Loan servicing (PHASE-11): release, payments, penalties, aging, write-off, restructure and
@@ -42,6 +43,8 @@ import { LoanError } from "./service";
 type MemberRow = typeof members.$inferSelect;
 const nameOf = (m: Pick<MemberRow, "lastName" | "firstName">) => `${m.lastName}, ${m.firstName}`;
 const OPEN: LoanStatus[] = ["ACTIVE", "PAST_DUE"];
+/** Loans whose balance left the books (restructured into a new loan, written off) or never reached them. */
+const CLOSED: LoanStatus[] = ["RESTRUCTURED", "WRITTEN_OFF", "CANCELLED"];
 
 // ── Reading a loan ──
 
@@ -72,16 +75,20 @@ export async function getLoan(loanId: string, db: Db | Tx = getDb()) {
   const today = businessToday();
   const oldest = oldestUnpaid(rows);
   const [restructuredInto] = await db.select({ id: loans.id, loanNo: loans.loanNo }).from(loans).where(eq(loans.restructuredFromId, loanId));
+  // A restructured or written-off loan owes nothing on the books any more (its schedule is history).
+  const closed = CLOSED.includes(row.loan.status);
   return {
     ...row,
     schedule: rows,
     payments,
-    outstandingPrincipal: sumOf(rows, "principal"),
-    unpaidInterest: sumOf(rows, "interest"),
-    unpaidPenalty: sumOf(rows, "penalty"),
+    outstandingPrincipal: closed ? 0n : sumOf(rows, "principal"),
+    unpaidInterest: closed ? 0n : sumOf(rows, "interest"),
+    unpaidPenalty: closed ? 0n : sumOf(rows, "penalty"),
     /** Everything due up to today (penalties, interest and principal of installments due). */
-    dueNow: rows.filter((r) => r.dueDate <= today).reduce((s, r) => s + unpaidOf(r).penalty + unpaidOf(r).interest + unpaidOf(r).principal, 0n),
+    dueNow: closed ? 0n : rows.filter((r) => r.dueDate <= today).reduce((s, r) => s + unpaidOf(r).penalty + unpaidOf(r).interest + unpaidOf(r).principal, 0n),
     daysPastDue: OPEN.includes(row.loan.status) ? daysPastDue(oldest?.dueDate ?? null, today) : 0,
+    /** Written off: what can still be recovered. */
+    recoverable: row.loan.status === "WRITTEN_OFF" ? await recoverable(db, loanId) : 0n,
     restructuredInto: restructuredInto ?? null,
   };
 }
@@ -90,7 +97,7 @@ export async function getLoan(loanId: string, db: Db | Tx = getDb()) {
 export async function memberLoans(memberId: string, db: Db | Tx = getDb()) {
   const rows = await db.select().from(loans).where(eq(loans.memberId, memberId)).orderBy(desc(loans.createdAt));
   const out = [];
-  for (const l of rows) out.push({ loan: l, outstandingPrincipal: sumOf(await scheduleOf(db, l.id), "principal") });
+  for (const l of rows) out.push({ loan: l, outstandingPrincipal: CLOSED.includes(l.status) ? 0n : sumOf(await scheduleOf(db, l.id), "principal") });
   return out;
 }
 
@@ -115,13 +122,10 @@ export async function authorizeRelease(tx: Tx, input: { applicationId: string; f
   const [app] = await tx.select().from(loanApplications).where(eq(loanApplications.id, input.applicationId)).for("update");
   if (!app) throw new LoanError("Loan application not found");
   if (app.status !== "APPROVED") throw new LoanError(`The application is ${app.status}; only an APPROVED application is released`);
-  if (app.encodedBy === managerId) throw new LoanError("Segregation of duties: the loan officer who encoded it can't release it");
-  const approvers = await tx.select({ by: loanApprovals.by }).from(loanApprovals).where(and(eq(loanApprovals.applicationId, app.id), eq(loanApprovals.decision, "APPROVE")));
-  if (approvers.some((a) => a.by === managerId)) throw new LoanError("Segregation of duties: the release is authorized by someone other than the approver");
-  const today = businessToday();
-  if (input.firstDueDate <= today) throw new LoanError("The first due date must be after today");
-  if (input.firstDueDate > addMonths(today, 3)) throw new LoanError("The first due date can be at most 3 months away");
+  await assertReleaser(tx, app, managerId);
+  await assertFirstDue(tx, input.firstDueDate);
   if (input.disbursement === "RESTRUCTURE") throw new LoanError("Choose cash or the member's savings");
+  await assertStillEligible(tx, app);
   if (input.disbursement === "SAVINGS") {
     if (!input.savingsAccountId) throw new LoanError("Choose the savings account to credit");
     await checkTransferIn(tx, { accountId: input.savingsAccountId, memberId: app.memberId });
@@ -158,10 +162,72 @@ export async function authorizeRelease(tx: Tx, input: { applicationId: string; f
   return { loanId: loan.id, loanNo };
 }
 
-/** Step 2 for cash (a teller, from the drawer): the release entry with the net proceeds paid out. */
-export async function payOutProceeds(tx: Tx, input: { loanId: string }, tellerId: string) {
+/** Segregation of duties: the release is authorized by neither the loan officer who encoded it nor an approver. */
+async function assertReleaser(tx: Tx, app: LoanApplication, managerId: string) {
+  if (app.encodedBy === managerId) throw new LoanError("Segregation of duties: the loan officer who encoded it can't release it");
+  const approvers = await tx.select({ by: loanApprovals.by }).from(loanApprovals).where(and(eq(loanApprovals.applicationId, app.id), eq(loanApprovals.decision, "APPROVE")));
+  if (approvers.some((a) => a.by === managerId)) throw new LoanError("Segregation of duties: the release is authorized by someone other than the approver");
+}
+
+/** A first due date after today and at most loan.max_first_due_months away. */
+async function assertFirstDue(tx: Tx, firstDueDate: BusinessDate) {
+  const today = businessToday();
+  const months = await getSetting("loan.max_first_due_months", tx);
+  if (firstDueDate <= today) throw new LoanError("The first due date must be after today");
+  if (firstDueDate > addMonths(today, months)) throw new LoanError(`The first due date can be at most ${months} months away`);
+}
+
+async function applicationOf(tx: Tx, loan: Loan): Promise<LoanApplication> {
+  if (!loan.applicationId) throw new LoanError(`${loan.loanNo} has no application`);
+  const [app] = await tx.select().from(loanApplications).where(eq(loanApplications.id, loan.applicationId));
+  if (!app) throw new LoanError("Loan application not found");
+  return app;
+}
+
+/**
+ * A loan waiting for its payout whose first due date has passed (or must move) is authorized again
+ * with a new first due date, by a manager who neither encoded nor approved it (eligibility re-checked).
+ */
+export async function reauthorizeRelease(tx: Tx, input: { loanId: string; firstDueDate: BusinessDate }, managerId: string) {
+  const [peek] = await tx.select().from(loans).where(eq(loans.id, input.loanId));
+  if (!peek) throw new LoanError("Loan not found");
+  if (peek.status !== "PENDING") throw new LoanError(`${peek.loanNo} is ${peek.status}; only a loan waiting for its payout is authorized again`);
+  const app = await applicationOf(tx, peek);
+  await assertReleaser(tx, app, managerId);
+  await assertFirstDue(tx, input.firstDueDate);
+  // Eligibility locks the member before the loan, as the payout and receipts do.
+  await assertStillEligible(tx, app);
   const loan = await lockLoan(tx, input.loanId);
-  if (loan.status !== "PENDING" || loan.disbursement !== "CASH") throw new LoanError(`${loan.loanNo} is not waiting for a cash payout`);
+  if (loan.status !== "PENDING") throw new LoanError(`${loan.loanNo} is ${loan.status}; only a loan waiting for its payout is authorized again`);
+  const maturityDate = addMonths(input.firstDueDate, loan.term - 1);
+  await tx.update(loans).set({ firstDueDate: input.firstDueDate, maturityDate, authorizedBy: managerId }).where(eq(loans.id, loan.id));
+  await audit(tx, { action: "loans.release_reauthorize", entity: "loan", entityId: loan.id, before: { firstDueDate: loan.firstDueDate, authorizedBy: loan.authorizedBy }, after: { firstDueDate: input.firstDueDate }, userId: managerId });
+}
+
+/** A loan not yet paid out is cancelled (the member no longer takes it); its application is CANCELLED too. */
+export async function cancelRelease(tx: Tx, input: { loanId: string; reason: string }, managerId: string) {
+  const reason = input.reason.trim();
+  if (!reason) throw new LoanError("Enter why the release is cancelled");
+  const loan = await lockLoan(tx, input.loanId);
+  if (loan.status !== "PENDING") throw new LoanError(`${loan.loanNo} is ${loan.status}; only a loan not yet paid out can be cancelled`);
+  await tx.update(loans).set({ status: "CANCELLED", closedAt: businessToday() }).where(eq(loans.id, loan.id));
+  if (loan.applicationId) await tx.update(loanApplications).set({ status: "CANCELLED" }).where(eq(loanApplications.id, loan.applicationId));
+  await audit(tx, { action: "loans.release_cancel", entity: "loan", entityId: loan.id, after: { loanNo: loan.loanNo, reason }, userId: managerId });
+}
+
+/**
+ * Step 2 for cash (a teller other than the authorizer, from the drawer): the release entry with the
+ * net proceeds paid out. Eligibility is checked again (it locks the member before the loan, as
+ * receipts do).
+ */
+export async function payOutProceeds(tx: Tx, input: { loanId: string }, tellerId: string) {
+  const [peek] = await tx.select().from(loans).where(eq(loans.id, input.loanId));
+  if (!peek) throw new LoanError("Loan not found");
+  if (peek.status !== "PENDING" || peek.disbursement !== "CASH") throw new LoanError(`${peek.loanNo} is not waiting for a cash payout`);
+  if (peek.authorizedBy === tellerId) throw new LoanError("Segregation of duties: the manager who authorized the release can't also pay it out");
+  await assertStillEligible(tx, await applicationOf(tx, peek));
+  const loan = await lockLoan(tx, input.loanId);
+  if (loan.status !== "PENDING" || loan.authorizedBy === tellerId) throw new LoanError(`${loan.loanNo} is not waiting for a cash payout`);
   return release(tx, loan, tellerId);
 }
 
@@ -172,7 +238,7 @@ export async function payOutProceeds(tx: Tx, input: { loanId: string }, tellerId
  */
 async function release(tx: Tx, loan: Loan, actorId: string) {
   const today = businessToday();
-  if (loan.firstDueDate <= today) throw new LoanError(`The first due date (${formatDate(loan.firstDueDate)}) has passed; the release must be authorized again`);
+  if (loan.firstDueDate <= today) throw new LoanError(`The first due date (${formatDate(loan.firstDueDate)}) has passed; a manager must authorize the release again with a new first due date`);
   const [member] = await tx.select().from(members).where(eq(members.id, loan.memberId));
   if (!member) throw new LoanError("Member not found");
   const debitLines: LineInput[] = [{ accountId: await accountIdFor(loan.receivableGlKey, tx), debit: loan.principal, memberId: loan.memberId, memo: loan.loanNo }];
@@ -248,6 +314,7 @@ export async function planLoanPayment(tx: Tx, loanId: string, amount: Money, kin
       totals.principal += part.principal;
     }
   }
+  if (left !== 0n) throw new LoanError(`${format(left)} of the payment could not be applied; check the loan payment allocation setting`);
   return { loanId: loan.id, kind, amount, ...totals, allocations };
 }
 
@@ -406,7 +473,7 @@ export async function loansDaily(tx: Tx, date: BusinessDate) {
   if (rows.length) {
     await tx
       .insert(loanAgingSnapshots)
-      .values(rows.map((r) => ({ asOf: date, loanId: r.loan.id, daysPastDue: r.daysPastDue, bucket: r.bucket, outstandingPrincipal: r.outstandingPrincipal })))
+      .values(rows.map((r) => ({ asOf: date, loanId: r.loan.id, daysPastDue: r.daysPastDue, bucket: r.bucket, outstandingPrincipal: r.outstandingPrincipal, amountPastDue: r.amountPastDue })))
       .onConflictDoNothing();
   }
   return { penalties: penalties.accruals, penaltyAmount: String(penalties.amount), loans: rows.length };
@@ -414,21 +481,63 @@ export async function loansDaily(tx: Tx, date: BusinessDate) {
 
 // ── Aging, PAR and delinquency (T11.5) ──
 
-/** Loans past due with what is overdue, the borrower's and the comakers' contact numbers. */
-export async function delinquencyList(asOf: BusinessDate, db: Db | Tx = getDb()) {
-  const rows = (await portfolio(asOf, db)).filter((r) => r.daysPastDue > 0).sort((a, b) => b.daysPastDue - a.daysPastDue);
+export type AgingRow = { loan: Loan; member: MemberRow; outstandingPrincipal: Money; daysPastDue: number; bucket: string; amountPastDue: Money | null };
+
+/**
+ * The aging as of a date: today's is computed live; an earlier date reads that day's snapshot
+ * (written by the daily job), so later payments don't change it. A later date shows today's.
+ */
+export async function agingAsOf(asOf: BusinessDate, db: Db | Tx = getDb()): Promise<{ asOf: BusinessDate; source: "live" | "snapshot"; rows: AgingRow[] }> {
+  const today = businessToday();
+  if (asOf >= today) return { asOf: today, source: "live", rows: await portfolio(today, db) };
+  const rows = await db
+    .select({ s: loanAgingSnapshots, loan: loans, member: members })
+    .from(loanAgingSnapshots)
+    .innerJoin(loans, eq(loans.id, loanAgingSnapshots.loanId))
+    .innerJoin(members, eq(members.id, loans.memberId))
+    .where(eq(loanAgingSnapshots.asOf, asOf))
+    .orderBy(asc(loans.loanNo));
+  return {
+    asOf,
+    source: "snapshot",
+    rows: rows.map(({ s, loan, member }) => ({ loan, member, outstandingPrincipal: s.outstandingPrincipal, daysPastDue: s.daysPastDue, bucket: s.bucket, amountPastDue: s.amountPastDue })),
+  };
+}
+
+/** The application a loan came from, following restructures back to the original loan. */
+async function originalApplicationId(db: Db | Tx, loan: Pick<Loan, "applicationId" | "restructuredFromId">): Promise<string | null> {
+  let cur = loan;
+  const seen = new Set<string>();
+  while (!cur.applicationId && cur.restructuredFromId && !seen.has(cur.restructuredFromId)) {
+    seen.add(cur.restructuredFromId);
+    const [prev] = await db.select({ applicationId: loans.applicationId, restructuredFromId: loans.restructuredFromId }).from(loans).where(eq(loans.id, cur.restructuredFromId));
+    if (!prev) break;
+    cur = prev;
+  }
+  return cur.applicationId;
+}
+
+/** Of aging rows, the loans past due (most days first) with the comakers' contact numbers. */
+export async function delinquentOf(rows: AgingRow[], db: Db | Tx = getDb()) {
+  const late = rows.filter((r) => r.daysPastDue > 0).sort((a, b) => b.daysPastDue - a.daysPastDue);
   const out = [];
-  for (const r of rows) {
-    const comakers = r.loan.applicationId
+  for (const r of late) {
+    const applicationId = await originalApplicationId(db, r.loan);
+    const comakers = applicationId
       ? await db
           .select({ name: sql<string>`${members.lastName} || ', ' || ${members.firstName}`, memberNo: members.memberNo, mobile: members.mobile })
           .from(loanApplicationComakers)
           .innerJoin(members, eq(members.id, loanApplicationComakers.memberId))
-          .where(eq(loanApplicationComakers.applicationId, r.loan.applicationId))
+          .where(eq(loanApplicationComakers.applicationId, applicationId))
       : [];
     out.push({ ...r, comakers });
   }
   return out;
+}
+
+/** Loans past due with what is overdue, the borrower's and the comakers' contact numbers. */
+export async function delinquencyList(asOf: BusinessDate, db: Db | Tx = getDb()) {
+  return delinquentOf((await agingAsOf(asOf, db)).rows, db);
 }
 
 // ── Write-off, recovery and restructure (T11.6) ──
@@ -491,14 +600,16 @@ export async function recoveryLines(tx: Tx, plan: LoanPaymentPlan): Promise<Line
  * term and schedule); the old loan is RESTRUCTURED and linked. GL: Dr Loans Receivable (new) / Cr
  * Loans Receivable (old principal) / Cr Interest Income / Cr Fines and Penalties Income.
  */
-export async function restructure(tx: Tx, input: { loanId: string; term: number; firstDueDate: BusinessDate; reason: string }, managerId: string) {
+export async function restructure(tx: Tx, input: { loanId: string; term: number; firstDueDate: BusinessDate; bodRef: string; reason: string }, managerId: string) {
+  const bodRef = input.bodRef.trim();
+  if (!bodRef) throw new LoanError("Enter the Board resolution no. that approved the restructure");
+  const reason = input.reason.trim();
+  if (!reason) throw new LoanError("Enter why the loan is restructured");
   const old = await lockLoan(tx, input.loanId);
   if (!OPEN.includes(old.status)) throw new LoanError(`${old.loanNo} is ${old.status}`);
-  const reason = input.reason.trim();
-  if (!reason) throw new LoanError("Enter why the loan is restructured (e.g. the Board resolution)");
   if (!Number.isInteger(input.term) || input.term < 1 || input.term > 360) throw new LoanError("Enter the new term in months (1 to 360)");
   const today = businessToday();
-  if (input.firstDueDate <= today || input.firstDueDate > addMonths(today, 3)) throw new LoanError("The first due date must be after today and at most 3 months away");
+  await assertFirstDue(tx, input.firstDueDate);
   const rows = await scheduleOf(tx, old.id);
   const principal = sumOf(rows, "principal");
   const interest = rows.filter((r) => r.dueDate <= today).reduce((s, r) => s + unpaidOf(r).interest, 0n);
@@ -512,8 +623,8 @@ export async function restructure(tx: Tx, input: { loanId: string; term: number;
     {
       date: today,
       book: "GJ",
-      particulars: `Restructure of loan ${old.loanNo} into ${loanNo}: ${reason}`,
-      reference: loanNo,
+      particulars: `Restructure of loan ${old.loanNo} into ${loanNo} (${bodRef}): ${reason}`,
+      reference: bodRef,
       source: { module: "loans", id: old.id },
       lines: [
         { accountId: receivable, debit: total, memberId: old.memberId, memo: loanNo },
@@ -548,13 +659,14 @@ export async function restructure(tx: Tx, input: { loanId: string; term: number;
       releasedBy: managerId,
       jeId: je.id,
       restructuredFromId: old.id,
+      restructureRef: bodRef,
       createdBy: managerId,
     })
     .returning();
   if (!loan) throw new Error("loan insert returned no row");
   await insertSchedule(tx, loan, total, input.firstDueDate, input.term, managerId);
   await tx.update(loans).set({ status: "RESTRUCTURED", closedAt: today }).where(eq(loans.id, old.id));
-  await audit(tx, { action: "loans.restructure", entity: "loan", entityId: old.id, after: { into: loanNo, principal: format(principal), interest: format(interest), penalty: format(penalty), term: input.term, reason }, userId: managerId });
+  await audit(tx, { action: "loans.restructure", entity: "loan", entityId: old.id, after: { into: loanNo, principal: format(principal), interest: format(interest), penalty: format(penalty), term: input.term, bodRef, reason }, userId: managerId });
   return { loanId: loan.id, loanNo, principal: total };
 }
 
@@ -611,8 +723,8 @@ registerShareOffset({
     const used = available - left;
     return { amount: used, lines, description: "Loans paid from share capital" };
   },
-  recorded: async (tx, _memberId, jeId) => {
-    for (const plan of pendingOffsets.get(tx) ?? []) await recordLoanPayment(tx, plan, { payDate: businessToday(), jeId, refNo: null, remarks: "Offset from share capital on withdrawal" }, null);
+  recorded: async (tx, _memberId, jeId, actorId) => {
+    for (const plan of pendingOffsets.get(tx) ?? []) await recordLoanPayment(tx, plan, { payDate: businessToday(), jeId, refNo: null, remarks: "Offset from share capital on withdrawal" }, actorId);
     pendingOffsets.delete(tx);
   },
 });

@@ -191,7 +191,7 @@ export const loanApprovals = pgTable(
 
 // ── Phase 11: loans, schedules, payments, penalties, aging ──
 
-export const LOAN_STATUSES = ["PENDING", "ACTIVE", "PAST_DUE", "PAID", "RESTRUCTURED", "WRITTEN_OFF"] as const;
+export const LOAN_STATUSES = ["PENDING", "ACTIVE", "PAST_DUE", "PAID", "RESTRUCTURED", "WRITTEN_OFF", "CANCELLED"] as const;
 export type LoanStatus = (typeof LOAN_STATUSES)[number];
 export const DISBURSEMENTS = ["CASH", "SAVINGS", "RESTRUCTURE"] as const;
 export type Disbursement = (typeof DISBURSEMENTS)[number];
@@ -199,7 +199,8 @@ export type Disbursement = (typeof DISBURSEMENTS)[number];
 /**
  * A loan. PENDING after the release is authorized (no entry yet); ACTIVE once the proceeds are paid
  * out (or credited to savings) with the release entry; PAST_DUE while an installment is overdue;
- * then PAID, RESTRUCTURED (into a new loan) or WRITTEN_OFF. Terms are copied from the application.
+ * then PAID, RESTRUCTURED (into a new loan) or WRITTEN_OFF. A PENDING loan can be authorized again
+ * (a new first due date) or CANCELLED before its payout. Terms are copied from the application.
  */
 export const loans = pgTable(
   "loans",
@@ -237,6 +238,8 @@ export const loans = pgTable(
     /** The release (or restructure) entry. */
     jeId: uuid("je_id").references(() => journalEntries.id),
     restructuredFromId: uuid("restructured_from_id"),
+    /** The Board resolution that approved the restructure (on the new loan). */
+    restructureRef: text("restructure_ref"),
     writeOffRef: text("write_off_ref"),
     writeOffJeId: uuid("write_off_je_id").references(() => journalEntries.id),
     closedAt: date("closed_at", { mode: "string" }),
@@ -246,7 +249,7 @@ export const loans = pgTable(
     check("loans_status_chk", inList("status", LOAN_STATUSES)),
     check("loans_disbursement_chk", inList("disbursement", DISBURSEMENTS)),
     check("loans_amounts_chk", sql`${t.principal} > 0 AND ${t.term} > 0 AND ${t.netProceeds} >= 0`),
-    check("loans_released_chk", sql`(${t.status} = 'PENDING') = (${t.jeId} IS NULL)`),
+    check("loans_released_chk", sql`(${t.status} IN ('PENDING', 'CANCELLED')) = (${t.jeId} IS NULL)`),
     uniqueIndex("loans_application_uq").on(t.applicationId),
     index("loans_member_idx").on(t.memberId),
     index("loans_status_idx").on(t.status),
@@ -358,6 +361,8 @@ export const loanAgingSnapshots = pgTable(
     daysPastDue: integer("days_past_due").notNull(),
     bucket: text("bucket").notNull(),
     outstandingPrincipal: money("outstanding_principal").notNull(),
+    /** Penalties, interest and principal of the installments overdue (null on snapshots taken before it was kept). */
+    amountPastDue: money("amount_past_due"),
     ...createdColumns(),
   },
   (t) => [uniqueIndex("loan_aging_snapshots_uq").on(t.asOf, t.loanId)],

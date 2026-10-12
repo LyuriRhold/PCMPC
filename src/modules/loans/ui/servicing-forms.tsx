@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { useAction } from "@/components/use-action";
 import { format } from "@/lib/money";
 import { selectClass } from "@/modules/members/ui/member-form";
-import { authorizeReleaseAction, payFromSavingsAction, payOutProceedsAction, restructureAction, writeOffAction } from "../servicing-actions";
+import { authorizeReleaseAction, cancelReleaseAction, payFromSavingsAction, payOutProceedsAction, reauthorizeReleaseAction, restructureAction, writeOffAction } from "../servicing-actions";
 
 function Err({ error }: { error: string | null }) {
   return error ? (
@@ -101,6 +101,48 @@ export function PayOutButton({ loanId, loanNo, net }: { loanId: string; loanNo: 
   );
 }
 
+/** Manager (not the approver): authorizes a loan waiting for its payout again with a new first due date, or cancels it. */
+export function PendingReleaseForms({ loanId, defaultFirstDue }: { loanId: string; defaultFirstDue: string }) {
+  const again = useAction();
+  const cancel = useAction();
+  return (
+    <div className="flex flex-col gap-3">
+      <form className="flex flex-wrap items-end gap-2" action={(fd) => again.run(() => reauthorizeReleaseAction({ loanId, firstDueDate: String(fd.get("raFirst") ?? "") }), { success: "Authorized again; the teller can pay it out." })}>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="raFirst">New first due date</Label>
+          <Input id="raFirst" name="raFirst" type="date" defaultValue={defaultFirstDue} />
+        </div>
+        <Button type="submit" variant="outline" disabled={again.pending}>
+          Authorize again
+        </Button>
+        <div className="w-full">
+          <Err error={again.error} />
+          <Done done={again.done} />
+        </div>
+      </form>
+      <form
+        className="flex flex-wrap items-end gap-2"
+        action={(fd) => {
+          if (!window.confirm("Cancel this loan? Its application is cancelled too.")) return;
+          cancel.run(() => cancelReleaseAction({ loanId, reason: String(fd.get("crReason") ?? "") }), { success: "Cancelled." });
+        }}
+      >
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="crReason">Reason for cancelling</Label>
+          <Input id="crReason" name="crReason" maxLength={300} className="w-64" />
+        </div>
+        <Button type="submit" variant="destructive" disabled={cancel.pending}>
+          Cancel the loan
+        </Button>
+        <div className="w-full">
+          <Err error={cancel.error} />
+          <Done done={cancel.done} />
+        </div>
+      </form>
+    </div>
+  );
+}
+
 /** Manager: writes off the outstanding principal on the Board's resolution. */
 export function WriteOffForm({ loanId }: { loanId: string }) {
   const { pending, error, done, run } = useAction();
@@ -125,7 +167,7 @@ export function WriteOffForm({ loanId }: { loanId: string }) {
   );
 }
 
-/** Manager: restructures the loan into a new one. */
+/** Manager: restructures the loan into a new one on the Board's resolution. */
 export function RestructureForm({ loanId, defaultFirstDue }: { loanId: string; defaultFirstDue: string }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -136,7 +178,7 @@ export function RestructureForm({ loanId, defaultFirstDue }: { loanId: string; d
       action={(fd) => {
         setError(null);
         startTransition(async () => {
-          const r = await restructureAction({ loanId, term: Number(fd.get("rsTerm") ?? 0), firstDueDate: String(fd.get("rsFirst") ?? ""), reason: String(fd.get("rsReason") ?? "") });
+          const r = await restructureAction({ loanId, term: Number(fd.get("rsTerm") ?? 0), firstDueDate: String(fd.get("rsFirst") ?? ""), bodRef: String(fd.get("rsRef") ?? ""), reason: String(fd.get("rsReason") ?? "") });
           if (!r.ok) return setError(r.error);
           router.push(`/loans/${r.data.loanId}`);
         });
@@ -151,7 +193,11 @@ export function RestructureForm({ loanId, defaultFirstDue }: { loanId: string; d
         <Input id="rsFirst" name="rsFirst" type="date" defaultValue={defaultFirstDue} />
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="rsReason">Reason / Board resolution</Label>
+        <Label htmlFor="rsRef">Board resolution no.</Label>
+        <Input id="rsRef" name="rsRef" maxLength={100} className="w-44" />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="rsReason">Reason</Label>
         <Input id="rsReason" name="rsReason" maxLength={300} className="w-64" />
       </div>
       <Button type="submit" variant="outline" disabled={pending}>

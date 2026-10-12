@@ -14,7 +14,7 @@ import { guardPage } from "@/lib/page-guard";
 import { getLoan } from "@/modules/loans/servicing";
 import { pct } from "@/modules/loans/ui/options";
 import { METHOD_LABEL } from "@/modules/loans/ui/schedule-table";
-import { PayFromSavingsForm, PayOutButton, RestructureForm, WriteOffForm } from "@/modules/loans/ui/servicing-forms";
+import { PayFromSavingsForm, PayOutButton, PendingReleaseForms, RestructureForm, WriteOffForm } from "@/modules/loans/ui/servicing-forms";
 import { depositableAccounts } from "@/modules/savings/service";
 
 export const metadata: Metadata = { title: "Loan · PCMPC MIS" };
@@ -101,8 +101,18 @@ async function LoanContent(props: PageProps<"/loans/[id]">) {
         </div>
       </div>
 
-      {loan.status === "PENDING" && loan.disbursement === "CASH" && can(user, "cash.session") ? <PayOutButton loanId={loan.id} loanNo={loan.loanNo} net={String(loan.netProceeds)} /> : null}
-      {loan.status === "PENDING" ? <p className="text-sm text-muted-foreground">Authorized; waiting for the teller to pay out {format(loan.netProceeds)}.</p> : null}
+      {loan.status === "PENDING" ? (
+        <section className="flex flex-col gap-3 rounded-lg border p-4">
+          {loan.firstDueDate > today ? (
+            <p className="text-sm text-muted-foreground">Authorized; waiting for a teller (not the authorizing manager) to pay out {format(loan.netProceeds)}.</p>
+          ) : (
+            <p className="text-sm text-destructive">The first due date ({formatDate(loan.firstDueDate)}) has passed: a manager must authorize the release again with a new first due date before the payout.</p>
+          )}
+          {loan.disbursement === "CASH" && loan.firstDueDate > today && can(user, "cash.session") && loan.authorizedBy !== user.id ? <PayOutButton loanId={loan.id} loanNo={loan.loanNo} net={String(loan.netProceeds)} /> : null}
+          {can(user, "loans.release") ? <PendingReleaseForms loanId={loan.id} defaultFirstDue={addMonths(today, 1)} /> : null}
+        </section>
+      ) : null}
+      {loan.status === "CANCELLED" ? <p className="text-sm text-muted-foreground">Cancelled before the payout{loan.closedAt ? ` on ${formatDate(loan.closedAt)}` : ""}; nothing was posted.</p> : null}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <dl className="divide-y rounded-lg border px-4 py-2">
@@ -114,6 +124,8 @@ async function LoanContent(props: PageProps<"/loans/[id]">) {
           <Row label="Net proceeds" value={format(loan.netProceeds)} />
           <Row label="Penalty" value={`${pct(loan.penaltyRatePm)}% a month after ${loan.graceDays} grace days`} />
           {loan.writeOffRef ? <Row label="Written off" value={`${loan.writeOffRef} on ${loan.closedAt ? formatDate(loan.closedAt) : ""}`} /> : null}
+          {loan.status === "WRITTEN_OFF" ? <Row label="Left to recover" value={format(data.recoverable)} /> : null}
+          {loan.restructureRef ? <Row label="Restructure resolution" value={loan.restructureRef} /> : null}
         </dl>
         {open ? (
           <div className="flex flex-col gap-4">

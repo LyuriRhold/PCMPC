@@ -12,7 +12,7 @@ import { LedgerError } from "@/modules/ledger/service";
 import { SavingsError } from "@/modules/savings/service";
 import { ShareError } from "@/modules/share/service";
 import { LoanError } from "./service";
-import { authorizeRelease, payFromSavings, payOutProceeds, restructure, writeOff } from "./servicing";
+import { authorizeRelease, cancelRelease, payFromSavings, payOutProceeds, reauthorizeRelease, restructure, writeOff } from "./servicing";
 
 const EXPECTED = [LoanError, LedgerError, CashieringError, SavingsError, ShareError];
 
@@ -34,6 +34,32 @@ export async function authorizeReleaseAction(input: z.input<typeof authorizeSche
   try {
     const data = authorizeSchema.parse(input);
     return ok(await withTx((tx) => authorizeRelease(tx, data, actor.id)));
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const reauthorizeSchema = z.object({ loanId: id, firstDueDate: date });
+/** Manager (not the approver): authorizes a loan waiting for its payout again, with a new first due date. */
+export async function reauthorizeReleaseAction(input: z.input<typeof reauthorizeSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("loans.release");
+  try {
+    const data = reauthorizeSchema.parse(input);
+    await withTx((tx) => reauthorizeRelease(tx, data, actor.id));
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const cancelSchema = z.object({ loanId: id, reason: z.string().trim().max(300) });
+/** Manager: cancels a loan not yet paid out (and its application). */
+export async function cancelReleaseAction(input: z.input<typeof cancelSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("loans.release");
+  try {
+    const data = cancelSchema.parse(input);
+    await withTx((tx) => cancelRelease(tx, data, actor.id));
+    return ok(null);
   } catch (e) {
     return failFrom(e, EXPECTED);
   }
@@ -64,8 +90,8 @@ export async function writeOffAction(input: z.input<typeof writeOffSchema>): Pro
   }
 }
 
-const restructureSchema = z.object({ loanId: id, term: z.number().int(), firstDueDate: date, reason: z.string().trim().max(300) });
-/** Manager: closes a loan into a new one with a new term. */
+const restructureSchema = z.object({ loanId: id, term: z.number().int(), firstDueDate: date, bodRef: z.string().trim().max(100), reason: z.string().trim().max(300) });
+/** Manager: closes a loan into a new one with a new term, on the Board's resolution. */
 export async function restructureAction(input: z.input<typeof restructureSchema>): Promise<ActionResult<{ loanId: string; loanNo: string }>> {
   const actor = await requirePermission("loans.release");
   try {

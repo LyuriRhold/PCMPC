@@ -9,11 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { can } from "@/lib/auth-guard";
 import { businessToday, formatDate, isBusinessDate } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPage } from "@/lib/page-guard";
 import { parPercent } from "@/modules/loans/aging";
-import { delinquencyList, portfolio } from "@/modules/loans/servicing";
+import { agingAsOf, delinquentOf } from "@/modules/loans/servicing";
+import { maskTail } from "@/modules/members/masking";
 import { getSetting } from "@/modules/settings/service";
 
 export const metadata: Metadata = { title: "Aging & PAR · PCMPC MIS" };
@@ -24,8 +26,12 @@ async function AgingContent({ searchParams }: { searchParams: Promise<Record<str
   const access = await guardPage("loans.read");
   if (!access.ok) return <Forbidden permission={access.permission} />;
   const sp = z.object({ asOf: one }).parse(await searchParams);
-  const asOf = sp.asOf && isBusinessDate(sp.asOf) ? sp.asOf : businessToday();
-  const [rows, delinquent, buckets, threshold] = await Promise.all([portfolio(asOf), delinquencyList(asOf), getSetting("loan.aging_buckets"), getSetting("loan.par_threshold_days")]);
+  const today = businessToday();
+  const [report, buckets, threshold] = await Promise.all([agingAsOf(sp.asOf && isBusinessDate(sp.asOf) ? sp.asOf : today), getSetting("loan.aging_buckets"), getSetting("loan.par_threshold_days")]);
+  const { asOf, rows } = report;
+  const delinquent = await delinquentOf(rows);
+  // Contact numbers follow the member-data masking policy (members.read_sensitive).
+  const mobile = can(access.user, "members.read_sensitive") ? (m: string | null) => m : (m: string | null) => maskTail(m);
   const par = parPercent(rows, threshold);
   const total = rows.reduce((s, r) => s + r.outstandingPrincipal, 0n);
 
@@ -34,11 +40,14 @@ async function AgingContent({ searchParams }: { searchParams: Promise<Record<str
       <div>
         <h1 className="text-2xl font-semibold">Aging &amp; PAR</h1>
         <p className="text-sm text-muted-foreground">Days past due count from the oldest unpaid installment. PAR is the outstanding principal of loans more than {threshold} days past due over the whole portfolio.</p>
+        <p className="text-xs text-muted-foreground">
+          {report.source === "live" ? "Today, as of now." : rows.length ? `From the daily snapshot of ${formatDate(asOf)}.` : `No snapshot was taken on ${formatDate(asOf)} (the daily job keeps one each business day).`}
+        </p>
       </div>
       <form method="get" className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="asOf">As of</Label>
-          <Input id="asOf" name="asOf" type="date" defaultValue={asOf} />
+          <Input id="asOf" name="asOf" type="date" defaultValue={asOf} max={today} />
         </div>
         <Button type="submit" size="sm">
           Show
@@ -125,11 +134,11 @@ async function AgingContent({ searchParams }: { searchParams: Promise<Record<str
                   </TableCell>
                   <TableCell>
                     {r.member.lastName}, {r.member.firstName}
-                    <div className="text-xs text-muted-foreground">{r.member.mobile ?? "no mobile"}</div>
+                    <div className="text-xs text-muted-foreground">{mobile(r.member.mobile) ?? "no mobile"}</div>
                   </TableCell>
-                  <TableCell className="text-xs">{r.comakers.length ? r.comakers.map((c) => `${c.name} · ${c.mobile ?? "no mobile"}`).join("; ") : "None"}</TableCell>
+                  <TableCell className="text-xs">{r.comakers.length ? r.comakers.map((c) => `${c.name} · ${mobile(c.mobile) ?? "no mobile"}`).join("; ") : "None"}</TableCell>
                   <TableCell className="text-right tabular-nums">{r.daysPastDue}</TableCell>
-                  <TableCell className="text-right tabular-nums">{format(r.amountPastDue)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{r.amountPastDue === null ? "—" : format(r.amountPastDue)}</TableCell>
                   <TableCell className="text-right tabular-nums">{format(r.outstandingPrincipal)}</TableCell>
                 </TableRow>
               ))}

@@ -148,8 +148,8 @@
 - [x] T10.1 Schema, migrations, product + deduction seed (DOMAIN sample products, flagged CONFIRM)
 - [x] T10.2 Amortization engine + golden and property tests
 - [x] T10.3 Net proceeds calculator
-- [ ] T10.4 Eligibility engine with the hook registry
-- [ ] T10.5 Application service + approval matrix + SoD
+- [x] T10.4 Eligibility engine with the hook registry
+- [x] T10.5 Application service + approval matrix + SoD
 - [ ] T10.6 UI: product admin, loan calculator, application form, approval queue, disclosure print
 - [x] Acceptance tests written first (tests/acceptance/phase-10.test.ts)
 - [ ] Exit checks passed

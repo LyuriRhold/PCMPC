@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 11
+**Current phase:** 12
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -19,7 +19,7 @@
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ✅ | phase-08-share-capital · tag `phase-08` | rldejoya (reviewer agent: two-person withdrawal + follow-ups fixed) · 2026-10-12 |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ✅ | phase-09-savings · tag `phase-09` | rldejoya (reviewer agent: interest opening balance + follow-ups fixed) · 2026-10-12 |
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ✅ | phase-10-loan-applications · tag `phase-10` | rldejoya (reviewer agent: small-loan error + tiny-loan rows fixed; follow-ups) · 2026-10-12 |
-| 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ⬜ | | |
+| 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ✅ | phase-11-loan-servicing · tag `phase-11` | rldejoya (reviewer agent: stuck pending release + historical aging fixed; follow-ups) · 2026-10-12 |
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ⬜ | | |
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ⬜ | | |
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ⬜ | | |
@@ -155,16 +155,16 @@
 - [x] Exit checks passed
 
 ### Phase 11 — Loan Release, Collections, Penalties & Aging
-- [ ] T11.1 Schema + migrations
-- [ ] T11.2 Release service (GL, CBU, schedule persistence, loan_no)
-- [ ] T11.3 Collection service (allocation, excess handling, GL, reversal of a payment)
-- [ ] T11.4 Penalty engine + daily job + job_runs idempotency
-- [ ] T11.5 Aging/PAR service + snapshot + delinquency list (with comakers and contact numbers)
-- [ ] T11.6 Write-off, restructure, termination offset, eligibility hooks, `canTerminate`
-- [ ] T11.7 UI: release screen, loan ledger card, delinquency/aging reports, PAR tile
-- [ ] T11.8 Teller registrations (`LOAN_PAYMENT`, `LOAN_PROCEEDS`) + cross-module receipt test
-- [ ] Acceptance tests written first (tests/acceptance/phase-11.test.ts)
-- [ ] Exit checks passed
+- [x] T11.1 Schema + migrations
+- [x] T11.2 Release service (GL, CBU, schedule persistence, loan_no)
+- [x] T11.3 Collection service (allocation, excess handling, GL, reversal of a payment)
+- [x] T11.4 Penalty engine + daily job + job_runs idempotency
+- [x] T11.5 Aging/PAR service + snapshot + delinquency list (with comakers and contact numbers)
+- [x] T11.6 Write-off, restructure, termination offset, eligibility hooks, `canTerminate`
+- [x] T11.7 UI: release screen, loan ledger card, delinquency/aging reports, PAR tile
+- [x] T11.8 Teller registrations (`LOAN_PAYMENT`, `LOAN_PROCEEDS`) + cross-module receipt test
+- [x] Acceptance tests written first (tests/acceptance/phase-11.test.ts)
+- [x] Exit checks passed
 
 ### Phase 12 — Store: Inventory & Purchasing
 - [ ] T12.1 Schema + migrations
@@ -319,6 +319,14 @@
 - [ ] Q-10.7 (phase 10) Loanable amount vs. loans already held or applied for. | default used: each application is checked on its own (paid-up multiple and product maximum), so a member could hold several applications that each pass; Phase 11 should net existing loan balances from the loanable amount | answer:
 - [ ] Q-10.8 (phase 10) Rounding points not in DOMAIN §3. | default used: percentage deductions (service fee, CBU) and the add-on total interest are rounded HALF-UP to the centavo; the add-on's per-installment interest is the total ÷ term HALF-UP, with the last installment taking the rest | answer:
 - [ ] Q-10.9 (phase 10) Smallest loan per product. | default used: ₱1,000.00 for REG, EMR and PRD (the deductions must fit in the loan); the admin can change it on Loan products | answer:
+- [ ] Q-11.1 (phase 11) How loans are released. | default used: two people: a manager who did not approve the loan authorizes the release (first due date, cash or savings), then a teller pays out the net proceeds from the drawer (cash-out LOAN_PROCEEDS); proceeds credited to the member's savings are released at once by the manager. The first due date is at most 3 months away, and a cash payout after it needs a new authorization | answer:
+- [ ] Q-11.2 (phase 11) Penalty computation. | default used: from the day after the grace days, the unpaid installment (principal + interest) × 2% × days past due ÷ 30, counted from the due date (incl. the grace days), kept as Σ(unpaid × days) and rounded once, so daily and catch-up runs agree; penalties are income only when collected; an installment is PAID when its penalty is paid too | answer:
+- [ ] Q-11.3 (phase 11) Payments ahead and settlement. | default used: payments go penalty → interest → principal, oldest installment first; extra pays the next installments' interest and principal (schedule unchanged); a payment can't exceed everything still scheduled (no pay-off discount of future interest) | answer:
+- [ ] Q-11.4 (phase 11) Recoveries after a write-off. | default used: collected at the teller on the written-off loan and credited to a new account 44140 Recovery of Loans Written Off (Other Income), up to the principal written off | answer:
+- [ ] Q-11.5 (phase 11) Restructure. | default used: the outstanding principal + unpaid interest of installments already due + unpaid penalties become a new loan (same rate and method, new term and first due date); the capitalized interest and penalties are income on restructure; the old loan is RESTRUCTURED and linked; a Board resolution no. is required (reviewer). Note: booking uncollected interest and penalties as income conflicts with `loan.interest_recognition = ON_COLLECTION`; the alternative is to credit them to an unearned-income account until the new loan is collected | answer:
+- [ ] Q-11.6 (phase 11) Offsets on termination. | default used: when a terminating member's share capital is paid out, it first pays their open loans (as a payment, incl. scheduled interest); savings can pay a loan through "Pay from savings" (keeping the maintaining balance) | answer:
+- [ ] Q-11.7 (phase 11) Days past due and PAST_DUE. | default used: days past due count from the oldest installment not fully paid (a penalty still unpaid keeps it unpaid); a loan is PAST_DUE from the day after a due date passes unpaid (grace days only delay penalties) | answer:
+- [ ] Q-11.8 (phase 11) The golden ₱10,000 Regular Loan on ₱2,500 paid-up (PHASE-11 A11.1–A11.12) vs. the seeded REG limit of 3× paid-up (DOMAIN): 3 × ₱2,500 = ₱7,500 < ₱10,000, so that loan can't be originated under the seeded configuration. | default used: the seeded REG stays at 3× (DOMAIN); the Phase 11 test fixture sets REG to 4× before applying, so the golden values are tested unchanged. Which is right for PCMPC: 3× or 4× (or a minimum paid-up for REG)? | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -353,6 +361,12 @@
 - Printable passbook layout for the passbook printer (PHASE-09 Out)
 - Approval or limits for large savings withdrawals (Q-09.6)
 - Corrections for savings postings (a wrong interest run, a manual adjustment); today a GL reversal of a savings entry from the Journal screen would leave the passbook unchanged, so savings entries should be reversed only through the savings module
+  - Since the Phase 11 review the Journal screen refuses to reverse module entries (only manual JVs), so the gap is now "no correction path" instead of "drift".
+- Corrections for loan payments made without a receipt (pay from savings, share-capital offsets on termination): a reversal in the loans module that also reverses the savings or share posting (Phase 11 review)
+- Penalty on the payment day: a payment made before the day's job runs collects penalties only up to the last run; compute the penalty to the payment date live (Phase 11 review)
+- Lock order between the loans daily job (locks every open loan) and receipts with several loan payments; run the job before the counter opens or lock loans in id order everywhere (Phase 11 review)
+- Concurrency tests (two payments on one loan, double release, double payout) and a dashboard/portfolio test for A11.6–A11.7 (Phase 11 review)
+- Members with a written-off loan: block new loans (and termination) until it is recovered or the Board decides (Phase 11 review)
 
 ## Phase summaries
 <!-- Claude appends "### Phase XX summary" here at the end of each phase:
@@ -1165,3 +1179,117 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - `npm run gate` green: 522 tests, 43 files. Only 1.8 GB of memory was free, so it ran on 2 DB workers (469 s).
   - `npm run build` green.
   - `npm run e2e -- phase-10` green: 2 tests.
+
+### Phase 11 summary
+**Built**
+- **Schema (T11.1):**
+  - `loans` (LN-YYYY-#####; PENDING → ACTIVE/PAST_DUE → PAID/RESTRUCTURED/WRITTEN_OFF; terms copied from the application).
+  - `loan_schedule`: due amounts frozen, paid amounts updated.
+  - `loan_payments`: with their per-installment allocation, so a reversal is exact.
+  - `loan_penalty_accruals`: basis × days.
+  - `loan_aging_snapshots`.
+  - Triggers keep terms, due amounts, payments (except the reversal mark) and accruals immutable.
+  - New account 44140 Recovery of Loans Written Off (CONFIRM).
+- **Release (T11.2), two people:**
+  - A manager who is neither the encoder nor an approver authorizes it (first due date ≤ 3 months, cash or savings). The loan is PENDING.
+  - A teller pays out the net proceeds (cash-out LOAN_PROCEEDS through `payOut`, with the drawer check). Proceeds credited to savings are released at once.
+  - The release entry: Dr Loans Receivable / Cr Cash or Savings (net) / Cr service fee and notarial income / Cr Subscription Receivable for CBU (`share.cbuLines` + `retainCbu`). The schedule comes from the Phase 10 engine.
+- **Payments (T11.3):**
+  - Teller receipt item LOAN_PAYMENT: penalty → interest → principal, oldest installment first; the excess advances the next installments. It can't exceed what is still owed. GL: Cr Fines and Penalties Income / Interest Income / Loans Receivable.
+  - Cancelling the receipt reverses the latest payment exactly, and a PAID loan reopens.
+- **Penalties and the daily job (T11.4):**
+  - Unpaid installment × rate × days ÷ 30 once past the grace days, accrued by `loans-daily` (runOnce per date). Σ(basis × days) is rounded once, so daily runs and a catch-up run give ₱18.34 either way.
+  - The job also refreshes ACTIVE/PAST_DUE and writes the aging snapshot.
+- **Aging and PAR (T11.5):** days past due from the oldest unpaid installment, the `loan.aging_buckets`, PAR over `loan.par_threshold_days`, and a delinquency list with the borrower's and comakers' mobile numbers.
+- **T11.6:**
+  - Write-off on a Board resolution (Dr Allowance / Cr Loans Receivable), then recoveries at the teller (Cr 44140).
+  - Restructure into a new loan (principal + due interest + penalties).
+  - Termination offset: share capital pays the loans first on withdrawal (share offset hook, now with a `recorded` callback).
+  - Pay from savings.
+  - Past-due eligibility hook (borrower and comakers) and the `canTerminate` loan rule.
+- **Screens (T11.7):**
+  - Authorize release on the application page.
+  - Loan ledger card `/loans/{id}`: pay out, write-off, restructure, pay from savings, installments, payments.
+  - Releases & collections queues.
+  - Aging & PAR with the delinquency list.
+  - PAR tiles on the dashboard.
+  - Member profile Loans tab.
+- **Teller (T11.8):**
+  - LOAN_PAYMENT dues (what is due now incl. penalties, or the next installment; recoveries for written-off loans) and LOAN_PROCEEDS.
+  - Water bills can now be paid on a **member's** receipt (the member's own water customer), so A11.14's single receipt holds all five modules.
+
+**Decisions** (see Questions Q-11.1–Q-11.7)
+- **Release:** two-person; cash or savings.
+- **Penalty:** counted from the due date once past grace, computed exactly; income on collection.
+- **Payments:** no pay-off discount of future interest.
+- **Recoveries** go to a new Other Income account.
+- **Restructure** capitalizes due interest and penalties.
+- **Termination:** share capital is offset first.
+- **PAST_DUE** from the day after a missed due date.
+
+**Deviations from spec (with reason)**
+- **Release has a PENDING step** (authorize → pay out). The spec says release is by `loans.release` (≠ approver) and registers the LOAN_PROCEEDS cash-out; the manager holds no teller drawer, so the cash leaves through a teller.
+- **Extra columns:**
+  - `loans`: `disbursement`, `savings_account_id`, `deductions`, `net_proceeds`, the penalty and grace snapshot, `authorized_by`/`released_by`, the write-off fields, `restructured_from_id`.
+  - `loan_payments`: `kind` (PAYMENT / OFFSET / RECOVERY), `allocations`, `receipt_item_id`, `remarks`.
+  - `loan_penalty_accruals`: `basis` and `days`.
+
+  They are needed for the exact reversal, the drift-free penalties and the release audit trail.
+- **Other modules:**
+  - Water's WATER_BILL accepts a MEMBER payor for the member's own water accounts (A11.14).
+  - Savings exposes transfer helpers.
+  - The share offset hook gained `recorded`.
+  - The Phase 10 pass hook was replaced by the real past-due check.
+- **Fixtures (tests only):** REG is set to 4× paid-up in the Phase 11 helpers (the golden ₱10,000 loan on ₱2,500 paid-up). A11.14's fixture adds 14 ₱2,500 shareholders so the member's ₱1,000 share payment stays within the 10% holding cap.
+- **E2E:** the "coming soon" example moved to Phase 12 (`/store/inventory`).
+
+**Follow-ups**
+- Answer Q-11.1–Q-11.7.
+- Allowance (provision) entries per aging bucket (`loan.allowance_rates`) are for Phase 14 (period close).
+- The loanable amount still ignores existing balances (Q-10.7).
+
+**Exit checks / counts:**
+- `npm run gate` is green: 550 tests (45 files), scan clean. Phase 11 adds:
+  - 13 acceptance tests (A11.1–A11.12, A11.14);
+  - 15 integration tests: release SoD, savings release, teller payout, payment reversal, catch-up penalties, restructure and termination with the trial balance balanced, recovery, pay from savings, past-due eligibility.
+- `npm run build` is green (`/loans/[id]`, `/loans/servicing`, `/loans/aging`).
+- `npm run e2e -- phase-11` is green: A11.13 (release → pay at the teller → the ledger card shows ₱4,166.67).
+- The full E2E against a production build is green: 20 of 20 (phases 00–11).
+- The trial balance balances after release, payment, write-off, recovery, restructure and termination (integration tests).
+- Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (9 seed steps); the sample trial balance balances.
+
+**Review follow-ups (reviewer agent, 2026-10-12)**
+- **Fixed (must-fix): a loan waiting for its payout could get stuck.**
+  - Once its first due date passed, the payout was refused for good: the application was RELEASED (final), the first due date was frozen, and nothing could re-authorize or cancel it. The loan stayed PENDING and blocked the member's termination.
+  - Now a manager who neither encoded nor approved it can **authorize it again** with a new first due date (eligibility is re-checked), or **cancel** it with a reason. A cancelled loan is CANCELLED, its application is CANCELLED too, and nothing was posted.
+  - Migration 0030: the CANCELLED status; the loans trigger lets the first due date, maturity and authorizer change only while PENDING; the application trigger allows RELEASED → CANCELLED only when its loan was cancelled.
+  - The loan page explains a passed first due date and shows the forms.
+- **Fixed (must-fix): "As of" on Aging & PAR was not historical.** An earlier date read today's schedule with a different day count.
+  - Now today's aging is live, and an earlier date reads that day's snapshot from the daily job, so later payments don't change it.
+  - A date with no snapshot says so; a future date shows today's.
+  - Snapshots now keep the amount past due (new nullable column).
+- **Fixed:**
+  - **Closed loans show no live balance:** a restructured, written-off or cancelled loan shows ₱0.00 outstanding (the member Loans tab and the loan card); a written-off loan shows what is left to recover.
+  - **Restructured loans keep their comakers** on the delinquency list (followed back to the original application).
+  - **Payout SoD:** the manager who authorized a release can't also pay it out; the page hides the button for them.
+  - **Eligibility is checked again** when a release is authorized (or authorized again) and at the payout (shared with approval: `assertStillEligible`).
+  - **Restructure needs a Board resolution no.**, kept on the new loan (`restructure_ref`) and as the entry's reference.
+  - **Mobile numbers on the delinquency list follow the masking policy:** full numbers only with `members.read_sensitive` (manager, auditor).
+  - **Journal screen:** only manual JVs (and entries with no business record) can be reversed there. An entry posted by a module (receipts, bills, loans, savings, shares) is corrected in its module, so its records follow; the page says so.
+  - **Settings:** "When loan interest is recorded as income" is read-only (only on collection is built); the payment allocation must list penalty, interest and principal once each; a payment that can't be fully applied is refused.
+  - **The first due date limit** (3 months) is a setting, `loan.max_first_due_months` (CONFIRM).
+  - **Share offsets on termination** record the teller as the loan payment's creator.
+  - **Loans trigger:** the release and write-off fields are recorded once, and the closing date changes only with the status.
+- **New tests:** authorize again and cancel; payout SoD; encoder SoD; eligibility at release and payout; the forbidden checks on every servicing action; aging from the snapshot; comakers after a restructure; closed balances; the Board resolution; the Journal-screen refusal; the allocation setting; the trigger rules.
+- **Logged:**
+  - As Questions: Q-11.8 (the golden REG loan vs. 3× paid-up), and the Q-11.5 note (restructure income vs. interest on collection).
+  - As Backlog: corrections for payments made without a receipt; the penalty on the payment day; the lock order with the daily job; concurrency tests; members with written-off loans.
+  - Q-10.7 (netting existing loans from the loanable amount) is still open: it is outside the Phase 11 spec.
+- **Not changed (noted):**
+  - The restructure still has one person: the manager, on the Board's resolution.
+  - A11.6 and A11.7 test the pure helpers; the dashboard tile uses the same `portfolio()`.
+- **After the fixes:**
+  - `npm run gate` green: 555 tests, 45 files, scan clean (1 DB worker; little memory free).
+  - `npm run build` green.
+  - E2E on a production build green: phase-11 (A11.13), phase-10, phase-03 and settings.
+  - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (migration 0030; the new setting is seeded).

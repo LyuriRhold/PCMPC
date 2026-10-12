@@ -8,11 +8,14 @@ import { PageLoading } from "@/components/page-loading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { can } from "@/lib/auth-guard";
-import { formatDate, formatDateTime } from "@/lib/dates";
+import { addMonths, businessToday, formatDate, formatDateTime } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPage } from "@/lib/page-guard";
 import { getApplication } from "@/modules/loans/service";
+import { loanForApplication } from "@/modules/loans/servicing";
 import { CancelApplicationForm, DecisionForm } from "@/modules/loans/ui/loan-forms";
+import { AuthorizeReleaseForm } from "@/modules/loans/ui/servicing-forms";
+import { depositableAccounts } from "@/modules/savings/service";
 import { pct } from "@/modules/loans/ui/options";
 import { METHOD_LABEL, ScheduleTable } from "@/modules/loans/ui/schedule-table";
 
@@ -42,6 +45,10 @@ async function ApplicationContent(props: PageProps<"/loans/applications/[id]">) 
   const decidedBefore = approvals.some((x) => x.by === user.id);
   const canDecide = can(user, "loans.approve") && user.id !== a.encodedBy && !decidedBefore && ((canRecommend && a.status === "SUBMITTED") || (!canRecommend && a.status === "RECOMMENDED"));
   const canCancel = can(user, "loans.apply") && user.id === a.encodedBy && (a.status === "SUBMITTED" || a.status === "RECOMMENDED");
+  const approvedBy = approvals.filter((x) => x.decision === "APPROVE").map((x) => x.by);
+  const canRelease = a.status === "APPROVED" && can(user, "loans.release") && user.id !== a.encodedBy && !approvedBy.includes(user.id);
+  const loan = a.status === "RELEASED" ? await loanForApplication(a.id) : null;
+  const savingsAccounts = canRelease ? (await depositableAccounts(member.id)).filter((x) => x.status === "OPEN") : [];
   const rows = a.schedulePreview.map((r) => ({ no: r.no, dueDate: r.dueDate, principal: BigInt(r.principal), interest: BigInt(r.interest), payment: BigInt(r.payment), balance: BigInt(r.balance) }));
   const deductionTotal = a.deductions.reduce((s, d) => s + BigInt(d.amount), 0n);
 
@@ -64,6 +71,29 @@ async function ApplicationContent(props: PageProps<"/loans/applications/[id]">) 
           </Link>
         </p>
       </div>
+
+      {loan ? (
+        <p className="text-sm">
+          Released as{" "}
+          <Link href={`/loans/${loan.id}`} className="font-medium underline underline-offset-4">
+            loan {loan.loanNo}
+          </Link>
+          .
+        </p>
+      ) : null}
+
+      {canRelease ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Release</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AuthorizeReleaseForm applicationId={a.id} defaultFirstDue={addMonths(businessToday(), 1)} savingsAccounts={savingsAccounts.map((x) => ({ id: x.id, accountNo: x.accountNo }))} />
+          </CardContent>
+        </Card>
+      ) : a.status === "APPROVED" && can(user, "loans.release") ? (
+        <p className="text-sm text-muted-foreground">Approved: the release is authorized by a manager other than the approver.</p>
+      ) : null}
 
       {canDecide ? (
         <Card>

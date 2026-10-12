@@ -1,0 +1,2 @@
+ALTER TABLE "loans" DROP CONSTRAINT "loans_disbursement_chk";--> statement-breakpoint
+ALTER TABLE "loans" ADD CONSTRAINT "loans_disbursement_chk" CHECK (disbursement IN ('CASH', 'SAVINGS', 'RESTRUCTURE'));

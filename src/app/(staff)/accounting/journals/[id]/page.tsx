@@ -11,6 +11,7 @@ import { businessToday, formatDate, formatDateTime } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPage } from "@/lib/page-guard";
 import { getEntry } from "@/modules/ledger/queries";
+import { USER_REVERSIBLE_SOURCES } from "@/modules/ledger/service";
 import { ApproveJvButton, DiscardJvButton, ReverseJvForm } from "@/modules/ledger/ui/jv-actions";
 import { JeStatusBadge } from "@/modules/ledger/ui/je-status-badge";
 
@@ -28,6 +29,7 @@ async function EntryContent(props: PageProps<"/accounting/journals/[id]">) {
   const dr = je.lines.reduce((s, l) => s + l.debit, 0n);
   const cr = je.lines.reduce((s, l) => s + l.credit, 0n);
   const isPreparer = je.preparedBy === access.user.id;
+  const reversible = USER_REVERSIBLE_SOURCES.includes(je.sourceModule);
 
   return (
     <div className="flex flex-col gap-5">
@@ -118,11 +120,15 @@ async function EntryContent(props: PageProps<"/accounting/journals/[id]">) {
         </section>
       ) : null}
 
-      {je.status === "POSTED" && !je.reversalOfId && can(access.user, "gl.jv_approve") && isPreparer ? (
+      {je.status === "POSTED" && !je.reversalOfId && !reversible ? (
+        <p className="text-sm text-muted-foreground">Posted by the {je.sourceModule} module: it is corrected there (for example by cancelling the receipt), so the module&apos;s records follow.</p>
+      ) : null}
+
+      {je.status === "POSTED" && !je.reversalOfId && reversible && can(access.user, "gl.jv_approve") && isPreparer ? (
         <p className="text-sm text-muted-foreground">You prepared this entry. Another user with approval rights must reverse it.</p>
       ) : null}
 
-      {je.status === "POSTED" && !je.reversalOfId && can(access.user, "gl.jv_approve") && !isPreparer ? (
+      {je.status === "POSTED" && !je.reversalOfId && reversible && can(access.user, "gl.jv_approve") && !isPreparer ? (
         <section className="flex flex-col gap-3 rounded-lg border p-4">
           <h2 className="text-sm font-semibold">Reverse this entry</h2>
           <p className="text-xs text-muted-foreground">

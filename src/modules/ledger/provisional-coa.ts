@@ -65,6 +65,7 @@ export const REQUIRED_MAPPING_KEYS = [
   "interest_income_loans",
   "service_fee_income",
   "fines_penalties_income",
+  "recovery_income_loans",
   "notarial_fee_income",
   "water_revenue_members",
   "water_revenue_nonmembers",
@@ -169,6 +170,7 @@ export const PROVISIONAL_COA: CoaRow[] = [
   p("44110", "Membership Fee Income", "REVENUE", "CR", "44000", ["membership_fee_income"]),
   p("44120", "Certification Fee Income", "REVENUE", "CR", "44000", ["certification_fee_income"]),
   p("44130", "Rental Income", "REVENUE", "CR", "44000", ["rental_income"]),
+  p("44140", "Recovery of Loans Written Off", "REVENUE", "CR", "44000", ["recovery_income_loans"]),
 
   h("5", "EXPENSES", "EXPENSE", "DR", null),
   h("51000", "Cost of Sales", "EXPENSE", "DR", "5"),

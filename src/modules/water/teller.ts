@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { receiptItems, receipts } from "@/modules/cashiering/schema";
-import type { Tx } from "@/db/client";
+import type { Db, Tx } from "@/db/client";
 import { normalizeName } from "@/lib/names";
 import { format } from "@/lib/money";
 import { CashieringError } from "@/modules/cashiering/builtins";
@@ -223,11 +223,23 @@ const pendingByReceipt = new WeakMap<ReceiptContext, Allocation[]>();
 
 type BillPaymentBreakdown = { accountId: string; customerId: string; allocations: Array<{ billId: string; penaltyPart: string; billPart: string }>; advance: string };
 
+/**
+ * Whose water bills a payor may pay: the water customer's own, or (on a member's receipt, PHASE-11
+ * A11.14) those of the member's own water customer, so one receipt can hold a member's water bill
+ * with their share, savings and loan payments.
+ */
+async function payorCustomerIds(db: Db | Tx, payor: { type: string; id: string | null }): Promise<string[]> {
+  if (!payor.id) return [];
+  if (payor.type === "WATER_CUSTOMER") return [payor.id];
+  if (payor.type === "MEMBER") return (await db.select({ id: waterCustomers.id }).from(waterCustomers).where(eq(waterCustomers.memberId, payor.id))).map((c) => c.id);
+  return [];
+}
+
 async function accountForPayment(tx: Tx, input: ItemInput, ctx: ReceiptContext) {
   if (!input.refId) throw new CashieringError("Choose the water account");
   const [a] = await tx.select().from(waterAccounts).where(eq(waterAccounts.id, input.refId)).for("update");
   if (!a) throw new CashieringError("Water account not found");
-  if (ctx.payor.type !== "WATER_CUSTOMER" || ctx.payor.id !== a.customerId) throw new CashieringError(`Collect ${a.accountNo}'s bills from its water customer`);
+  if (!(await payorCustomerIds(tx, ctx.payor)).includes(a.customerId)) throw new CashieringError(`Collect ${a.accountNo}'s bills from its water customer`);
   return a;
 }
 
@@ -236,8 +248,9 @@ registerReceiptItem({
   label: "Water bill payment",
   permission: "cash.receipt",
   dues: async (db, payor) => {
-    if (payor.type !== "WATER_CUSTOMER" || !payor.id) return [];
-    const accounts = await db.select().from(waterAccounts).where(eq(waterAccounts.customerId, payor.id)).orderBy(asc(waterAccounts.accountNo));
+    const customerIds = await payorCustomerIds(db, payor);
+    if (customerIds.length === 0) return [];
+    const accounts = await db.select().from(waterAccounts).where(inArray(waterAccounts.customerId, customerIds)).orderBy(asc(waterAccounts.accountNo));
     const balances = await billBalances(db, { accountIds: accounts.map((a) => a.id) });
     const out = [];
     for (const a of accounts) {

@@ -46,6 +46,8 @@ type AccountOpts = {
   manager: string;
   routeId: string;
   kind?: "MEMBER" | "NON_MEMBER";
+  /** With kind MEMBER: link this existing member instead of creating one. */
+  memberId?: string;
   classification?: "RESIDENTIAL" | "COMMERCIAL";
   initialReading?: number;
   digits?: number;
@@ -57,8 +59,11 @@ export async function activeAccount(o: AccountOpts) {
   names += 1;
   let customer: { id: string; customerNo: string };
   if (o.kind === "MEMBER") {
-    const memberId = await createApplicantAs(o.manager, applicant({ firstName: `Juan ${names}`, birthdate: `1950-01-${String(names).padStart(2, "0")}` }));
-    await approveAs(o.manager, memberId);
+    let memberId = o.memberId;
+    if (!memberId) {
+      memberId = await createApplicantAs(o.manager, applicant({ firstName: `Juan ${names}`, birthdate: `1950-01-${String(names).padStart(2, "0")}` }));
+      await approveAs(o.manager, memberId);
+    }
     customer = await createCustomerAs(o.clerk, nonMember({ type: "MEMBER", memberId }));
   } else {
     customer = await createCustomerAs(o.clerk, nonMember({ firstName: `Maria ${names}` }));

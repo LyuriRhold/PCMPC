@@ -101,6 +101,7 @@ export const PRESENTATION: Record<SettingKey, Presentation> = {
     label: "When loan interest is recorded as income",
     help: "Choose when the bookkeeping recognizes loan interest.",
     spec: { type: "choice", options: { ON_COLLECTION: "When the interest is collected", MONTHLY_ACCRUAL: "Every month as it is earned" } },
+    readonly: fixedPolicy("Loan interest is income when it is collected; monthly accrual is not available."),
   },
   "loan.payment_allocation": {
     label: "How loan payments are applied",
@@ -128,6 +129,7 @@ export const PRESENTATION: Record<SettingKey, Presentation> = {
     readonly: { reason: "Each loan product has its own penalty rate and grace days on the Loan products page (this was the starting value).", link: { href: "/loans/products", label: "Open Loan products" } },
   },
   "loan.grace_days": { label: "Grace period for loan payments", help: "No penalty if paid within this many days after the due date.", spec: { type: "number", unit: "days", min: 0, max: 60 }, readonly: { reason: "Each loan product has its own penalty rate and grace days on the Loan products page (this was the starting value).", link: { href: "/loans/products", label: "Open Loan products" } } },
+  "loan.max_first_due_months": { label: "Latest first due date of a loan", help: "When a loan is released or restructured, its first installment falls due at most this many months later.", spec: { type: "number", unit: "months", min: 1, max: 12 } },
   "loan.par_threshold_days": { label: "Portfolio-at-risk counts loans late by", help: "Loans this many days or more past due count as “at risk”.", spec: { type: "number", unit: "days", min: 1, max: 365 } },
   "loan.manager_approval_limit": { label: "Manager can approve loans up to", help: "Larger loans go to the Credit Committee.", spec: { type: "money" } },
   "loan.block_if_past_due": {

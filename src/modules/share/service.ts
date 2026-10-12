@@ -299,6 +299,8 @@ export type ShareOffset = {
   name: string;
   /** Credit lines settling what the member owes (e.g. an unpaid loan, Phase 11), up to `available`. */
   lines: (tx: Tx, memberId: string, available: Money) => Promise<{ amount: Money; lines: LineInput[]; description: string }>;
+  /** After the withdrawal entry is posted: write the module's own records of the offset (e.g. the loan payment). */
+  recorded?: (tx: Tx, memberId: string, jeId: string, actorId: string) => Promise<void>;
 };
 const offsets: ShareOffset[] = [];
 
@@ -376,12 +378,14 @@ export async function withdraw(tx: Tx, input: { memberId: string }, tellerId: st
   const offsetLines: LineInput[] = [];
   let available = balance.paidUp;
   const notes: string[] = [];
+  const used: ShareOffset[] = [];
   for (const o of offsets) {
     const r = await o.lines(tx, m.id, available);
     if (r.amount > 0n) {
       offsetLines.push(...r.lines);
       available -= r.amount;
       notes.push(`${r.description} ${format(r.amount)}`);
+      used.push(o);
     }
   }
   const cash = available;
@@ -396,6 +400,7 @@ export async function withdraw(tx: Tx, input: { memberId: string }, tellerId: st
     const je = await postJournal(tx, { date, book: "GJ", particulars, reference: m.memberNo, source: { module: "share", id: m.id }, lines: [...debitLines, ...otherCredits] }, tellerId);
     jeId = je.id;
   }
+  for (const o of used) await o.recorded?.(tx, m.id, jeId, tellerId);
   if (balance.unpaid > 0n) await txn(tx, { memberId: m.id, type: "ADJUSTMENT", amount: balance.unpaid, jeId, date, remarks: "Unpaid subscription cancelled on withdrawal" }, tellerId);
   if (balance.paidUp > 0n) await txn(tx, { memberId: m.id, type: "WITHDRAWAL", amount: balance.paidUp, jeId, date, refNo: approval.bodRef, remarks: [approval.reason, ...notes].join("; ") }, tellerId);
   await tx.update(shareWithdrawals).set({ status: "PAID", paidBy: tellerId, paidAt: sql`now()`, jeId }).where(eq(shareWithdrawals.id, approval.id));

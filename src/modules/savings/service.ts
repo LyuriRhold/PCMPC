@@ -142,6 +142,44 @@ export async function updateProduct(tx: Tx, input: { productId: string } & Produ
   });
 }
 
+// ── Transfers with other modules (Phase 11: loan proceeds, loan payments from savings) ──
+
+/** The GL account a savings account's money sits in. */
+export async function savingsGlAccountId(tx: Tx, accountId: string): Promise<string> {
+  const l = await lockAccount(tx, accountId);
+  return accountIdFor(l.product.depositGlKey, tx);
+}
+
+/**
+ * Checks a transfer out of a member's savings account by another module (locks it): the member's
+ * own OPEN savings account, never below the maintaining balance.
+ */
+export async function checkTransferOut(tx: Tx, input: { accountId: string; memberId: string; amount: Money }): Promise<void> {
+  const l = await lockAccount(tx, input.accountId);
+  assertSavings(l);
+  if (l.account.memberId !== input.memberId) throw new SavingsError("Use the member's own savings account");
+  if (l.account.status !== "OPEN") throw new SavingsError(`${l.account.accountNo} is ${l.account.status}`);
+  const balance = await accountBalance(l.account.id, tx);
+  if (balance - input.amount < l.product.maintainingBalance) {
+    throw new SavingsError(`${l.account.accountNo} has ${format(balance)}; with the maintaining balance ${format(l.product.maintainingBalance)}, at most ${format(balance > l.product.maintainingBalance ? balance - l.product.maintainingBalance : 0n)} can be used`);
+  }
+}
+
+/** Checks a transfer into a member's savings account (locks it): the member's own account, not closed. */
+export async function checkTransferIn(tx: Tx, input: { accountId: string; memberId: string }): Promise<void> {
+  const l = await lockAccount(tx, input.accountId);
+  assertSavings(l);
+  if (l.account.memberId !== input.memberId) throw new SavingsError("Use the member's own savings account");
+  if (l.account.status === "CLOSED") throw new SavingsError(`${l.account.accountNo} is closed`);
+}
+
+/** Writes another module's transfer in the passbook (the caller posted the entry): + in, − out. */
+export async function recordTransfer(tx: Tx, input: { accountId: string; amount: Money; date: BusinessDate; jeId: string; refNo: string; remarks: string }, actorId: string): Promise<void> {
+  const { account } = await lockAccount(tx, input.accountId);
+  await post(tx, { accountId: account.id, type: input.amount > 0n ? "TRANSFER_IN" : "TRANSFER_OUT", amount: input.amount, date: input.date, jeId: input.jeId, refNo: input.refNo, remarks: input.remarks }, actorId);
+  await tx.update(depositAccounts).set({ lastCustomerTxnAt: input.date, ...(account.status === "DORMANT" && input.amount > 0n ? { status: "OPEN" as const } : {}) }).where(eq(depositAccounts.id, account.id));
+}
+
 // ── Accounts (T9.2) ──
 
 /** Opens a savings account for an ACTIVE member; one regular savings account per member (CONFIRM Q-09.1). */

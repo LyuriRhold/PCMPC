@@ -25,6 +25,7 @@ import {
   type DeductionBasis,
   type DeductionCode,
   type EligibilityResult,
+  type LoanApplication,
   type LoanApplicationStatus,
   type LoanProduct,
   type LoanProductDeduction,
@@ -171,6 +172,21 @@ async function lockMember(tx: Tx, memberId: string): Promise<MemberRow> {
   return m;
 }
 
+/**
+ * Eligibility rules 1–5 again on the application's current facts (the member's situation may have
+ * changed since submission): at approval and at release. Locks the member.
+ */
+export async function assertStillEligible(tx: Tx, app: LoanApplication): Promise<EligibilityResult[]> {
+  const member = await lockMember(tx, app.memberId);
+  const product = await getLoanProduct(app.productId, tx);
+  if (!product) throw new LoanError("Loan product not found");
+  const comakerRows = await tx.select({ m: members }).from(loanApplicationComakers).innerJoin(members, eq(members.id, loanApplicationComakers.memberId)).where(eq(loanApplicationComakers.applicationId, app.id));
+  const results = await checkEligibility(tx, { member, product: { ...product, ratePm: app.ratePm, method: app.method }, amount: app.amount, term: app.term, comakers: comakerRows.map((r) => r.m) });
+  const failed = results.filter((r) => !r.pass);
+  if (failed.length) throw new LoanError(`Not eligible any more: ${failed.map((r) => r.message).join("; ")}`);
+  return results;
+}
+
 /** The loan officer submits an application; every eligibility rule must pass (the results are kept). */
 export async function submitApplication(tx: Tx, input: { memberId: string; productId: string; amount: Money; term: number; purpose: string; comakerIds: string[] }, officerId: string) {
   const member = await lockMember(tx, input.memberId);
@@ -244,14 +260,7 @@ export async function decideApplication(tx: Tx, input: { applicationId: string; 
   let recheck: EligibilityResult[] | null = null;
   if (input.decision === "REJECT") status = "REJECTED";
   else {
-    const member = await lockMember(tx, app.memberId);
-    const product = await getLoanProduct(app.productId, tx);
-    if (!product) throw new LoanError("Loan product not found");
-    const comakerRows = await tx.select({ m: members }).from(loanApplicationComakers).innerJoin(members, eq(members.id, loanApplicationComakers.memberId)).where(eq(loanApplicationComakers.applicationId, app.id));
-    const results = await checkEligibility(tx, { member, product: { ...product, ratePm: app.ratePm, method: app.method }, amount: app.amount, term: app.term, comakers: comakerRows.map((r) => r.m) });
-    recheck = results;
-    const failed = results.filter((r) => !r.pass);
-    if (failed.length) throw new LoanError(`Not eligible any more: ${failed.map((r) => r.message).join("; ")}`);
+    recheck = await assertStillEligible(tx, app);
     const limit = BigInt(await getSetting("loan.manager_approval_limit", tx));
     status = level === "MANAGER" && app.amount > limit ? "RECOMMENDED" : "APPROVED";
   }
@@ -305,6 +314,16 @@ export async function applicationRegistry(filters: { status?: LoanApplicationSta
     .where(conds.length ? and(...conds) : undefined)
     .orderBy(desc(loanApplications.createdAt))
     .limit(200);
+}
+
+/** A member's loan applications, newest first. */
+export async function memberApplications(memberId: string, db: Db | Tx = getDb()) {
+  return db
+    .select({ application: loanApplications, productName: loanProducts.name })
+    .from(loanApplications)
+    .innerJoin(loanProducts, eq(loanProducts.id, loanApplications.productId))
+    .where(eq(loanApplications.memberId, memberId))
+    .orderBy(desc(loanApplications.createdAt));
 }
 
 /** A member found by member no., with what the application form needs to know. */

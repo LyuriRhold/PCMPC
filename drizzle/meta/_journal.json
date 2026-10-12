@@ -169,6 +169,20 @@
       "when": 1791780377185,
       "tag": "0023_td_savings_index",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791783273035,
+      "tag": "0024_loans",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791783283002,
+      "tag": "0025_loans_immutable",
+      "breakpoints": true
     }
   ]
 }

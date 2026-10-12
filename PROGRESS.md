@@ -145,7 +145,7 @@
 - [x] Exit checks passed
 
 ### Phase 10 — Loan Products, Amortization Engine & Applications
-- [ ] T10.1 Schema, migrations, product + deduction seed (DOMAIN sample products, flagged CONFIRM)
+- [x] T10.1 Schema, migrations, product + deduction seed (DOMAIN sample products, flagged CONFIRM)
 - [ ] T10.2 Amortization engine + golden and property tests
 - [ ] T10.3 Net proceeds calculator
 - [ ] T10.4 Eligibility engine with the hook registry

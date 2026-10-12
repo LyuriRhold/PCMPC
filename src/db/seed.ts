@@ -4,6 +4,7 @@ import { seedCoa } from "@/modules/ledger/coa";
 import { seedCurrentFiscalYear } from "@/modules/ledger/periods";
 import { seedWater } from "@/modules/water/seed";
 import { seedDepositProducts } from "@/modules/savings/seed";
+import { seedLoanProducts } from "@/modules/loans/seed";
 import { seedNumberSeries } from "@/modules/numbering/series";
 import { seedSettings } from "@/modules/settings/service";
 
@@ -24,6 +25,7 @@ export const SEED_STEPS: SeedStep[] = [
   { name: "fiscal year and periods", run: seedCurrentFiscalYear },
   { name: "water zones/routes, sample tariff versions and fees (CONFIRM)", run: seedWater },
   { name: "deposit products: Regular Savings, Time Deposit (CONFIRM)", run: seedDepositProducts },
+  { name: "loan products REG, EMR, PRD and their deductions (DOMAIN samples, CONFIRM)", run: seedLoanProducts },
 ];
 
 /** The first admin, from SEED_ADMIN_USERNAME / SEED_ADMIN_PASSWORD. */

@@ -18,7 +18,7 @@
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ✅ | phase-07-water-collections · tag `phase-07` | rldejoya (reviewer agent: reconnection-fee rules fixed) · 2026-10-09 |
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ✅ | phase-08-share-capital · tag `phase-08` | rldejoya (reviewer agent: two-person withdrawal + follow-ups fixed) · 2026-10-12 |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ✅ | phase-09-savings · tag `phase-09` | rldejoya (reviewer agent: interest opening balance + follow-ups fixed) · 2026-10-12 |
-| 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ⬜ | | |
+| 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | 🔨 | phase-10-loan-applications | |
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ⬜ | | |
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ⬜ | | |
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ⬜ | | |
@@ -151,7 +151,7 @@
 - [ ] T10.4 Eligibility engine with the hook registry
 - [ ] T10.5 Application service + approval matrix + SoD
 - [ ] T10.6 UI: product admin, loan calculator, application form, approval queue, disclosure print
-- [ ] Acceptance tests written first (tests/acceptance/phase-10.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-10.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 11 — Loan Release, Collections, Penalties & Aging

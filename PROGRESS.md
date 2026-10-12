@@ -150,7 +150,7 @@
 - [x] T10.3 Net proceeds calculator
 - [x] T10.4 Eligibility engine with the hook registry
 - [x] T10.5 Application service + approval matrix + SoD
-- [ ] T10.6 UI: product admin, loan calculator, application form, approval queue, disclosure print
+- [x] T10.6 UI: product admin, loan calculator, application form, approval queue, disclosure print
 - [x] Acceptance tests written first (tests/acceptance/phase-10.test.ts)
 - [ ] Exit checks passed
 

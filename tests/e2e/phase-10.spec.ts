@@ -110,3 +110,14 @@ test("A10.11 the calculator shows A10.1 row 1; an application is submitted and a
   await expect(page.getByRole("heading", { name: "Disclosure Statement on Loan Transaction" })).toBeVisible();
   await expect(page.getByText("₱5,000.00").first()).toBeVisible();
 });
+
+test("loan products: the admin sees each product's terms as a form and can save them", async ({ page }) => {
+  await signIn(page, adminUser, adminPass);
+  await page.goto("/loans/products");
+  await expect(page.getByRole("heading", { name: "Loan products" })).toBeVisible();
+  const regular = page.locator("form", { has: page.locator('input[name="name"][value="Regular Loan"]') });
+  await expect(regular.getByLabel("Interest (% a month)")).toHaveValue("1.5");
+  await expect(regular.getByLabel("Deduction value")).toHaveCount(3);
+  await regular.getByRole("button", { name: "Save" }).click();
+  await expect(regular.getByText("Saved.")).toBeVisible();
+});

@@ -13,15 +13,15 @@ test.beforeEach(async ({ page }) => {
 
 test("planned screens show the under-construction page with their phase", async ({ page }) => {
   const nav = page.getByRole("navigation", { name: "Main" });
-  await nav.getByRole("link", { name: /Loan applications/ }).click();
-  await expect(page).toHaveURL(/\/loans\/applications$/);
-  await expect(page.getByRole("heading", { name: "Loan applications" })).toBeVisible();
+  await nav.getByRole("link", { name: /Releases & collections/ }).click();
+  await expect(page).toHaveURL(/\/loans\/servicing$/);
+  await expect(page.getByRole("heading", { name: "Releases & collections" })).toBeVisible();
   await expect(page.getByText("Coming soon: under construction")).toBeVisible();
-  await expect(page.getByText(/planned for Phase 10: Loan Products & Applications/)).toBeVisible();
+  await expect(page.getByText(/planned for Phase 11: Loan Release, Collections & Aging/)).toBeVisible();
 });
 
 test("the dashboard lists live and coming-soon modules; unknown paths are 404", async ({ page }) => {
-  await expect(page.getByRole("link", { name: /Loan applications.*Soon · P10/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Releases & collections.*Soon · P11/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Coop settings.*Live/ })).toBeVisible();
 
   await page.goto("/water/no-such-screen");

@@ -8,17 +8,19 @@ import { PageLoading } from "@/components/page-loading";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { can } from "@/lib/auth-guard";
-import { formatDate, formatDateTime, isBusinessDate } from "@/lib/dates";
+import { businessToday, formatDate, formatDateTime, isBusinessDate } from "@/lib/dates";
 import { guardPage } from "@/lib/page-guard";
 import { cn } from "@/lib/utils";
 import { allowedStatusTargets, getMemberProfile } from "@/modules/members/service";
 import { ApprovePanel, BeneficiariesEditor, StatusChangeForm } from "@/modules/members/ui/profile-panels";
 import { MemberStatusBadge } from "@/modules/members/ui/status-badge";
+import { SharePanel } from "@/modules/share/ui/share-panel";
 
 export const metadata: Metadata = { title: "Member · PCMPC MIS" };
 
 const TABS = [
   { id: "profile", label: "Profile" },
+  { id: "share", label: "Share capital" },
   { id: "beneficiaries", label: "Beneficiaries" },
   { id: "history", label: "Status history" },
 ] as const;
@@ -40,7 +42,8 @@ async function MemberContent(props: PageProps<"/members/[id]">) {
   const { id } = await props.params;
   if (!z.uuid().safeParse(id).success) notFound();
   const sp = await props.searchParams;
-  const tab = TABS.find((t) => t.id === sp.tab)?.id ?? "profile";
+  const tabs = TABS.filter((t) => t.id !== "share" || can(access.user, "share.read"));
+  const tab = tabs.find((t) => t.id === sp.tab)?.id ?? "profile";
   const approvedNo = typeof sp.approved === "string" && /^M-\d+$/.test(sp.approved) ? sp.approved : null;
 
   const profile = await getMemberProfile(id, can(access.user, "members.read_sensitive"));
@@ -79,7 +82,7 @@ async function MemberContent(props: PageProps<"/members/[id]">) {
       ) : null}
 
       <nav aria-label="Member sections" className="flex gap-1 border-b">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <Link
             key={t.id}
             href={`/members/${m.id}?tab=${t.id}`}
@@ -134,6 +137,17 @@ async function MemberContent(props: PageProps<"/members/[id]">) {
             </p>
           ) : null}
         </div>
+      ) : null}
+
+      {tab === "share" ? (
+        <SharePanel
+          memberId={m.id}
+          memberStatus={m.status}
+          year={typeof sp.year === "string" && /^(19|20)\d\d$/.test(sp.year) ? Number(sp.year) : Number(businessToday().slice(0, 4))}
+          from={typeof sp.from === "string" ? sp.from : null}
+          to={typeof sp.to === "string" ? sp.to : null}
+          can={{ subscribe: canWrite, approve: canApprove, payOut: can(access.user, "cash.session") }}
+        />
       ) : null}
 
       {tab === "beneficiaries" ? (

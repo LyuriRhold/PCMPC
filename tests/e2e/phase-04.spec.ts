@@ -42,10 +42,10 @@ test("A4.11 open session → multi-item receipt → close with count → manager
   await page.getByLabel("Payor type").selectOption("WALK_IN");
   await page.getByLabel("Payor name").fill(`E2E Walk-in ${run}`);
   await page.getByLabel("Income item").selectOption("CERT_FEE");
-  await page.getByLabel("Amount").fill("50");
+  await page.getByLabel("Amount", { exact: true }).fill("50");
   await page.getByRole("button", { name: "Add item" }).click();
   await page.getByLabel("Income item").selectOption("HALL_RENTAL");
-  await page.getByLabel("Amount").fill("1500");
+  await page.getByLabel("Amount", { exact: true }).fill("1500");
   await page.getByRole("button", { name: "Add item" }).click();
   await expect(page.getByTestId("cart-total")).toHaveText("₱1,550.00");
   await page.getByLabel("BIR receipt no.").fill(`E2E-${run}`);

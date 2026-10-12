@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 08
+**Current phase:** 09
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -16,7 +16,7 @@
 | 05 | [Water: Customers, Service Connections, Meters & Rates](docs/phases/PHASE-05-water-connections.md) | ✅ | phase-05-water-connections · tag `phase-05` | rldejoya (merged on request without the reviewer agent) · 2026-10-09 |
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ✅ | phase-06-water-billing · tag `phase-06` | rldejoya (reviewer agent: memo cap + phone re-read fixed) · 2026-10-09 |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ✅ | phase-07-water-collections · tag `phase-07` | rldejoya (reviewer agent: reconnection-fee rules fixed) · 2026-10-09 |
-| 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ⬜ | | |
+| 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ✅ | phase-08-share-capital · tag `phase-08` | rldejoya (reviewer agent: two-person withdrawal + follow-ups fixed) · 2026-10-12 |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ⬜ | | |
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ⬜ | | |
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ⬜ | | |
@@ -126,13 +126,13 @@
 - [x] Exit checks passed
 
 ### Phase 08 — Share Capital & CBU
-- [ ] T8.1 Schema, migrations, view, mappings check
-- [ ] T8.2 Share service (subscribe, pay, fee, transfer, withdraw, retainCbu, isGoodStanding, ASM)
-- [ ] T8.3 GL integration via `postJournal` in the same transaction
-- [ ] T8.4 Actions, UI tab/forms, teller registrations (fee, share payment, withdrawal)
-- [ ] T8.5 Member share ledger report (per member, date range) + Excel export
-- [ ] Acceptance tests written first (tests/acceptance/phase-08.test.ts)
-- [ ] Exit checks passed
+- [x] T8.1 Schema, migrations, view, mappings check
+- [x] T8.2 Share service (subscribe, pay, fee, transfer, withdraw, retainCbu, isGoodStanding, ASM)
+- [x] T8.3 GL integration via `postJournal` in the same transaction
+- [x] T8.4 Actions, UI tab/forms, teller registrations (fee, share payment, withdrawal)
+- [x] T8.5 Member share ledger report (per member, date range) + Excel export
+- [x] Acceptance tests written first (tests/acceptance/phase-08.test.ts)
+- [x] Exit checks passed
 
 ### Phase 09 — Savings & Time Deposits
 - [ ] T9.1 Schema + migrations
@@ -294,6 +294,12 @@
 - [ ] Q-07.5 (phase 07) Deposit refund on closure. | default used: automatic when the account is closed: the deposit offsets everything the account still owes (oldest bill first) and the rest is refunded by a DV (DRAFT, then approved and released as usual) | answer:
 - [ ] Q-07.6 (phase 07) Collection efficiency: do advances applied to a bill count as collected? | default used: yes (cash received earlier, applied to the bill); penalties are not counted | answer:
 - [ ] Q-07.7 (phase 07) Report formats used today (billing summary, collection report, aging, notices). | default used: on-screen tables that print and export to Excel; the notice is a one-page PDF | answer:
+- [ ] Q-08.1 (phase 08) Holding cap (10% of the coop's total paid-up) for new members: with few members, any first payment is a large share of the total. | default used: the cap is checked only when the member's paid-up would go above the minimum paid-up (`share.min_paid_up_regular`, ₱2,500.00); payments up to the minimum are always allowed. Transfers (Board-approved) and CBU retention on loans (loan policy) don't check the cap | answer:
+- [ ] Q-08.2 (phase 08) CBU retention on a loan (Phase 11) when the member's unpaid subscription is smaller than the retention. | default used: whole shares are subscribed first for the excess (as `share.auto_subscribe_excess`), then the retention is credited to paid-up | answer:
+- [ ] Q-08.3 (phase 08) Who encodes subscriptions, transfers and withdrawals? | default used: subscriptions by membership staff (members.write: manager, loan officer); transfers by the manager (members.approve) with the Board resolution no.; withdrawal in two steps: the manager approves it on the Board's termination resolution (members.approve), then a different person, the teller, pays it out from the drawer (cash.session); payments and the membership fee only at the teller | answer:
+- [ ] Q-08.4 (phase 08) Partial payments at the teller. | default used: the teller can change the amount of any item in the cart (e.g. ₱2,500.00 of a ₱10,000.00 unpaid subscription); the server re-checks each amount against the module's rules | answer:
+- [ ] Q-08.5 (phase 08) Average share month (ASM) rounding. | default used: each member's ASM for a year is rounded HALF-UP to the centavo (DOMAIN §3 doesn't list it); Phase 15 may compute interest on share capital from the unrounded sum if PCMPC prefers | answer:
+- [ ] Q-08.6 (phase 08) Good standing for associate members. | default used: the same minimum paid-up (₱2,500.00) and membership fee as regular members | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -827,3 +833,101 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - **Not changed (noted):**
   - The Excel export turns peso amounts into spreadsheet numbers. They are exact for any realistic amount and used for display only.
   - `dv_lines.customer_id` makes cashiering reference water customers, the same way journal lines already do.
+
+### Phase 08 summary
+**Built**
+- **Schema (T8.1):** `share_subscriptions`, `share_transactions` (the member share ledger) and `member_fees`, plus the view `v_member_share_balance` (subscribed, paid-up, unpaid). The view leaves out rows whose receipt was cancelled. Share rows and fees are immutable (triggers); a subscription can only change status. A unit test checks that every GL key the module posts to is mapped.
+- **Share service (T8.2/T8.3):** every money movement posts its journal entry in the same transaction as its share rows.
+  - **Subscribe:** the first subscription must reach `share.min_subscription_shares` (100 shares). GJ Dr Subscription Receivable / Cr Subscribed Share Capital, member-tagged.
+  - **Pay** (teller item `SHARE_PAYMENT`): the teller sees the unpaid subscription as a due. A payment above it is rejected ("Payment exceeds unpaid subscription (₱…)"), unless `share.auto_subscribe_excess` is on (then whole shares are subscribed first). The holding cap (10%) is checked.
+  - **Membership fee** (teller item `MEMBERSHIP_FEE`): a due until paid; it must be the exact fee and is paid once. `isGoodStanding()` = paid-up ≥ minimum paid-up and fee paid.
+  - **Transfer:** needs both members ACTIVE, a Board resolution no., and an amount ≤ the transferor's paid-up. GL Dr capital (from) / Cr capital (to) nets to zero; both members' ledgers move.
+  - **Withdrawal** (termination only): cancels the unpaid subscription and pays out the paid-up in cash from the teller's drawer (cash-out `SHARE_WITHDRAWAL`, through the new generic `payOut()` in cashiering). `registerShareOffset()` is the hook Phase 11 uses to deduct loans first.
+  - **Termination rule:** "share capital must be fully withdrawn/settled first (paid-up ₱…, unpaid subscription ₱…)".
+  - **For Phase 11:** `cbuLines()` + `retainCbu()` credit CBU retention to paid-up.
+  - **ASM:** Σ of the 12 month-end paid-up balances ÷ 12, HALF-UP (new `divide()` in `src/lib/money.ts`).
+  - **Cancelling a receipt:** cancelling a share payment or fee receipt takes it off the balances. It's refused if that capital was already transferred or paid out.
+- **Screens (T8.4):**
+  - **Member profile → "Share capital" tab** (needs `share.read`):
+    - subscribed, paid-up, unpaid and the ASM for a chosen year;
+    - membership fee and good-standing badges;
+    - subscriptions, and the share ledger with running balances.
+  - **Forms on the tab:**
+    - Subscribe (membership staff);
+    - Transfer (manager; finds the other member by member no.);
+    - Pay out share capital (teller, with a confirmation).
+  - **`/share` registry:** coop totals plus each member's subscribed, paid-up and unpaid, with search. The nav item is live.
+  - **Teller desk:** cart amounts can be edited, so a due can be paid in part (e.g. ₱2,500.00 of a ₱10,000.00 unpaid subscription). The server re-checks every amount.
+- **Report (T8.5):** the member share ledger for a date range, with the opening balance carried, exported to Excel at `/api/share/ledger?member=&from=&to=` (needs `share.read`).
+
+**Decisions** (see Questions Q-08.1–Q-08.6)
+- **Holding cap:** applies only above the minimum paid-up (₱2,500.00). Otherwise no early member could pay the minimum. Transfers don't check the cap.
+- **CBU retention above the unpaid subscription:** subscribes whole shares first.
+- **Who does what:** subscriptions by membership staff (`members.write`); transfers by the manager (`members.approve`); payouts by the teller (`cash.session`); payments and fees only at the teller.
+- **Partial payments:** made by editing the cart amount.
+
+**Deviations from spec (with reason)**
+- **Extra columns:**
+  - `share_transactions.seq`: same-day rows keep their order in the ledger;
+  - `share_transactions.subscription_id` and `receipt_item_id`, plus `member_fees.receipt_item_id`: tie rows to their source, so a cancelled receipt drops out of the balances.
+- **Withdrawal is paid out at the teller,** as a cash-out from the open session, not by a DV. The spec says "pays out paid-up"; the teller already handles cash and the drawer check.
+- **Phase 08 E2E:** I wrote this file in the tests-first commit; three selectors were fixed since, assertions unchanged:
+  - the tab link is matched exactly, because the main nav also has "Share capital & CBU";
+  - the "Add" button is taken from the share-capital due row, not the first due.
+- **Phase 04 E2E:** the manual item's "Amount" field is now matched exactly. The new cart inputs are labelled "Amount for …".
+- **UI-shell E2E / nav unit test:** the "coming soon" example moved to Phase 09 (`/savings`), since `/share` is now live.
+- **Vitest DB projects:** test and hook timeout raised to 30 s.
+  - A8.6 builds 37 paying members through the real actions. Under load it took 6 s, over Vitest's 5 s default.
+  - A test that times out keeps querying while the next test resets the database, which caused a deadlock.
+  - No assertion changed.
+- **Vitest DB worker count now follows free memory** (1–4, about 0.75 GB each; `PCMPC_TEST_WORKERS=<n>` overrides).
+  - The Stop-hook gate went red twice with only timeouts, when the PC had ~2.6 GB free (30 GB committed on 16 GB RAM, ~4,000 pages/s): 474 s, then 532 s.
+  - With 2 workers the same suite was green in 360 s.
+  - A healthy PC still gets 4 workers.
+
+**Follow-ups**
+- Answer Q-08.1–Q-08.4.
+- **Phase 11:** register the loan offset (`registerShareOffset`) and call `retainCbu()` on loan release.
+- **Phase 15:** `ISC_CAPITALIZED` and `PR_CAPITALIZED` ledger types are ready; nothing posts them yet.
+- **Older code** (cashiering, water) runs `Promise.all` on one transaction. pg 9 will refuse this; it now logs a deprecation warning. Fixed in the share module; offered as a separate task.
+- **Full E2E on `next dev`:** timing-sensitive on this PC (cold route compiles against the 15 s expect timeout). The full suite is more reliable against a production build: `E2E_SERVER=prod npx playwright test`.
+
+**Exit checks / counts:**
+- `npm run gate` is green: 422 tests (35 files), scan clean.
+- `npm run build` is green (`/share`, `/api/share/ledger`).
+- `npm run e2e -- phase-08` is green (A8.10).
+- Full E2E:
+  - **Production build:** 13 of 14 green in one run. A3.11 timed out once waiting for the dashboard after sign-in, then passed on rerun.
+  - **Dev server:** two full runs each had 2 different 15 s timeouts (slow first-time page renders); every spec passed in at least one run.
+- **TB balances after the fixture:**
+  - The integration test (subscribe, pay, fee, transfer, withdraw) checks that the TB balances and that GL paid-up equals the share ledgers.
+  - A8.7 checks that the TB control totals are unchanged.
+  - A8.9 checks that the ledger equals the GL subsidiary at every row.
+- Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK; the sample trial balance balances.
+
+**Review follow-ups (reviewer agent, 2026-10-12)**
+- **Fixed (must-fix): withdrawals need two people.**
+  - The manager approves the withdrawal on the Board's termination resolution (`members.approve`): reason plus resolution no.
+  - A different person, the teller, then pays it out from the drawer (`cash.session`). The amount is the paid-up at payout time.
+  - Approvals can be cancelled; payout is refused without an approval, or by the approver.
+  - New table `share_withdrawals` (migration 0020): APPROVED → PAID or CANCELLED, one open approval per member, with the payout entry. Paying out also marks the member's subscriptions CANCELLED (shown as "withdrawn").
+  - Tested, including the denied paths.
+- **Fixed:**
+  - A second share item in one receipt counts the shares the first item auto-subscribed (it subscribed too many when `share.auto_subscribe_excess` is on).
+  - Cancelling a share payment is refused once capital was transferred out or withdrawn *after* it, even if the paid-up still covers it (and the member row is locked).
+  - The membership fee can't be taken from a TERMINATED or DECEASED member. The member row is locked, so two tellers can't both collect it.
+  - `retainCbu()` checks that the entry credits the member's share capital with exactly that amount, so the share ledger can't drift from the GL. The shares-for-excess maths is now one helper.
+  - The Share tab's ASM year accepts only 1900–2099 (a year like 0000 crashed the page). The ledger export refuses `from` after `to`.
+  - The teller item validates the stored breakdown instead of casting it. The unused `shareBalances` was removed.
+- **New tests:**
+  - immutability triggers (share rows, fees, subscriptions);
+  - the permission matrix of the share actions;
+  - a terminated member's water customer becomes NON_MEMBER;
+  - `divide()` HALF-UP;
+  - the reversed export date range.
+- **Logged as Questions:** Q-08.1 now says the cap doesn't apply to transfers or CBU retention; new Q-08.5 (ASM rounding) and Q-08.6 (good standing for associate members).
+- **Not changed (noted):**
+  - The `/share` registry is the nav item Phase 08 owns (`nav.ts`, phase "08").
+  - The Vitest worker-count change stays on this branch (it was needed to get the gate green).
+  - The fourth copy of the Excel `pesos()` helper and fractional-share transfers are left as they are.
+- **After the fixes:** `npm run gate` green (430 tests, 35 files; 2 DB workers at 2.2 GB free memory, 260 s), `npm run build` green, `npm run e2e -- phase-08` green (A8.10 and the new withdrawal flow: the manager approves, the teller pays out, the balances settle to ₱0.00).

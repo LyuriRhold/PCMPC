@@ -1008,7 +1008,7 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - `npm run gate` is green: 470 tests (39 files), scan clean. Phase 09 adds:
   - 10 acceptance tests (A9.1–A9.10);
   - 16 integration tests;
-  - 14 unit tests (interest engine, mappings, `divide`).
+  - 14 unit tests (interest engine including `mulRateRatio`, and mappings).
 - `npm run build` is green (`/savings`, `/savings/interest`, `/savings/products`, `/savings/time-deposits`).
 - `npm run e2e -- phase-09` is green: A9.11, and the products / interest-run smoke test.
 - The full E2E against a production build is green: 17 of 17 (phases 00–09).

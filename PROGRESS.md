@@ -135,7 +135,7 @@
 - [x] Exit checks passed
 
 ### Phase 09 — Savings & Time Deposits
-- [ ] T9.1 Schema + migrations
+- [x] T9.1 Schema + migrations
 - [ ] T9.2 Deposit service (open, deposit, withdraw, close, reactivate, ledger)
 - [ ] T9.3 ADB + interest engine (pure functions + tests), interest run with preview and post
 - [ ] T9.4 Time deposits (place, mature, pre-terminate, rollover)

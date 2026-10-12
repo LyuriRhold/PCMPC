@@ -9,3 +9,4 @@ export * from "@/modules/cashiering/schema";
 export * from "@/modules/water/schema";
 export * from "@/modules/jobs/schema";
 export * from "@/modules/share/schema";
+export * from "@/modules/savings/schema";

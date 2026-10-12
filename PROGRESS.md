@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 09
+**Current phase:** 10
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -17,7 +17,7 @@
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ✅ | phase-06-water-billing · tag `phase-06` | rldejoya (reviewer agent: memo cap + phone re-read fixed) · 2026-10-09 |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ✅ | phase-07-water-collections · tag `phase-07` | rldejoya (reviewer agent: reconnection-fee rules fixed) · 2026-10-09 |
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ✅ | phase-08-share-capital · tag `phase-08` | rldejoya (reviewer agent: two-person withdrawal + follow-ups fixed) · 2026-10-12 |
-| 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | 🟡 awaiting review | phase-09-savings | |
+| 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ✅ | phase-09-savings · tag `phase-09` | rldejoya (reviewer agent: interest opening balance + follow-ups fixed) · 2026-10-12 |
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ⬜ | | |
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ⬜ | | |
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ⬜ | | |
@@ -1053,3 +1053,7 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - TD accounts show their certificates, not a separate passbook.
   - Pre-termination uses the Regular Savings product's rate (the only `td.pretermination_rate` choice).
   - The deviation "TD funded from savings (Dr Savings Deposits)" needs PCMPC's sign-off (Q-09.3).
+- **After the fixes:**
+  - `npm run gate` green: 478 tests, 39 files. Only 1.5 GB of memory was free, so it ran on 1 DB worker (572 s).
+  - `npm run build` green.
+  - `npm run e2e -- phase-09` green: 2 tests.

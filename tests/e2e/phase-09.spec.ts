@@ -69,3 +69,29 @@ test("A9.11 open account → deposit and withdraw at the teller → ledger shows
   await expect(page.getByRole("row", { name: /Deposit/ })).toContainText("₱10,000.00");
   await expect(page.getByRole("row", { name: /Withdrawal/ })).toContainText("₱7,000.00");
 });
+
+test("savings products and the interest-run preview open for the right roles", async ({ page }) => {
+  const run = Date.now().toString(36).toUpperCase();
+  const book = { user: `bk9_${run.toLowerCase()}`, pass: `E2e-Book-${run}` };
+
+  // Admin: the products page shows the rates and limits as a form; saving keeps them.
+  await signIn(page, adminUser, adminPass);
+  await page.goto("/savings/products");
+  await expect(page.getByRole("heading", { name: "Savings products" })).toBeVisible();
+  const regular = page.locator("form", { has: page.getByLabel("Maintaining balance (₱)") });
+  await expect(regular.getByLabel("Interest rate (% a year)")).toHaveValue("2");
+  await regular.getByRole("button", { name: "Save" }).click();
+  await expect(regular.getByText("Saved.")).toBeVisible();
+  // The coop settings point to it for savings rates.
+  await page.goto("/admin/settings");
+  await expect(page.getByRole("link", { name: "Open Savings products" }).first()).toBeVisible();
+  await createUser(page, book.user, "BOOKKEEPER", book.pass);
+  await signOut(page);
+
+  // Bookkeeper: the interest-run preview for the last quarter.
+  await signIn(page, book.user, book.pass);
+  await page.goto("/savings/interest");
+  await expect(page.getByRole("heading", { name: "Savings interest runs" })).toBeVisible();
+  await expect(page.getByLabel("Quarter ending")).toBeVisible();
+  await expect(page.getByText("Posted runs", { exact: true })).toBeVisible();
+});

@@ -87,13 +87,13 @@ export const PRESENTATION: Record<SettingKey, Presentation> = {
   "share.asm_basis": { label: "Average share months (for interest on capital)", help: "Computed from each month-end paid-up balance over the year, divided by 12.", spec: { type: "text" }, readonly: fixedPolicy("Fixed method.") },
 
   // ── Savings & time deposits ──
-  "savings.regular.rate_pa": { label: "Regular savings interest", help: "Yearly interest rate on regular savings.", spec: { type: "percent", suffix: "per year" } },
+  "savings.regular.rate_pa": { label: "Regular savings interest", help: "Yearly interest rate on regular savings.", spec: { type: "percent", suffix: "per year" }, readonly: { reason: "Savings rates and limits are set on the Savings products page.", link: { href: "/savings/products", label: "Open Savings products" } } },
   "savings.interest_basis": { label: "How savings interest is computed", help: "On the average daily balance, actual days over 365.", spec: { type: "text" }, readonly: fixedPolicy("Fixed method.") },
   "savings.crediting": { label: "When savings interest is credited", help: "Every quarter: end of March, June, September and December.", spec: { type: "text" }, readonly: fixedPolicy("Fixed schedule.") },
-  "savings.min_balance_earn": { label: "Minimum balance to earn interest", help: "Accounts whose average daily balance is below this earn no interest.", spec: { type: "money" } },
-  "savings.maintaining_balance": { label: "Maintaining balance", help: "The least a savings account should keep.", spec: { type: "money" } },
-  "savings.dormant_after_months": { label: "Account becomes dormant after", help: "An account with no deposits or withdrawals for this long is marked dormant.", spec: { type: "number", unit: "months", min: 1, max: 120 } },
-  "savings.wtax_rate": { label: "Withholding tax on deposit interest", help: "Leave at 0% if the cooperative is exempt.", spec: { type: "percent" } },
+  "savings.min_balance_earn": { label: "Minimum balance to earn interest", help: "Accounts whose average daily balance is below this earn no interest.", spec: { type: "money" }, readonly: { reason: "Savings rates and limits are set on the Savings products page.", link: { href: "/savings/products", label: "Open Savings products" } } },
+  "savings.maintaining_balance": { label: "Maintaining balance", help: "The least a savings account should keep.", spec: { type: "money" }, readonly: { reason: "Savings rates and limits are set on the Savings products page.", link: { href: "/savings/products", label: "Open Savings products" } } },
+  "savings.dormant_after_months": { label: "Account becomes dormant after", help: "An account with no deposits or withdrawals for this long is marked dormant.", spec: { type: "number", unit: "months", min: 1, max: 120 }, readonly: { reason: "Savings rates and limits are set on the Savings products page.", link: { href: "/savings/products", label: "Open Savings products" } } },
+  "savings.wtax_rate": { label: "Withholding tax on deposit interest", help: "Leave at 0% if the cooperative is exempt.", spec: { type: "percent" }, readonly: { reason: "Savings rates and limits are set on the Savings products page.", link: { href: "/savings/products", label: "Open Savings products" } } },
   "td.pretermination_rate": { label: "Time deposit withdrawn early", help: "Earns only the regular savings rate for the days it was held.", spec: { type: "text" }, readonly: fixedPolicy("Fixed rule.") },
 
   // ── Loans ──

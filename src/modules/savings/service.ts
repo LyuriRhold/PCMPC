@@ -7,6 +7,8 @@ import { format, type Money } from "@/lib/money";
 import { normalizeName } from "@/lib/names";
 import { next as nextNumber } from "@/lib/numbering";
 import { payOut } from "@/modules/cashiering/service";
+import { users } from "@/modules/auth/schema";
+import { jobRuns } from "@/modules/jobs/schema";
 import { journalEntries } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal, type LineInput } from "@/modules/ledger/service";
 import { members } from "@/modules/members/schema";
@@ -468,6 +470,17 @@ export async function runInterest(tx: Tx, input: { productId: string; periodEnd:
     },
     () => `Interest for ${product.name}, quarter ending ${formatDate(input.periodEnd)}, has already run`,
   );
+}
+
+/** Interest runs already posted, newest first (Interest runs page). */
+export async function interestRuns(db: Db | Tx = getDb()) {
+  return db
+    .select({ key: jobRuns.key, runAt: jobRuns.runAt, result: jobRuns.result, by: users.username })
+    .from(jobRuns)
+    .leftJoin(users, eq(users.id, jobRuns.by))
+    .where(eq(jobRuns.job, "savings-interest"))
+    .orderBy(desc(jobRuns.runAt))
+    .limit(40);
 }
 
 // ── Time deposits (T9.4) ──

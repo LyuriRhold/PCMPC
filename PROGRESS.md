@@ -140,7 +140,7 @@
 - [x] T9.3 ADB + interest engine (pure functions + tests), interest run with preview and post
 - [x] T9.4 Time deposits (place, mature, pre-terminate, rollover)
 - [x] T9.5 Dormancy job + teller registrations (`SAVINGS_DEPOSIT`, `SAVINGS_WITHDRAWAL`)
-- [ ] T9.6 UI + actions + permissions + audit
+- [x] T9.6 UI + actions + permissions + audit
 - [x] Acceptance tests written first (tests/acceptance/phase-09.test.ts)
 - [ ] Exit checks passed
 

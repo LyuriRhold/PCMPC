@@ -155,7 +155,7 @@
 - [x] Exit checks passed
 
 ### Phase 11 — Loan Release, Collections, Penalties & Aging
-- [ ] T11.1 Schema + migrations
+- [x] T11.1 Schema + migrations
 - [ ] T11.2 Release service (GL, CBU, schedule persistence, loan_no)
 - [ ] T11.3 Collection service (allocation, excess handling, GL, reversal of a payment)
 - [ ] T11.4 Penalty engine + daily job + job_runs idempotency

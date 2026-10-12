@@ -66,3 +66,10 @@ export function quarterEnding(periodEnd: BusinessDate): { start: BusinessDate; e
   const year = periodEnd.slice(0, 4);
   return { start: `${year}-${String(i * 3 + 1).padStart(2, "0")}-01`, end: periodEnd };
 }
+
+/** The last quarter end before `date` (e.g. Apr 10 → Mar 31). */
+export function lastQuarterEnd(date: BusinessDate): BusinessDate {
+  const y = Number(date.slice(0, 4));
+  const completed = Math.floor((Number(date.slice(5, 7)) - 1) / 3);
+  return completed === 0 ? `${y - 1}-12-31` : `${y}-${["03-31", "06-30", "09-30"][completed - 1]}`;
+}

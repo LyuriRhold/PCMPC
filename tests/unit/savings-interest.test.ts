@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mulRateRatio } from "@/lib/money";
-import { averageDailyBalance, balanceDays, quarterEnding, savingsInterest, simpleInterest, withholdingTax } from "@/modules/savings/interest";
+import { averageDailyBalance, balanceDays, lastQuarterEnd, quarterEnding, savingsInterest, simpleInterest, withholdingTax } from "@/modules/savings/interest";
 
 const P = (pesos: number, centavos = 0) => BigInt(pesos) * 100n + BigInt(centavos);
 const Q1 = { from: "2026-01-01", to: "2026-03-31" };
@@ -74,5 +74,14 @@ describe("withholding tax and quarters", () => {
   it("mulRateRatio rounds once, exactly", () => {
     expect(mulRateRatio(P(50000), "0.03", 180n, 365n)).toBe(P(739, 73));
     expect(mulRateRatio(150n, "1", 1n, 12n)).toBe(13n);
+  });
+});
+
+describe("review follow-ups", () => {
+  it("lastQuarterEnd", () => {
+    expect(lastQuarterEnd("2026-01-01")).toBe("2025-12-31");
+    expect(lastQuarterEnd("2026-04-10")).toBe("2026-03-31");
+    expect(lastQuarterEnd("2026-07-01")).toBe("2026-06-30");
+    expect(lastQuarterEnd("2026-12-31")).toBe("2026-09-30");
   });
 });

@@ -146,7 +146,7 @@ export const timeDeposits = pgTable(
       .notNull()
       .references(() => depositAccounts.id),
     rolledFromId: uuid("rolled_from_id"),
-    /** Placement entry. */
+    /** The entry that placed it (for a rollover, the entry that ended the previous certificate). */
     jeId: uuid("je_id")
       .notNull()
       .references(() => journalEntries.id),
@@ -160,6 +160,7 @@ export const timeDeposits = pgTable(
     check("time_deposits_closed_chk", sql`(${t.status} = 'ACTIVE') = (${t.closedAt} IS NULL)`),
     uniqueIndex("time_deposits_certificate_uq").on(t.certificateNo),
     index("time_deposits_account_idx").on(t.accountId),
+    index("time_deposits_savings_account_idx").on(t.savingsAccountId),
   ],
 );
 

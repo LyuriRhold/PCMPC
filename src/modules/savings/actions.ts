@@ -39,7 +39,7 @@ function pesos(text: string): bigint {
 function percent(text: string, what: string): string {
   const t = text.trim().replace(/%$/, "").trim();
   if (!/^\d+(\.\d+)?$/.test(t)) throw new SavingsError(`Enter the ${what} as a percentage, e.g. 2 for 2%`);
-  return new Decimal(t).div(100).toString();
+  return new Decimal(t).div(100).toFixed();
 }
 
 const id = z.uuid();
@@ -58,8 +58,9 @@ export async function openAccountAction(input: z.input<typeof openSchema>): Prom
 }
 
 const withdrawSchema = z.object({ accountId: id, amount: amountText });
-/** Teller: pays a savings withdrawal out of the open session's drawer. */
+/** Teller: pays a savings withdrawal out of the open session's drawer (savings.post and cash.session). */
 export async function withdrawAction(input: z.input<typeof withdrawSchema>): Promise<ActionResult<{ jeId: string; balance: string }>> {
+  await requirePermission("savings.post");
   const actor = await requirePermission("cash.session");
   try {
     const data = withdrawSchema.parse(input);
@@ -71,8 +72,9 @@ export async function withdrawAction(input: z.input<typeof withdrawSchema>): Pro
 }
 
 const closeSchema = z.object({ accountId: id });
-/** Teller: closes a savings account and pays out its whole balance. */
+/** Teller: closes a savings account and pays out its whole balance (savings.post and cash.session). */
 export async function closeAccountAction(input: z.input<typeof closeSchema>): Promise<ActionResult<{ paidOut: string }>> {
+  await requirePermission("savings.post");
   const actor = await requirePermission("cash.session");
   try {
     const data = closeSchema.parse(input);

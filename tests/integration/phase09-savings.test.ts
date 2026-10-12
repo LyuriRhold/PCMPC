@@ -277,3 +277,115 @@ describe("database rules", () => {
     await expect(pool.query("UPDATE time_deposits SET status = 'ACTIVE', closed_at = NULL WHERE id = $1", [r.data.timeDepositId])).rejects.toThrow(/PRETERMINATED time deposit can't be changed/);
   });
 });
+
+describe("review follow-ups", () => {
+  const runFor = async (periodEnd: string) => runAs(bookkeeperId(), async () => runInterestAction({ productId: await productId("SAV"), periodEnd }));
+
+  it("a deposit made after the quarter end but before the run doesn't count twice in the next quarter", async () => {
+    const m = await activeMember();
+    const acc = await openSavings(m);
+    expect((await deposit(m, acc, "10,000.00")).ok).toBe(true);
+    on("2026-04-01");
+    expect((await deposit(m, acc, "5,000.00")).ok).toBe(true);
+    const q1 = await runFor("2026-03-31");
+    if (!q1.ok) throw new Error(q1.error);
+    // The passbook is in date order: the Mar 31 interest comes before the Apr 1 deposit.
+    expect((await depositLedger(acc)).rows.map((r) => [r.date, r.type, r.balanceAfter])).toEqual([
+      ["2026-01-01", "DEPOSIT", P(10000)],
+      ["2026-03-31", "INTEREST", P(10049, 32)],
+      ["2026-04-01", "DEPOSIT", P(15049, 32)],
+    ]);
+    expect((await depositLedger(acc, { from: "2026-04-01" })).opening).toBe(P(10049, 32));
+    on("2026-07-01");
+    const [q2] = await previewInterest(await productId("SAV"), "2026-06-30");
+    expect(q2?.adb).toBe(P(15049, 32));
+  });
+
+  it("previewing a quarter after its run shows the interest that was posted", async () => {
+    const m = await activeMember();
+    const acc = await openSavings(m);
+    expect((await deposit(m, acc, "1,000,000.00")).ok).toBe(true);
+    const r = await runQ1();
+    if (!r.ok) throw new Error(r.error);
+    const [again] = await previewInterest(await productId("SAV"), "2026-03-31");
+    expect(again?.interest).toBe(BigInt(r.data.total));
+    expect(again?.interest).toBe(P(4931, 51));
+  });
+
+  it("quarters run in order; an account closes only after the last quarter's interest is credited", async () => {
+    const m = await activeMember();
+    const acc = await openSavings(m);
+    expect((await deposit(m, acc, "10,000.00")).ok).toBe(true);
+    on("2026-07-01");
+    expect(await runFor("2026-06-30")).toMatchObject({ ok: false, error: expect.stringMatching(/quarter ending Mar 31, 2026 first/) });
+    expect(await runAs(await tellerToday(), () => closeAccountAction({ accountId: acc }))).toMatchObject({ ok: false, error: expect.stringMatching(/quarter ending Jun 30, 2026 first/) });
+    expect((await runFor("2026-03-31")).ok).toBe(true);
+    expect((await runFor("2026-06-30")).ok).toBe(true);
+    // Another member's deposit puts the payout cash in today's drawer.
+    const other = await activeMember("Other");
+    expect((await deposit(other, await openSavings(other), "20,000.00")).ok).toBe(true);
+    const before = await accountBalance(acc);
+    expect(before).toBeGreaterThan(P(10000)); // Q1 and Q2 interest credited
+    const closed = await runAs(await tellerToday(), () => closeAccountAction({ accountId: acc }));
+    if (!closed.ok) throw new Error(closed.error);
+    expect(BigInt(closed.data.paidOut)).toBe(before);
+  });
+
+  it("an account opened mid-quarter averages over the whole quarter (CONFIRM Q-09.8)", async () => {
+    on("2026-03-20");
+    const m = await activeMember();
+    const acc = await openSavings(m);
+    expect((await deposit(m, acc, "1,000.00")).ok).toBe(true);
+    on("2026-04-01");
+    const [row] = await previewInterest(await productId("SAV"), "2026-03-31");
+    expect(row).toMatchObject({ accountId: acc, adb: P(133, 33), interest: 0n }); // 1,000 × 12 days ÷ 90
+  });
+
+  it("dormancy counts from the opening when there was no deposit; closed and dormant accounts are left alone", async () => {
+    const a = await activeMember("Alpha");
+    const b = await activeMember("Bravo");
+    const accA = await openSavings(a);
+    const accB = await openSavings(b);
+    expect((await runAs(await tellerToday(), () => closeAccountAction({ accountId: accB }))).ok).toBe(true);
+    expect(await withTx((tx) => markDormant(tx, "2027-12-31"))).toEqual({ dormant: 0 });
+    expect(await withTx((tx) => markDormant(tx, "2028-01-01"))).toEqual({ dormant: 1 });
+    expect(await withTx((tx) => markDormant(tx, "2028-01-02"))).toEqual({ dormant: 0 });
+    expect((await getAccount(accA))?.status).toBe("DORMANT");
+    expect((await getAccount(accB))?.status).toBe("CLOSED");
+  });
+
+  it("time-deposit interest with withholding tax: net to savings, tax to Withholding Tax Payable; balanced", async () => {
+    const admin = (await makeUser("ADMIN", "admin9td")).id;
+    const td = await productByCode("TD");
+    expect((await runAs(admin, () => updateProductAction({ productId: td!.id, name: td!.name, ratePct: "3", minBalanceEarn: "0", maintainingBalance: "0", dormantAfterMonths: null, wtaxPct: "20", active: true }))).ok).toBe(true);
+    const m = await activeMember();
+    const acc = await openSavings(m);
+    expect((await deposit(m, acc, "50,100.00")).ok).toBe(true);
+    const placed = await runAs(await tellerToday(), async () => placeTimeDepositAction({ memberId: m, productId: td!.id, fromAccountId: acc, principal: "50,000.00", termDays: 180 }));
+    if (!placed.ok) throw new Error(placed.error);
+    on("2026-06-30");
+    const r = await runAs(await tellerToday(), () => matureTimeDepositAction({ timeDepositId: placed.data.timeDepositId }));
+    if (!r.ok) throw new Error(r.error);
+    expect(r.data.interest).toBe(String(P(739, 73)));
+    // Tax 739.73 × 20% = 147.946 → 147.95; net 591.78.
+    expect(await accountBalance(acc)).toBe(P(100) + P(50000) + P(591, 78));
+    expect(await accountBalance(placed.data.accountId)).toBe(0n);
+    expect((await subsidiaryLedger("time_deposits", m, "2026-01-01", "2026-12-31")).closing).toBe(0n);
+    expect((await subsidiaryLedger("savings_deposits", m, "2026-01-01", "2026-12-31")).closing).toBe(P(50691, 78));
+    expect((await trialBalance("2026-12-31")).balanced).toBe(true);
+  });
+
+  it("pre-termination: the time deposit leaves the GL and its principal and interest reach savings", async () => {
+    const m = await activeMember();
+    const acc = await openSavings(m);
+    expect((await deposit(m, acc, "50,100.00")).ok).toBe(true);
+    const placed = await runAs(await tellerToday(), async () => placeTimeDepositAction({ memberId: m, productId: await productId("TD"), fromAccountId: acc, principal: "50,000.00", termDays: 180 }));
+    if (!placed.ok) throw new Error(placed.error);
+    on("2026-04-01");
+    expect((await runAs(await tellerToday(), () => preterminateTimeDepositAction({ timeDepositId: placed.data.timeDepositId }))).ok).toBe(true);
+    expect((await subsidiaryLedger("time_deposits", m, "2026-01-01", "2026-12-31")).closing).toBe(0n);
+    expect((await subsidiaryLedger("savings_deposits", m, "2026-01-01", "2026-12-31")).closing).toBe(P(50346, 58));
+    expect((await getAccount(placed.data.accountId))?.status).toBe("CLOSED");
+    expect((await trialBalance("2026-12-31")).balanced).toBe(true);
+  });
+});

@@ -1,15 +1,13 @@
 import { eq } from "drizzle-orm";
 import type { Tx } from "@/db/client";
-import { registerDailyJob } from "@/lib/cron";
 import { CashieringError } from "@/modules/cashiering/builtins";
 import { registerCashOut, registerReceiptItem, type ItemInput, type ReceiptContext } from "@/modules/cashiering/registry";
 import { receipts } from "@/modules/cashiering/schema";
-import { checkDeposit, depositableAccounts, markDormant, recordDeposit, reverseDeposit, SavingsError } from "./service";
+import { checkDeposit, checkDepositReversal, depositableAccounts, recordDeposit, reverseDeposit, SavingsError } from "./service";
 
 /**
  * Savings at the teller counter (PHASE-09 T9.5): receipt item SAVINGS_DEPOSIT (the member's
- * savings accounts appear as open-amount dues), cash-out SAVINGS_WITHDRAWAL, and the daily
- * dormancy job.
+ * savings accounts appear as open-amount dues) and cash-out SAVINGS_WITHDRAWAL.
  */
 
 /** Savings rule errors are shown to the teller like any other receipt error. */
@@ -65,9 +63,12 @@ registerReceiptItem({
     const r = await receiptInfo(tx, ctx.receiptId);
     await recordDeposit(tx, { accountId: accountOf(item), amount: item.amount, receiptItemId: item.id, jeId: r.jeId, date: r.date, receiptNo: r.receiptNo, birReceiptNo: r.birReceiptNo }, ctx.actorId);
   },
-  // A cancelled deposit comes back out of the passbook (an ADJUSTMENT on the cancellation entry),
-  // unless it was already withdrawn.
-  reverse: async (tx, item, ctx) => {
+  // A cancelled deposit comes back out of the passbook, unless it was already withdrawn: checked
+  // before the reversal entry, then an ADJUSTMENT on that entry.
+  reverse: async (tx, item) => {
+    await asCashiering(() => checkDepositReversal(tx, { accountId: accountOf(item), amount: item.amount }));
+  },
+  reversed: async (tx, item, ctx) => {
     if (!ctx.cancelJeId) throw new Error("receipt cancellation has no reversal entry");
     const jeId = ctx.cancelJeId;
     await asCashiering(() => reverseDeposit(tx, { accountId: accountOf(item), amount: item.amount, receiptNo: ctx.receiptNo, date: ctx.date, jeId }, ctx.actorId));
@@ -75,5 +76,3 @@ registerReceiptItem({
 });
 
 registerCashOut({ type: "SAVINGS_WITHDRAWAL", label: "Savings withdrawal", permission: "cash.session" });
-
-registerDailyJob({ name: "savings-dormancy", run: (tx, date) => markDormant(tx, date) });

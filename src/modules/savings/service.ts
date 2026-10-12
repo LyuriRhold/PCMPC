@@ -2,18 +2,18 @@ import { and, asc, desc, eq, inArray, lt, lte, ne, or, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { addDays, addMonths, businessToday, daysBetween, formatDate, type BusinessDate } from "@/lib/dates";
-import { runOnce } from "@/lib/jobs";
+import { hasRun, runOnce } from "@/lib/jobs";
 import { format, type Money } from "@/lib/money";
 import { normalizeName } from "@/lib/names";
 import { next as nextNumber } from "@/lib/numbering";
-import { payOut } from "@/modules/cashiering/service";
+import { payOut, requireOpenSession } from "@/modules/cashiering/service";
 import { users } from "@/modules/auth/schema";
 import { jobRuns } from "@/modules/jobs/schema";
 import { journalEntries } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal, type LineInput } from "@/modules/ledger/service";
 import { members } from "@/modules/members/schema";
 import { registerTerminationRule } from "@/modules/members/termination";
-import { averageDailyBalance, balanceDays, quarterEnding, savingsInterest, simpleInterest, withholdingTax } from "./interest";
+import { averageDailyBalance, balanceDays, lastQuarterEnd, quarterEnding, savingsInterest, simpleInterest, withholdingTax } from "./interest";
 import { depositAccounts, depositProducts, depositTransactions, timeDeposits, type DepositAccount, type DepositProduct, type DepositTxnType, type TimeDeposit } from "./schema";
 
 /**
@@ -185,16 +185,22 @@ export async function recordDeposit(tx: Tx, input: { accountId: string; amount: 
   }
 }
 
-/** A cancelled deposit receipt: the money comes back out of the passbook, unless it was already withdrawn. */
-export async function reverseDeposit(tx: Tx, input: { accountId: string; amount: Money; receiptNo: string; date: BusinessDate; jeId: string }, actorId: string) {
+/** Before a deposit receipt is cancelled (locks the account): the money must still be in it. */
+export async function checkDepositReversal(tx: Tx, input: { accountId: string; amount: Money }): Promise<void> {
   const { account } = await lockAccount(tx, input.accountId);
   const balance = await accountBalance(account.id, tx);
   if (balance < input.amount) throw new SavingsError(`Only ${format(balance)} is left in ${account.accountNo}; the deposit was already withdrawn, so the receipt can't be cancelled`);
-  await post(tx, { accountId: account.id, type: "ADJUSTMENT", amount: -input.amount, date: input.date, jeId: input.jeId, refNo: input.receiptNo, remarks: `Receipt ${input.receiptNo} cancelled` }, actorId);
+}
+
+/** After the cancellation's reversal entry exists: the money comes back out of the passbook. */
+export async function reverseDeposit(tx: Tx, input: { accountId: string; amount: Money; receiptNo: string; date: BusinessDate; jeId: string }, actorId: string) {
+  await checkDepositReversal(tx, input);
+  await post(tx, { accountId: input.accountId, type: "ADJUSTMENT", amount: -input.amount, date: input.date, jeId: input.jeId, refNo: input.receiptNo, remarks: `Receipt ${input.receiptNo} cancelled` }, actorId);
 }
 
 /** Teller withdrawal: cash out of the drawer, never below the maintaining balance. DORMANT accounts must be reactivated first. */
 export async function withdraw(tx: Tx, input: { accountId: string; amount: Money }, tellerId: string) {
+  await requireOpenSession(tx, tellerId); // the session before the account, the same order as a receipt
   const l = await lockAccount(tx, input.accountId);
   assertSavings(l);
   const { account, product, member } = l;
@@ -232,6 +238,7 @@ export async function withdraw(tx: Tx, input: { accountId: string; amount: Money
  * paying back into it must end first.
  */
 export async function closeAccount(tx: Tx, input: { accountId: string }, tellerId: string) {
+  await requireOpenSession(tx, tellerId); // the session before the account, the same order as a receipt
   const l = await lockAccount(tx, input.accountId);
   assertSavings(l);
   const { account, product, member } = l;
@@ -239,8 +246,14 @@ export async function closeAccount(tx: Tx, input: { accountId: string }, tellerI
   if (account.status === "DORMANT") throw new SavingsError(`${account.accountNo} is dormant; it must be reactivated first`);
   const [td] = await tx.select({ no: timeDeposits.certificateNo }).from(timeDeposits).where(and(eq(timeDeposits.savingsAccountId, account.id), eq(timeDeposits.status, "ACTIVE"))).limit(1);
   if (td) throw new SavingsError(`Time deposit ${td.no} pays back into ${account.accountNo}; end it first`);
-  const balance = await accountBalance(account.id, tx);
   const date = businessToday();
+  // The last finished quarter's interest is credited before the account closes; nothing for the
+  // quarter it closes in (CONFIRM Q-09.4).
+  const lastEnd = lastQuarterEnd(date);
+  if (account.openedAt <= lastEnd && !(await hasRun(tx, "savings-interest", `${product.code}:${lastEnd}`))) {
+    throw new SavingsError(`Post the savings interest for the quarter ending ${formatDate(lastEnd)} first (Interest runs), so this account gets it before closing`);
+  }
+  const balance = await accountBalance(account.id, tx);
   let jeId: string | null = null;
   if (balance > 0n) {
     ({ jeId } = await payOut(
@@ -275,25 +288,31 @@ export async function reactivate(tx: Tx, input: { accountId: string; reason: str
 
 export type LedgerRow = { id: string; date: BusinessDate; type: DepositTxnType; amount: Money; balanceAfter: Money; refNo: string | null; jeNo: string | null; remarks: string | null };
 
-/** The passbook: rows in posting order with the balance after each (optionally a date range). */
+/**
+ * The passbook in date order (then posting order) with the running balance after each row,
+ * optionally for a date range (the opening is everything dated before it). Interest is dated the
+ * quarter end even when it is posted after later rows, so the running balance is computed here.
+ */
 export async function depositLedger(accountId: string, range: { from?: BusinessDate; to?: BusinessDate } = {}, db: Db | Tx = getDb()) {
   const rows = await db
     .select({ t: depositTransactions, jeNo: journalEntries.jeNo })
     .from(depositTransactions)
     .innerJoin(journalEntries, eq(journalEntries.id, depositTransactions.jeId))
     .where(eq(depositTransactions.accountId, accountId))
-    .orderBy(asc(depositTransactions.seq));
+    .orderBy(asc(depositTransactions.txnDate), asc(depositTransactions.seq));
   let opening = 0n;
+  let running = 0n;
   const out: LedgerRow[] = [];
   for (const { t, jeNo } of rows) {
     if (range.to && t.txnDate > range.to) continue;
+    running += t.amount;
     if (range.from && t.txnDate < range.from) {
-      opening = t.balanceAfter;
+      opening = running;
       continue;
     }
-    out.push({ id: t.id, date: t.txnDate, type: t.type, amount: t.amount, balanceAfter: t.balanceAfter, refNo: t.refNo, jeNo, remarks: t.remarks });
+    out.push({ id: t.id, date: t.txnDate, type: t.type, amount: t.amount, balanceAfter: running, refNo: t.refNo, jeNo, remarks: t.remarks });
   }
-  return { opening, rows: out, closing: out.at(-1)?.balanceAfter ?? opening };
+  return { opening, rows: out, closing: running };
 }
 
 /** A member's deposit accounts with product and balance (Savings tab). */
@@ -392,17 +411,24 @@ export async function previewInterest(productId: string, periodEnd: BusinessDate
     .orderBy(asc(depositAccounts.accountNo));
   const out: InterestLine[] = [];
   for (const { account, member } of accounts) {
+    // The opening is what was dated before the quarter (not the stored balance_after: interest rows
+    // are dated the quarter end but posted later, after rows dated in the next quarter).
     const [before] = await db
-      .select({ b: depositTransactions.balanceAfter })
+      .select({ b: sql<string>`coalesce(sum(${depositTransactions.amount}), 0)::text` })
       .from(depositTransactions)
-      .where(and(eq(depositTransactions.accountId, account.id), lt(depositTransactions.txnDate, quarter.start)))
-      .orderBy(desc(depositTransactions.seq))
-      .limit(1);
+      .where(and(eq(depositTransactions.accountId, account.id), lt(depositTransactions.txnDate, quarter.start)));
+    // This quarter's own interest (a re-preview after the run) doesn't earn interest in it.
     const moves = await db
       .select({ date: depositTransactions.txnDate, amount: depositTransactions.amount })
       .from(depositTransactions)
-      .where(and(eq(depositTransactions.accountId, account.id), sql`${depositTransactions.txnDate} BETWEEN ${quarter.start} AND ${quarter.end}`));
-    const { sum, days } = balanceDays(before?.b ?? 0n, moves, quarter.start, quarter.end);
+      .where(
+        and(
+          eq(depositTransactions.accountId, account.id),
+          sql`${depositTransactions.txnDate} BETWEEN ${quarter.start} AND ${quarter.end}`,
+          sql`NOT (${depositTransactions.type} IN ('INTEREST', 'WTAX') AND ${depositTransactions.txnDate} = ${quarter.end})`,
+        ),
+      );
+    const { sum, days } = balanceDays(BigInt(before?.b ?? "0"), moves, quarter.start, quarter.end);
     const interest = savingsInterest({ sum, days, ratePa: product.ratePa, minBalanceEarn: product.minBalanceEarn });
     out.push({
       accountId: account.id,
@@ -429,6 +455,8 @@ export async function runInterest(tx: Tx, input: { productId: string; periodEnd:
   if (!product) throw new SavingsError("Deposit product not found");
   if (!quarterEnding(input.periodEnd)) throw new SavingsError("Choose a quarter end (Mar 31, Jun 30, Sep 30 or Dec 31)");
   if (input.periodEnd >= businessToday()) throw new SavingsError(`The quarter ending ${formatDate(input.periodEnd)} isn't over yet; run it from the next day`);
+  const previous = await unpostedQuarterBefore(tx, product, input.periodEnd);
+  if (previous) throw new SavingsError(`Post the interest for the quarter ending ${formatDate(previous)} first (quarters are run in order)`);
   return runOnce(
     tx,
     "savings-interest",
@@ -481,6 +509,16 @@ export async function interestRuns(db: Db | Tx = getDb()) {
     .where(eq(jobRuns.job, "savings-interest"))
     .orderBy(desc(jobRuns.runAt))
     .limit(40);
+}
+
+/** The previous quarter end, when the product had accounts by then and its interest wasn't posted (null otherwise). */
+async function unpostedQuarterBefore(db: Db | Tx, product: DepositProduct, periodEnd: BusinessDate): Promise<BusinessDate | null> {
+  const quarter = quarterEnding(periodEnd);
+  if (!quarter) return null;
+  const previous = addDays(quarter.start, -1);
+  const [existed] = await db.select({ id: depositAccounts.id }).from(depositAccounts).where(and(eq(depositAccounts.productId, product.id), lte(depositAccounts.openedAt, previous))).limit(1);
+  if (!existed) return null;
+  return (await hasRun(db, "savings-interest", `${product.code}:${previous}`)) ? null : previous;
 }
 
 // ── Time deposits (T9.4) ──

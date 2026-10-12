@@ -27,7 +27,7 @@ export type ReceiptContext = {
   payor: Payor;
   actorId: string;
   sessionId: string;
-  /** Set while a receipt is being cancelled: the reversal entry (for `reverse` hooks). */
+  /** Set while a receipt is being cancelled, for `reversed` hooks: the reversal entry. */
   cancelJeId?: string;
 };
 
@@ -62,6 +62,11 @@ export type ReceiptItemDef = {
   reverse: (tx: Tx, item: StoredItem, ctx: ReceiptContext) => Promise<void>;
   /** Optional: runs after the receipt and its item rows exist (e.g. to write rows that reference the item). */
   recorded?: (tx: Tx, item: StoredItem, ctx: ReceiptContext) => Promise<void>;
+  /**
+   * Optional: runs during a cancellation after the reversal entry exists (`ctx.cancelJeId`), e.g. to
+   * write correction rows that reference it. `reverse` (the checks, and any locks) runs before it.
+   */
+  reversed?: (tx: Tx, item: StoredItem, ctx: ReceiptContext) => Promise<void>;
 };
 
 export type CashOutDef = {

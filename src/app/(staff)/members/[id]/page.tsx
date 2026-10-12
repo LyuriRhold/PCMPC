@@ -153,7 +153,7 @@ async function MemberContent(props: PageProps<"/members/[id]">) {
       ) : null}
 
       {tab === "savings" ? (
-        <SavingsPanel memberId={m.id} memberStatus={m.status} can={{ post: can(access.user, "savings.post"), cash: can(access.user, "cash.session"), approve: canApprove }} />
+        <SavingsPanel memberId={m.id} memberStatus={m.status} can={{ post: can(access.user, "savings.post"), cash: can(access.user, "cash.session") && can(access.user, "savings.post"), approve: canApprove }} />
       ) : null}
 
       {tab === "beneficiaries" ? (

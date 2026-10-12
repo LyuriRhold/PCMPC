@@ -29,7 +29,7 @@ async function ProductsContent() {
         </Link>
         <h1 className="text-2xl font-semibold">Savings products</h1>
         <p className="text-sm text-muted-foreground">
-          The interest rates and limits of each deposit product. A new rate applies from the next quarter&apos;s interest run (savings) or the next placement (time deposits); time deposits already placed keep their rate.
+          The interest rates and limits of each deposit product. A new rate applies to the next interest run, which uses it for the whole quarter being run (savings), or to the next placement (time deposits); time deposits already placed keep their rate.
           {canEdit ? "" : " Only the administrator can change them."}
         </p>
       </div>

@@ -307,9 +307,6 @@ export async function cancelReceipt(tx: Tx, receiptId: string, reason: string, s
   }
 
   const items = await tx.select().from(receiptItems).where(eq(receiptItems.receiptId, receiptId)).orderBy(asc(receiptItems.lineNo));
-  // The reversal entry first, so modules can tie their correction rows to it; an item that refuses
-  // the cancellation throws and the whole transaction (reversal included) rolls back.
-  const rev = await reverseJournal(tx, r.jeId, today, `Receipt ${r.receiptNo} cancelled: ${reason.trim()}`, supervisorId);
   const ctx: ReceiptContext = {
     receiptId,
     receiptNo: r.receiptNo,
@@ -317,13 +314,18 @@ export async function cancelReceipt(tx: Tx, receiptId: string, reason: string, s
     payor: { type: r.payorType, id: r.payorId, name: r.payorName },
     actorId: supervisorId,
     sessionId: r.sessionId,
-    cancelJeId: rev.id,
   };
-  for (const item of [...items].reverse()) {
+  const stored = [...items].reverse().map((item) => {
     const def = receiptItem(item.type);
     if (!def) throw new Error(`receipt item type ${item.type} is no longer registered`);
-    await def.reverse(tx, { id: item.id, type: item.type, refId: item.refId, amount: item.amount, breakdown: item.breakdown }, ctx);
-  }
+    return { def, item: { id: item.id, type: item.type, refId: item.refId, amount: item.amount, breakdown: item.breakdown } };
+  });
+  // Item checks (and their sub-ledger locks) first, then the reversal entry: the same lock order as
+  // issuing a receipt. Rows that reference the reversal are written by `reversed` hooks after it.
+  for (const { def, item } of stored) await def.reverse(tx, item, ctx);
+  const rev = await reverseJournal(tx, r.jeId, today, `Receipt ${r.receiptNo} cancelled: ${reason.trim()}`, supervisorId);
+  ctx.cancelJeId = rev.id;
+  for (const { def, item } of stored) await def.reversed?.(tx, item, ctx);
   const [cancelled] = await tx
     .update(receipts)
     .set({ status: "CANCELLED", cancelJeId: rev.id, cancelReason: reason.trim(), cancelledBy: supervisorId, cancelledAt: now() })

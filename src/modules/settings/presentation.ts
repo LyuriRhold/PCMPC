@@ -125,8 +125,9 @@ export const PRESENTATION: Record<SettingKey, Presentation> = {
         { key: "prorateDaysPerMonth", label: "Days counted in a month", spec: { type: "number", unit: "days", min: 1, max: 31 }, help: "For partial months." },
       ],
     },
+    readonly: { reason: "Each loan product has its own penalty rate and grace days on the Loan products page (this was the starting value).", link: { href: "/loans/products", label: "Open Loan products" } },
   },
-  "loan.grace_days": { label: "Grace period for loan payments", help: "No penalty if paid within this many days after the due date.", spec: { type: "number", unit: "days", min: 0, max: 60 } },
+  "loan.grace_days": { label: "Grace period for loan payments", help: "No penalty if paid within this many days after the due date.", spec: { type: "number", unit: "days", min: 0, max: 60 }, readonly: { reason: "Each loan product has its own penalty rate and grace days on the Loan products page (this was the starting value).", link: { href: "/loans/products", label: "Open Loan products" } } },
   "loan.par_threshold_days": { label: "Portfolio-at-risk counts loans late by", help: "Loans this many days or more past due count as “at risk”.", spec: { type: "number", unit: "days", min: 1, max: 365 } },
   "loan.manager_approval_limit": { label: "Manager can approve loans up to", help: "Larger loans go to the Credit Committee.", spec: { type: "money" } },
   "loan.block_if_past_due": {

@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 10
+**Current phase:** 11
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -18,7 +18,7 @@
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ✅ | phase-07-water-collections · tag `phase-07` | rldejoya (reviewer agent: reconnection-fee rules fixed) · 2026-10-09 |
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ✅ | phase-08-share-capital · tag `phase-08` | rldejoya (reviewer agent: two-person withdrawal + follow-ups fixed) · 2026-10-12 |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ✅ | phase-09-savings · tag `phase-09` | rldejoya (reviewer agent: interest opening balance + follow-ups fixed) · 2026-10-12 |
-| 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ⬜ | | |
+| 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ✅ | phase-10-loan-applications · tag `phase-10` | rldejoya (reviewer agent: small-loan error + tiny-loan rows fixed; follow-ups) · 2026-10-12 |
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ⬜ | | |
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ⬜ | | |
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ⬜ | | |
@@ -145,14 +145,14 @@
 - [x] Exit checks passed
 
 ### Phase 10 — Loan Products, Amortization Engine & Applications
-- [ ] T10.1 Schema, migrations, product + deduction seed (DOMAIN sample products, flagged CONFIRM)
-- [ ] T10.2 Amortization engine + golden and property tests
-- [ ] T10.3 Net proceeds calculator
-- [ ] T10.4 Eligibility engine with the hook registry
-- [ ] T10.5 Application service + approval matrix + SoD
-- [ ] T10.6 UI: product admin, loan calculator, application form, approval queue, disclosure print
-- [ ] Acceptance tests written first (tests/acceptance/phase-10.test.ts)
-- [ ] Exit checks passed
+- [x] T10.1 Schema, migrations, product + deduction seed (DOMAIN sample products, flagged CONFIRM)
+- [x] T10.2 Amortization engine + golden and property tests
+- [x] T10.3 Net proceeds calculator
+- [x] T10.4 Eligibility engine with the hook registry
+- [x] T10.5 Application service + approval matrix + SoD
+- [x] T10.6 UI: product admin, loan calculator, application form, approval queue, disclosure print
+- [x] Acceptance tests written first (tests/acceptance/phase-10.test.ts)
+- [x] Exit checks passed
 
 ### Phase 11 — Loan Release, Collections, Penalties & Aging
 - [ ] T11.1 Schema + migrations
@@ -310,6 +310,15 @@
 - [ ] Q-09.8 (phase 09) An account opened during a quarter. | default used: its average daily balance is over the whole quarter (spec: ADB = Σ daily balances ÷ days in the period), so ₱1,000.00 opened on Mar 20 averages ₱133.33 and earns nothing under the ₱500.00 minimum | answer:
 - [ ] Q-09.9 (phase 09) Deposits and withdrawals for INACTIVE, TERMINATED or DECEASED members. | default used: no member-status check (an INACTIVE member keeps using the account; a deceased member's account is paid out to the heirs at the counter with the usual documents) | answer:
 - [ ] Q-09.10 (phase 09) Time-deposit interest rounding. | default used: principal × rate × days ÷ 365, rounded HALF-UP to the centavo once per certificate (DOMAIN §3 doesn't list it; the A9.8/A9.9 golden values imply it) | answer:
+- [ ] Q-10.1 (phase 10) Loan products: rates, terms, maximums, deductions and comakers. | default used: the DOMAIN §2 samples: REG (equal amortization, 1.5%/mo, 6–24 mo, up to 3× paid-up, service fee 2% + CBU 2% + notarial ₱100, 1 comaker), EMR (add-on, 1.5%/mo, 1–6 mo, up to ₱10,000, service fee 1%, no comaker), PRD (equal principal, 1%/mo, 6–12 mo, up to ₱50,000, service fee 2% + CBU 2%, 1 comaker). The comaker counts are my default (DOMAIN gives none); the admin can change all of it on Loan products | answer:
+- [ ] Q-10.2 (phase 10) Approval matrix. | default used: the manager reviews every application; up to loan.manager_approval_limit (₱30,000.00) the manager's approval approves it, above it any one Credit Committee member's approval does (no quorum count in the system). The encoder never decides; a person decides once per application; rejection needs remarks | answer:
+- [ ] Q-10.3 (phase 10) First due date. | default used: the application previews the schedule from one month after the application date; the release (Phase 11) sets the real dates | answer:
+- [ ] Q-10.4 (phase 10) Disclosure statement form. | default used: a one-page RA 3765 statement: amount, finance charges deducted (service fee, notarial, LPP), amount financed, interest, total finance charge, other deductions (CBU, shown as the member's share capital, not a finance charge), net proceeds, effective interest rate (monthly IRR of the amount financed vs. the installments, × 12 for the year), schedule and signatures | answer:
+- [ ] Q-10.5 (phase 10) Comaker rules. | default used: a comaker must be an ACTIVE member other than the borrower, not past due (from Phase 11); not required to be in good standing; no limit on how many loans one member co-signs | answer:
+- [ ] Q-10.6 (phase 10) Eligibility at approval. | default used: the rules are re-checked when the manager or the Credit Committee approves; an application whose borrower fell out of good standing can't be approved | answer:
+- [ ] Q-10.7 (phase 10) Loanable amount vs. loans already held or applied for. | default used: each application is checked on its own (paid-up multiple and product maximum), so a member could hold several applications that each pass; Phase 11 should net existing loan balances from the loanable amount | answer:
+- [ ] Q-10.8 (phase 10) Rounding points not in DOMAIN §3. | default used: percentage deductions (service fee, CBU) and the add-on total interest are rounded HALF-UP to the centavo; the add-on's per-installment interest is the total ÷ term HALF-UP, with the last installment taking the rest | answer:
+- [ ] Q-10.9 (phase 10) Smallest loan per product. | default used: ₱1,000.00 for REG, EMR and PRD (the deductions must fit in the loan); the admin can change it on Loan products | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -1057,3 +1066,102 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - `npm run gate` green: 478 tests, 39 files. Only 1.5 GB of memory was free, so it ran on 1 DB worker (572 s).
   - `npm run build` green.
   - `npm run e2e -- phase-09` green: 2 tests.
+
+### Phase 10 summary
+**Built**
+- **Schema (T10.1):**
+  - `loan_products`, `loan_product_deductions`.
+  - `loan_applications` (LA-YYYY-#####), with snapshots of rate, method, eligibility, schedule preview, deductions and net proceeds. After submission only the status changes (trigger).
+  - `loan_application_comakers` and `loan_approvals`: insert-only (triggers).
+  - Seeded with the DOMAIN §2 sample products REG/EMR/PRD and their deductions (CONFIRM). A mappings check covers every receivable and deduction account.
+- **Amortization engine (T10.2, `loans/amortization.ts`, pure):**
+  - Diminishing equal amortization: A = P·r ÷ (1 − (1+r)^−n), HALF-UP.
+  - Diminishing equal principal: P ÷ n, interest on the opening balance.
+  - Add-on: I = P × r × n, payment (P + I) ÷ n.
+  - Every row's interest is HALF-UP; the last row absorbs the residue; due dates are `addMonths(first, k)`, clamped.
+  - Tested with the goldens and a 600-loan property test (principal sums to P, balance ends at 0).
+- **Net proceeds (T10.3):** deductions by percentage (HALF-UP) or fixed amount, and the net. Also the effective interest rate (monthly IRR) for the disclosure.
+- **Eligibility (T10.4):** five rules, each pass/fail with a message, kept on the application:
+  1. ACTIVE and in good standing ("Member must be ACTIVE" / "Member is not in good standing (…)");
+  2. "Exceeds loanable amount ₱…" (product max and the multiple of paid-up);
+  3. term;
+  4. past due;
+  5. comakers (count, ACTIVE, not the borrower, not twice, not past due).
+
+  The past-due checks are a hook registry (`registerPastDueHook`) that Phase 11 fills in; `loan.block_if_past_due` turns them off.
+- **Applications (T10.5):**
+  - Submit (loan officer). The manager reviews: up to `loan.manager_approval_limit` that APPROVES it, above it the application is RECOMMENDED and a Credit Committee member APPROVES it.
+  - The encoder can never decide (SoD), and a person decides once. Rejection needs remarks.
+  - Eligibility is re-checked on approval.
+  - The encoder can cancel an undecided application.
+  - Product admin (terms and deductions; applications keep their snapshot).
+- **Screens (T10.6):**
+  - **Loan calculator** (all staff): schedule, deductions, net proceeds, effective rate.
+  - **Loan applications**: queues for the manager and the Credit Committee.
+  - **New application**: borrower and comaker lookup by member no., live schedule preview in the browser.
+  - **Application page**: eligibility results, decisions, approve/reject, cancel.
+  - **Disclosure statement** (RA 3765, printable).
+  - **Loan products** (admin edits).
+
+**Decisions** (see Questions Q-10.1–Q-10.6)
+- Sample products as in DOMAIN, with 1 comaker for REG and PRD and none for EMR.
+- Any one Credit Committee member's approval suffices above the limit.
+- The tentative first due date is one month after the application.
+- The disclosure statement treats CBU as the member's capital, not a finance charge, and computes the EIR on the amount financed.
+- Comakers must be ACTIVE (good standing not required).
+- Eligibility is re-checked on approval.
+- **Cancel (not in the spec):** the encoding loan officer can cancel an undecided application (with a reason), so a member who withdraws doesn't leave it in the queues.
+
+**Deviations from spec (with reason)**
+- **No DRAFT status.** Applications start SUBMITTED, as the spec's workflow says, though DOMAIN §4 lists DRAFT first.
+- **Approval levels follow permissions.** A decider who holds `loans.recommend` (the manager) acts at the MANAGER level on SUBMITTED applications; one who only holds `loans.approve` (the Credit Committee) acts on RECOMMENDED ones. So A10.8's loan officer is refused with Forbidden: they lack `loans.approve`, and SoD would refuse them anyway.
+- **Extra snapshot columns on `loan_applications`:** `method`, `rate_pm`, `first_due_date`, `deductions`, `net_proceeds` and `total_interest`, so the disclosure and the Phase 11 release use exactly what was approved.
+- **E2E:** the "coming soon" example moved to Phase 11 (`/loans/servicing`).
+
+**Follow-ups**
+- Answer Q-10.1–Q-10.6, and send the PCMPC loan policy (products, rates, deductions, comaker rules, approval limits).
+- **Phase 11:** register the past-due hooks, release approved applications (with the real schedule), and post the GL.
+
+**Exit checks / counts:**
+- `npm run gate` is green: 514 tests (43 files), scan clean. Phase 10 adds:
+  - 10 acceptance tests (A10.1–A10.10);
+  - 12 integration tests;
+  - 14 unit tests (engine goldens, the 600-loan property test, net proceeds, EIR, mappings).
+- `npm run build` is green (`/loans/calculator`, `/loans/applications`, `/new`, `/[id]`, `/[id]/disclosure`, `/loans/products`).
+- `npm run e2e -- phase-10` is green: A10.11, and the loan products smoke test.
+- The full E2E against a production build is green: 19 of 19 (phases 00–10).
+- Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (9 seed steps); the sample trial balance balances.
+
+**Review follow-ups (reviewer agent, 2026-10-12)**
+- **Fixed (must-fix):** a small application gave a server error when the deductions were more than the loan.
+  - Products now have a minimum amount: ₱1,000.00 for the samples (Q-10.9; migration 0026). Rule 2 says "The smallest Regular Loan is ₱1,000.00".
+  - A product whose deductions don't fit returns a message.
+  - Percentage deductions can't reach 100%, and fixed deductions can't take the whole minimum.
+  - The form disables Submit when the deductions don't fit.
+- **Fixed (must-fix):** the engine kept its invariants only above a few pesos.
+  - Equal-principal and add-on rows are now clamped to what is left, so no row is negative.
+  - A boundary sweep tests 1 centavo to ₱50 at 1 to 360 months, 4 rates and every method. The property test now also asserts principal ≥ 0, and its generator is exact (MINSTD).
+- **Fixed:**
+  - **One effective interest rate** (the disclosure's: the monthly IRR of the amount financed, CBU not a finance charge). The calculator shows the same figure: 1.9924% a month on REG ₱10,000 for 12 months.
+  - **More snapshots for Phase 11:** the application keeps the receivable account, penalty rate and grace days (the disclosure prints them from the snapshot). Each approval keeps its eligibility re-check and the status it led to; the page shows "recommended to the Credit Committee".
+  - **Status transitions only move forward in the database** (trigger: SUBMITTED → RECOMMENDED / APPROVED / REJECTED / CANCELLED, RECOMMENDED → APPROVED / REJECTED / CANCELLED, APPROVED → RELEASED / CANCELLED).
+  - **Disclosure statement:** a "PREVIEW" banner until approved, none for rejected or cancelled applications, dated the approval, and the annual figure labelled the simple annual rate.
+  - **Loan penalty and grace settings** on Coop settings are read-only and link to Loan products (each product carries them).
+  - **Calculator:** keeps to the product's term and amount limits and says so; the EIR search was cut to 60 halvings, plenty for 6 decimals.
+  - **Past-due hook:** the default pass hook is registered now (`loans/hooks.ts`, name "loans"; Phase 11 replaces it).
+  - **Smaller fixes:** a ₱1,000,000,000.00 ceiling per loan; the deduction→account table is shared by the service and the form; rates are shown without float maths; `previewLoan` lost its unused overrides.
+- **New tests:**
+  - the minimum and deduction guards;
+  - the snapshots;
+  - "a person decides once" and encoder SoD at both levels;
+  - the status transitions in the database;
+  - the EIR basis.
+- **Logged as Questions:** Q-10.7 (loanable amount vs. existing loans and pending applications), Q-10.8 (rounding points not in DOMAIN §3), Q-10.9 (smallest loan). The cancel flow is under Decisions.
+- **Not changed (noted):**
+  - The approval level comes from `loans.recommend` (no role holds `loans.apply` and `loans.approve` together, so SoD is covered by the service-level tests).
+  - Products and their deductions are read in two statements.
+  - T10.2/T10.3 and T10.4/T10.5 were committed together.
+- **After the fixes:**
+  - `npm run gate` green: 522 tests, 43 files. Only 1.8 GB of memory was free, so it ran on 2 DB workers (469 s).
+  - `npm run build` green.
+  - `npm run e2e -- phase-10` green: 2 tests.

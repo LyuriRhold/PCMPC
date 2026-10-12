@@ -11,6 +11,7 @@ import { format, parse } from "@/lib/money";
 import { selectClass } from "@/modules/members/ui/member-form";
 import { borrowerLookupAction, cancelApplicationAction, decideApplicationAction, submitApplicationAction, updateLoanProductAction } from "../actions";
 import { netProceeds, schedule, scheduleTotals, type AmortizationMethod } from "../amortization";
+import { DEDUCTION_CODES, DEDUCTION_GL } from "../schema";
 import { ScheduleTable } from "./schedule-table";
 
 function Err({ error }: { error: string | null }) {
@@ -27,8 +28,11 @@ export type ProductOption = {
   name: string;
   method: AmortizationMethod;
   ratePm: string;
+  /** The monthly rate in percent, for display ("1.5"). */
+  ratePct: string;
   minTerm: number;
   maxTerm: number;
+  minAmount: string;
   maxAmount: string | null;
   maxMultipleOfPaidUp: string | null;
   requiredComakers: number;
@@ -134,8 +138,8 @@ export function ApplicationForm({ products, today }: { products: ProductOption[]
         </div>
         {product ? (
           <p className="text-xs text-muted-foreground sm:col-span-4">
-            {(Number(product.ratePm) * 100).toFixed(2).replace(/\.?0+$/, "")}% a month · {product.minTerm}–{product.maxTerm} months
-            {product.maxAmount ? ` · up to ${format(BigInt(product.maxAmount))}` : ""}
+            {product.ratePct}% a month · {product.minTerm}–{product.maxTerm} months · from {format(BigInt(product.minAmount))}
+            {product.maxAmount ? ` up to ${format(BigInt(product.maxAmount))}` : ""}
             {product.maxMultipleOfPaidUp ? ` · up to ${product.maxMultipleOfPaidUp}× paid-up share capital` : ""}
             {` · ${product.requiredComakers} comaker${product.requiredComakers === 1 ? "" : "s"} needed`}
           </p>
@@ -195,7 +199,7 @@ export function ApplicationForm({ products, today }: { products: ProductOption[]
 
       <div className="flex flex-col gap-2">
         <div>
-          <Button type="button" onClick={submit} disabled={pending || !borrower}>
+          <Button type="button" onClick={submit} disabled={pending || !borrower || preview?.deductions === null}>
             Submit application
           </Button>
         </div>
@@ -249,14 +253,13 @@ export function CancelApplicationForm({ applicationId }: { applicationId: string
 }
 
 type DeductionRow = { code: string; name: string; basis: "PCT_OF_PRINCIPAL" | "FIXED"; value: string; glKey: string };
-const GL_FOR: Record<string, string> = { SERVICE_FEE: "service_fee_income", CBU: "subscription_receivable_common", LPP: "lpp_insurance_payable", NOTARIAL: "notarial_fee_income", OTHER: "service_fee_income" };
-const CODES = ["SERVICE_FEE", "CBU", "LPP", "NOTARIAL", "OTHER"] as const;
+const CODES = DEDUCTION_CODES;
 
 /** Admin: a loan product's terms and its deductions (percent and pesos as typed). */
 export function LoanProductForm({
   product,
 }: {
-  product: { id: string; name: string; ratePct: string; minTerm: number; maxTerm: number; maxAmount: string; maxMultipleOfPaidUp: string; requiredComakers: number; penaltyPct: string; graceDays: number; isActive: boolean; deductions: DeductionRow[] };
+  product: { id: string; name: string; ratePct: string; minTerm: number; maxTerm: number; minAmount: string; maxAmount: string; maxMultipleOfPaidUp: string; requiredComakers: number; penaltyPct: string; graceDays: number; isActive: boolean; deductions: DeductionRow[] };
 }) {
   const { pending, error, done, run } = useAction();
   const [rows, setRows] = useState<DeductionRow[]>(product.deductions);
@@ -274,6 +277,7 @@ export function LoanProductForm({
               ratePct: String(fd.get("ratePct") ?? ""),
               minTerm: Number(fd.get("minTerm") ?? 0),
               maxTerm: Number(fd.get("maxTerm") ?? 0),
+              minAmount: String(fd.get("minAmount") ?? ""),
               maxAmount: String(fd.get("maxAmount") ?? ""),
               maxMultipleOfPaidUp: String(fd.get("maxMultiple") ?? ""),
               requiredComakers: Number(fd.get("comakers") ?? 0),
@@ -292,6 +296,7 @@ export function LoanProductForm({
           ["ratePct", "Interest (% a month)", p.ratePct],
           ["minTerm", "Shortest term (months)", String(p.minTerm)],
           ["maxTerm", "Longest term (months)", String(p.maxTerm)],
+          ["minAmount", "Minimum amount (₱)", p.minAmount],
           ["maxAmount", "Maximum amount (₱, blank = none)", p.maxAmount],
           ["maxMultiple", "Up to × paid-up (blank = none)", p.maxMultipleOfPaidUp],
           ["comakers", "Comakers needed", String(p.requiredComakers)],
@@ -311,7 +316,7 @@ export function LoanProductForm({
         <p className="text-sm font-medium">Deductions on release</p>
         {rows.map((r, i) => (
           <div key={i} className="flex flex-wrap items-end gap-2">
-            <select aria-label="Deduction type" className={selectClass} value={r.code} onChange={(e) => set(i, { code: e.target.value, glKey: GL_FOR[e.target.value] ?? "service_fee_income" })}>
+            <select aria-label="Deduction type" className={selectClass} value={r.code} onChange={(e) => set(i, { code: e.target.value, glKey: DEDUCTION_GL[e.target.value as (typeof CODES)[number]]?.[0] ?? "service_fee_income" })}>
               {CODES.map((c) => (
                 <option key={c} value={c}>
                   {c.replace("_", " ").toLowerCase()}

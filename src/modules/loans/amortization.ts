@@ -56,7 +56,8 @@ export function schedule(input: ScheduleInput): ScheduleRow[] {
     let balance = P;
     for (let k = 0; k < n; k++) {
       const interest = mulRate(balance, ratePm); // on the opening balance
-      const principal = k === n - 1 ? balance : each;
+      // Never more than what is left (tiny loans: HALF-UP of P ÷ n can exceed P ÷ n).
+      const principal = k === n - 1 || each > balance ? balance : each;
       balance -= principal;
       rows.push({ no: k + 1, dueDate: dueDate(k), principal, interest, payment: principal + interest, balance });
     }
@@ -68,17 +69,25 @@ export function schedule(input: ScheduleInput): ScheduleRow[] {
   const payment = divide(P + totalInterest, BigInt(n));
   const interestEach = divide(totalInterest, BigInt(n));
   let balance = P;
-  let paid = 0n;
   let interestPaid = 0n;
   for (let k = 0; k < n; k++) {
-    const last = k === n - 1;
-    const pay = last ? P + totalInterest - paid : payment;
-    const interest = last ? totalInterest - interestPaid : interestEach;
-    const principal = pay - interest;
+    let interest: Money;
+    let principal: Money;
+    if (k === n - 1) {
+      // The last row pays whatever is left.
+      interest = totalInterest - interestPaid;
+      principal = balance;
+    } else {
+      // The rounded payment and interest never take more than what is left (tiny loans, long terms).
+      const remainingInterest = totalInterest - interestPaid;
+      interest = interestEach < remainingInterest ? interestEach : remainingInterest;
+      if (interest > payment) interest = payment;
+      principal = payment - interest;
+      if (principal > balance) principal = balance;
+    }
     balance -= principal;
-    paid += pay;
     interestPaid += interest;
-    rows.push({ no: k + 1, dueDate: dueDate(k), principal, interest, payment: pay, balance });
+    rows.push({ no: k + 1, dueDate: dueDate(k), principal, interest, payment: principal + interest, balance });
   }
   return rows;
 }
@@ -129,7 +138,8 @@ export function effectiveMonthlyRate(net: Money, payments: Money[]): string {
   let lo = new D(0);
   let hi = new D(1);
   while (pv(hi).gt(target)) hi = hi.mul(2);
-  for (let k = 0; k < 200; k++) {
+  // 60 halvings of [0, hi] pin the rate far below the 6 decimal places shown.
+  for (let k = 0; k < 60; k++) {
     const mid = lo.plus(hi).div(2);
     if (pv(mid).gt(target)) lo = mid;
     else hi = mid;

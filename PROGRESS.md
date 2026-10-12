@@ -316,6 +316,9 @@
 - [ ] Q-10.4 (phase 10) Disclosure statement form. | default used: a one-page RA 3765 statement: amount, finance charges deducted (service fee, notarial, LPP), amount financed, interest, total finance charge, other deductions (CBU, shown as the member's share capital, not a finance charge), net proceeds, effective interest rate (monthly IRR of the amount financed vs. the installments, × 12 for the year), schedule and signatures | answer:
 - [ ] Q-10.5 (phase 10) Comaker rules. | default used: a comaker must be an ACTIVE member other than the borrower, not past due (from Phase 11); not required to be in good standing; no limit on how many loans one member co-signs | answer:
 - [ ] Q-10.6 (phase 10) Eligibility at approval. | default used: the rules are re-checked when the manager or the Credit Committee approves; an application whose borrower fell out of good standing can't be approved | answer:
+- [ ] Q-10.7 (phase 10) Loanable amount vs. loans already held or applied for. | default used: each application is checked on its own (paid-up multiple and product maximum), so a member could hold several applications that each pass; Phase 11 should net existing loan balances from the loanable amount | answer:
+- [ ] Q-10.8 (phase 10) Rounding points not in DOMAIN §3. | default used: percentage deductions (service fee, CBU) and the add-on total interest are rounded HALF-UP to the centavo; the add-on's per-installment interest is the total ÷ term HALF-UP, with the last installment taking the rest | answer:
+- [ ] Q-10.9 (phase 10) Smallest loan per product. | default used: ₱1,000.00 for REG, EMR and PRD (the deductions must fit in the loan); the admin can change it on Loan products | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -1107,6 +1110,7 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - The disclosure statement treats CBU as the member's capital, not a finance charge, and computes the EIR on the amount financed.
 - Comakers must be ACTIVE (good standing not required).
 - Eligibility is re-checked on approval.
+- **Cancel (not in the spec):** the encoding loan officer can cancel an undecided application (with a reason), so a member who withdraws doesn't leave it in the queues.
 
 **Deviations from spec (with reason)**
 - **No DRAFT status.** Applications start SUBMITTED, as the spec's workflow says, though DOMAIN §4 lists DRAFT first.
@@ -1127,3 +1131,33 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - `npm run e2e -- phase-10` is green: A10.11, and the loan products smoke test.
 - The full E2E against a production build is green: 19 of 19 (phases 00–10).
 - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (9 seed steps); the sample trial balance balances.
+
+**Review follow-ups (reviewer agent, 2026-10-12)**
+- **Fixed (must-fix):** a small application gave a server error when the deductions were more than the loan.
+  - Products now have a minimum amount: ₱1,000.00 for the samples (Q-10.9; migration 0026). Rule 2 says "The smallest Regular Loan is ₱1,000.00".
+  - A product whose deductions don't fit returns a message.
+  - Percentage deductions can't reach 100%, and fixed deductions can't take the whole minimum.
+  - The form disables Submit when the deductions don't fit.
+- **Fixed (must-fix):** the engine kept its invariants only above a few pesos.
+  - Equal-principal and add-on rows are now clamped to what is left, so no row is negative.
+  - A boundary sweep tests 1 centavo to ₱50 at 1 to 360 months, 4 rates and every method. The property test now also asserts principal ≥ 0, and its generator is exact (MINSTD).
+- **Fixed:**
+  - **One effective interest rate** (the disclosure's: the monthly IRR of the amount financed, CBU not a finance charge). The calculator shows the same figure: 1.9924% a month on REG ₱10,000 for 12 months.
+  - **More snapshots for Phase 11:** the application keeps the receivable account, penalty rate and grace days (the disclosure prints them from the snapshot). Each approval keeps its eligibility re-check and the status it led to; the page shows "recommended to the Credit Committee".
+  - **Status transitions only move forward in the database** (trigger: SUBMITTED → RECOMMENDED / APPROVED / REJECTED / CANCELLED, RECOMMENDED → APPROVED / REJECTED / CANCELLED, APPROVED → RELEASED / CANCELLED).
+  - **Disclosure statement:** a "PREVIEW" banner until approved, none for rejected or cancelled applications, dated the approval, and the annual figure labelled the simple annual rate.
+  - **Loan penalty and grace settings** on Coop settings are read-only and link to Loan products (each product carries them).
+  - **Calculator:** keeps to the product's term and amount limits and says so; the EIR search was cut to 60 halvings, plenty for 6 decimals.
+  - **Past-due hook:** the default pass hook is registered now (`loans/hooks.ts`, name "loans"; Phase 11 replaces it).
+  - **Smaller fixes:** a ₱1,000,000,000.00 ceiling per loan; the deduction→account table is shared by the service and the form; rates are shown without float maths; `previewLoan` lost its unused overrides.
+- **New tests:**
+  - the minimum and deduction guards;
+  - the snapshots;
+  - "a person decides once" and encoder SoD at both levels;
+  - the status transitions in the database;
+  - the EIR basis.
+- **Logged as Questions:** Q-10.7 (loanable amount vs. existing loans and pending applications), Q-10.8 (rounding points not in DOMAIN §3), Q-10.9 (smallest loan). The cancel flow is under Decisions.
+- **Not changed (noted):**
+  - The approval level comes from `loans.recommend` (no role holds `loans.apply` and `loans.approve` together, so SoD is covered by the service-level tests).
+  - Products and their deductions are read in two statements.
+  - T10.2/T10.3 and T10.4/T10.5 were committed together.

@@ -183,6 +183,13 @@
       "when": 1791783283002,
       "tag": "0025_loans_immutable",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791786784752,
+      "tag": "0026_loans_review",
+      "breakpoints": true
     }
   ]
 }

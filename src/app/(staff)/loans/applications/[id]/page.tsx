@@ -134,7 +134,7 @@ async function ApplicationContent(props: PageProps<"/loans/applications/[id]">) 
               {approvals.map((x) => (
                 <TableRow key={x.id}>
                   <TableCell>
-                    {x.level === "MANAGER" ? "Manager" : "Credit Committee"}: {x.decision === "APPROVE" ? "approved" : "rejected"}
+                    {x.level === "MANAGER" ? "Manager" : "Credit Committee"}: {x.decision === "REJECT" ? "rejected" : x.resultingStatus === "RECOMMENDED" ? "recommended to the Credit Committee" : "approved"}
                     {x.remarks ? <div className="text-xs text-muted-foreground">{x.remarks}</div> : null}
                   </TableCell>
                   <TableCell>{x.byName}</TableCell>

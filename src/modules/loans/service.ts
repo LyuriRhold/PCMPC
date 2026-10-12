@@ -11,6 +11,7 @@ import { members } from "@/modules/members/schema";
 import { getSetting } from "@/modules/settings/service";
 import { isGoodStanding, shareBalance } from "@/modules/share/service";
 import { effectiveMonthlyRate, netProceeds, schedule, scheduleTotals, type ScheduleRow } from "./amortization";
+import Decimal from "decimal.js";
 import { checkEligibility } from "./eligibility";
 import {
   loanApplicationComakers,
@@ -18,12 +19,13 @@ import {
   loanApprovals,
   loanProductDeductions,
   loanProducts,
+  DEDUCTION_GL,
   type ApprovalDecision,
   type ApprovalLevel,
   type DeductionBasis,
   type DeductionCode,
+  type EligibilityResult,
   type LoanApplicationStatus,
-  type LoanMethod,
   type LoanProduct,
   type LoanProductDeduction,
 } from "./schema";
@@ -34,6 +36,9 @@ import {
  * application is RECOMMENDED to the Credit Committee, whose approval makes it APPROVED. Nobody
  * decides on an application they encoded; a rejection needs remarks.
  */
+
+/** No single loan above this (keeps amounts far inside the database's range). */
+const MAX_LOAN = 100_000_000_000n; // ₱1,000,000,000.00
 
 /** A loan rule was broken; the message is safe to show. */
 export class LoanError extends Error {
@@ -68,6 +73,7 @@ export type ProductChanges = {
   ratePm: string;
   minTerm: number;
   maxTerm: number;
+  minAmount: Money;
   maxAmount: Money | null;
   maxMultipleOfPaidUp: string | null;
   requiredComakers: number;
@@ -75,14 +81,6 @@ export type ProductChanges = {
   graceDays: number;
   isActive: boolean;
   deductions: Array<{ code: DeductionCode; name: string; basis: DeductionBasis; value: string; glKey: string }>;
-};
-
-const DEDUCTION_GL: Record<DeductionCode, string[]> = {
-  SERVICE_FEE: ["service_fee_income"],
-  CBU: ["subscription_receivable_common"],
-  LPP: ["lpp_insurance_payable"],
-  NOTARIAL: ["notarial_fee_income"],
-  OTHER: ["service_fee_income", "notarial_fee_income", "lpp_insurance_payable"],
 };
 
 /** Admin: a product's terms and its deductions (applications keep the terms they were submitted on). */
@@ -94,7 +92,8 @@ export async function updateLoanProduct(tx: Tx, input: { productId: string } & P
   if (!decimal.test(input.ratePm) || Number(input.ratePm) > 1) throw new LoanError("Enter the monthly interest rate as a percentage");
   if (!decimal.test(input.penaltyRatePm) || Number(input.penaltyRatePm) > 1) throw new LoanError("Enter the monthly penalty rate as a percentage");
   if (!Number.isInteger(input.minTerm) || !Number.isInteger(input.maxTerm) || input.minTerm < 1 || input.maxTerm < input.minTerm || input.maxTerm > 360) throw new LoanError("Enter the shortest and longest terms in months (1 to 360)");
-  if (input.maxAmount !== null && input.maxAmount <= 0n) throw new LoanError("The maximum amount must be more than zero");
+  if (input.minAmount < 0n) throw new LoanError("The minimum amount can't be negative");
+  if (input.maxAmount !== null && (input.maxAmount <= 0n || input.maxAmount < input.minAmount)) throw new LoanError("The maximum amount must be more than zero and not below the minimum");
   if (input.maxMultipleOfPaidUp !== null && (!decimal.test(input.maxMultipleOfPaidUp) || Number(input.maxMultipleOfPaidUp) <= 0)) throw new LoanError("Enter the multiple of paid-up share capital, e.g. 3");
   if (!Number.isInteger(input.requiredComakers) || input.requiredComakers < 0 || input.requiredComakers > 5) throw new LoanError("Enter the number of comakers (0 to 5)");
   if (!Number.isInteger(input.graceDays) || input.graceDays < 0 || input.graceDays > 60) throw new LoanError("Enter the grace days (0 to 60)");
@@ -103,8 +102,12 @@ export async function updateLoanProduct(tx: Tx, input: { productId: string } & P
     if (d.basis === "PCT_OF_PRINCIPAL" ? !decimal.test(d.value) || Number(d.value) >= 1 : !/^\d+$/.test(d.value)) throw new LoanError(`Enter the ${d.name} as a percentage below 100% or an amount`);
     if (!DEDUCTION_GL[d.code].includes(d.glKey)) throw new LoanError(`${d.name} can't be credited to ${d.glKey}`);
   }
+  const pctTotal = input.deductions.filter((d) => d.basis === "PCT_OF_PRINCIPAL").reduce((s, d) => s.plus(d.value), new Decimal(0));
+  if (pctTotal.gte(1)) throw new LoanError("The percentage deductions add up to 100% or more of the loan");
+  const fixedTotal = input.deductions.filter((d) => d.basis === "FIXED").reduce((s, d) => s + BigInt(d.value), 0n);
+  if (fixedTotal > 0n && input.minAmount > 0n && fixedTotal >= input.minAmount) throw new LoanError("The fixed deductions take the whole minimum loan; raise the minimum amount");
   const { deductions, ...fields } = input;
-  const changes = { name: fields.name.trim(), ratePm: fields.ratePm, minTerm: fields.minTerm, maxTerm: fields.maxTerm, maxAmount: fields.maxAmount, maxMultipleOfPaidUp: fields.maxMultipleOfPaidUp, requiredComakers: fields.requiredComakers, penaltyRatePm: fields.penaltyRatePm, graceDays: fields.graceDays, isActive: fields.isActive };
+  const changes = { name: fields.name.trim(), ratePm: fields.ratePm, minTerm: fields.minTerm, maxTerm: fields.maxTerm, minAmount: fields.minAmount, maxAmount: fields.maxAmount, maxMultipleOfPaidUp: fields.maxMultipleOfPaidUp, requiredComakers: fields.requiredComakers, penaltyRatePm: fields.penaltyRatePm, graceDays: fields.graceDays, isActive: fields.isActive };
   await tx.update(loanProducts).set(changes).where(eq(loanProducts.id, before.id));
   const old = await tx.select().from(loanProductDeductions).where(eq(loanProductDeductions.productId, before.id));
   await tx.delete(loanProductDeductions).where(eq(loanProductDeductions.productId, before.id));
@@ -113,8 +116,8 @@ export async function updateLoanProduct(tx: Tx, input: { productId: string } & P
     action: "loans.product_update",
     entity: "loan_product",
     entityId: before.id,
-    before: { ...before, maxAmount: before.maxAmount === null ? null : format(before.maxAmount), deductions: old.map((d) => ({ code: d.code, basis: d.basis, value: d.value })) },
-    after: { ...changes, maxAmount: changes.maxAmount === null ? null : format(changes.maxAmount), deductions: deductions.map((d) => ({ code: d.code, basis: d.basis, value: d.value })) },
+    before: { ...before, minAmount: format(before.minAmount), maxAmount: before.maxAmount === null ? null : format(before.maxAmount), deductions: old.map((d) => ({ code: d.code, basis: d.basis, value: d.value })) },
+    after: { ...changes, minAmount: format(changes.minAmount), maxAmount: changes.maxAmount === null ? null : format(changes.maxAmount), deductions: deductions.map((d) => ({ code: d.code, basis: d.basis, value: d.value })) },
     userId: actorId,
   });
 }
@@ -123,11 +126,26 @@ export async function updateLoanProduct(tx: Tx, input: { productId: string } & P
 
 export type LoanPreview = { rows: ScheduleRow[]; totalInterest: Money; totalPayment: Money; regularPayment: Money; deductions: Array<{ code: string; name: string; amount: Money; glKey: string }>; totalDeductions: Money; net: Money; effectiveRatePm: string };
 
+/**
+ * The effective interest rate a month for the disclosure (RA 3765): the monthly IRR of the amount
+ * financed (the loan less the finance charges deducted; CBU is the member's own share capital, not
+ * a finance charge) against the installments. The calculator shows the same figure.
+ */
+export function effectiveRateOf(amount: Money, deductions: Array<{ code: string; amount: Money }>, payments: Money[]): string {
+  const financeCharges = deductions.filter((d) => d.code !== "CBU").reduce((s, d) => s + d.amount, 0n);
+  return effectiveMonthlyRate(amount - financeCharges, payments);
+}
+
 /** A product's schedule, deductions and net proceeds for an amount and term (calculator and preview). */
-export function previewLoan(product: ProductWithDeductions, input: { amount: Money; term: number; firstDueDate: BusinessDate; method?: LoanMethod; ratePm?: string }): LoanPreview {
-  const rows = schedule({ principal: input.amount, ratePm: input.ratePm ?? product.ratePm, term: input.term, method: input.method ?? product.method, firstDueDate: input.firstDueDate });
+export function previewLoan(product: ProductWithDeductions, input: { amount: Money; term: number; firstDueDate: BusinessDate }): LoanPreview {
+  const rows = schedule({ principal: input.amount, ratePm: product.ratePm, term: input.term, method: product.method, firstDueDate: input.firstDueDate });
   const totals = scheduleTotals(rows);
-  const np = netProceeds(input.amount, product.deductions.map((d) => ({ code: d.code, name: d.name, basis: d.basis, value: d.value, glKey: d.glKey })));
+  let np: ReturnType<typeof netProceeds>;
+  try {
+    np = netProceeds(input.amount, product.deductions.map((d) => ({ code: d.code, name: d.name, basis: d.basis, value: d.value, glKey: d.glKey })));
+  } catch {
+    throw new LoanError(`The deductions of ${product.name} are more than ${format(input.amount)}${product.minAmount > 0n ? `; the smallest loan is ${format(product.minAmount)}` : ""}`);
+  }
   return {
     rows,
     totalInterest: totals.interest,
@@ -136,7 +154,7 @@ export function previewLoan(product: ProductWithDeductions, input: { amount: Mon
     deductions: np.lines,
     totalDeductions: np.total,
     net: np.net,
-    effectiveRatePm: effectiveMonthlyRate(np.net, rows.map((r) => r.payment)),
+    effectiveRatePm: effectiveRateOf(input.amount, np.lines, rows.map((r) => r.payment)),
   };
 }
 
@@ -159,6 +177,7 @@ export async function submitApplication(tx: Tx, input: { memberId: string; produ
   const product = await getLoanProduct(input.productId, tx);
   if (!product || !product.isActive) throw new LoanError("Choose an active loan product");
   if (input.amount <= 0n) throw new LoanError("The loan amount must be more than zero");
+  if (input.amount > MAX_LOAN) throw new LoanError(`A loan can't be more than ${format(MAX_LOAN)}`);
   if (!Number.isInteger(input.term) || input.term < 1) throw new LoanError("Enter the term in months");
   const purpose = input.purpose.trim();
   if (!purpose) throw new LoanError("Enter the purpose of the loan");
@@ -191,6 +210,9 @@ export async function submitApplication(tx: Tx, input: { memberId: string; produ
       deductions: preview.deductions.map((d) => ({ code: d.code, name: d.name, amount: String(d.amount), glKey: d.glKey })),
       netProceeds: preview.net,
       totalInterest: preview.totalInterest,
+      receivableGlKey: product.receivableGlKey,
+      penaltyRatePm: product.penaltyRatePm,
+      graceDays: product.graceDays,
       encodedBy: officerId,
       createdBy: officerId,
     })
@@ -219,6 +241,7 @@ export async function decideApplication(tx: Tx, input: { applicationId: string; 
   if (input.decision === "REJECT" && !remarks) throw new LoanError("Enter the reason for rejecting");
 
   let status: LoanApplicationStatus;
+  let recheck: EligibilityResult[] | null = null;
   if (input.decision === "REJECT") status = "REJECTED";
   else {
     const member = await lockMember(tx, app.memberId);
@@ -226,12 +249,13 @@ export async function decideApplication(tx: Tx, input: { applicationId: string; 
     if (!product) throw new LoanError("Loan product not found");
     const comakerRows = await tx.select({ m: members }).from(loanApplicationComakers).innerJoin(members, eq(members.id, loanApplicationComakers.memberId)).where(eq(loanApplicationComakers.applicationId, app.id));
     const results = await checkEligibility(tx, { member, product: { ...product, ratePm: app.ratePm, method: app.method }, amount: app.amount, term: app.term, comakers: comakerRows.map((r) => r.m) });
+    recheck = results;
     const failed = results.filter((r) => !r.pass);
     if (failed.length) throw new LoanError(`Not eligible any more: ${failed.map((r) => r.message).join("; ")}`);
     const limit = BigInt(await getSetting("loan.manager_approval_limit", tx));
     status = level === "MANAGER" && app.amount > limit ? "RECOMMENDED" : "APPROVED";
   }
-  await tx.insert(loanApprovals).values({ applicationId: app.id, level, decision: input.decision, remarks: remarks || null, by: actor.id, createdBy: actor.id });
+  await tx.insert(loanApprovals).values({ applicationId: app.id, level, decision: input.decision, remarks: remarks || null, by: actor.id, resultingStatus: status, eligibility: recheck, createdBy: actor.id });
   await tx.update(loanApplications).set({ status }).where(eq(loanApplications.id, app.id));
   await audit(tx, { action: `loans.${input.decision === "APPROVE" ? "approve" : "reject"}`, entity: "loan_application", entityId: app.id, before: { status: app.status }, after: { status, level, remarks }, userId: actor.id });
   return { status };

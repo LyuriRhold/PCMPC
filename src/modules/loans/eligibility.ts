@@ -59,9 +59,10 @@ export async function checkEligibility(db: Db | Tx, input: EligibilityInput): Pr
     out.push({ rule: "member", pass: true, message: "ACTIVE and in good standing" });
   }
 
-  // 2. Within the product maximum and the multiple of paid-up share capital.
+  // 2. Within the product minimum, its maximum and the multiple of paid-up share capital.
   const loanable = await loanableAmount(db, product, member.id);
-  if (loanable !== null && amount > loanable) out.push({ rule: "amount", pass: false, message: `Exceeds loanable amount ${format(loanable)}` });
+  if (amount < product.minAmount) out.push({ rule: "amount", pass: false, message: `The smallest ${product.name} is ${format(product.minAmount)}` });
+  else if (loanable !== null && amount > loanable) out.push({ rule: "amount", pass: false, message: `Exceeds loanable amount ${format(loanable)}` });
   else out.push({ rule: "amount", pass: true, message: loanable === null ? "No loanable limit" : `Within the loanable amount ${format(loanable)}` });
 
   // 3. Term within the product's.

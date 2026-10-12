@@ -66,9 +66,10 @@ describe("T10.2 due dates (golden A10.10)", () => {
 
 describe("T10.2 properties (deterministic random loans)", () => {
   it("for every method the principal sums to the loan, the balance falls to 0 and never goes negative", () => {
+    // MINSTD: products stay below 2^53, so the sequence is exact.
     let seed = 20261012;
     const rand = (n: number) => {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
+      seed = (seed * 48271) % 2147483647;
       return seed % n;
     };
     const methods: AmortizationMethod[] = ["DIMINISHING_EQUAL_AMORT", "DIMINISHING_EQUAL_PRINCIPAL", "ADD_ON"];
@@ -82,7 +83,7 @@ describe("T10.2 properties (deterministic random loans)", () => {
       expect(scheduleTotals(rows).principal).toBe(principal);
       expect(rows.at(-1)?.balance).toBe(0n);
       for (const r of rows) {
-        expect(r.balance >= 0n && r.interest >= 0n && r.payment === r.principal + r.interest).toBe(true);
+        expect(r.balance >= 0n && r.interest >= 0n && r.principal >= 0n && r.payment === r.principal + r.interest).toBe(true);
       }
     }
   });
@@ -125,5 +126,34 @@ describe("effective interest rate (disclosure)", () => {
     expect(Number(effectiveMonthlyRate(P(10000), payments))).toBeCloseTo(0.015, 4);
     expect(Number(effectiveMonthlyRate(P(9500), payments))).toBeGreaterThan(0.023);
     expect(effectiveMonthlyRate(P(20000), payments)).toBe("0");
+  });
+});
+
+describe("review follow-ups: tiny loans and long terms", () => {
+  it("no row is ever negative, the principal sums to the loan and the balance ends at 0 (1 centavo to ₱50, 1 to 360 months)", () => {
+    const methods: AmortizationMethod[] = ["DIMINISHING_EQUAL_AMORT", "DIMINISHING_EQUAL_PRINCIPAL", "ADD_ON"];
+    for (const method of methods) {
+      for (const term of [1, 2, 12, 36, 360]) {
+        for (const ratePm of ["0", "0.005", "0.015", "0.04"]) {
+          for (let principal = 1n; principal <= 5_000n; principal += principal < 100n ? 1n : 97n) {
+            const rows = schedule({ principal, ratePm, term, method, firstDueDate: "2026-01-31" });
+            let sum = 0n;
+            for (const r of rows) {
+              if (r.principal < 0n || r.interest < 0n || r.payment < 0n || r.balance < 0n || r.payment !== r.principal + r.interest) {
+                throw new Error(`${method} ${principal} centavos, ${term} months at ${ratePm}: row ${r.no} ${JSON.stringify({ ...r, principal: String(r.principal), interest: String(r.interest), payment: String(r.payment), balance: String(r.balance) })}`);
+              }
+              sum += r.principal;
+            }
+            expect(sum).toBe(principal);
+            expect(rows.at(-1)?.balance).toBe(0n);
+          }
+        }
+      }
+    }
+  });
+
+  it("add-on totals stay exact on a 360-month ₱1.00 loan", () => {
+    const rows = schedule({ principal: P(1), ratePm: "0.005", term: 360, method: "ADD_ON", firstDueDate: first });
+    expect(scheduleTotals(rows)).toMatchObject({ principal: P(1), interest: P(1, 80), payment: P(2, 80) });
   });
 });

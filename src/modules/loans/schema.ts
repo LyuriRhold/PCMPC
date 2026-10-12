@@ -29,6 +29,8 @@ export const loanProducts = pgTable(
     maxTerm: integer("max_term").notNull(),
     /** MONTHLY only (others CONFIRM). */
     frequency: text("frequency").notNull().default("MONTHLY"),
+    /** Smallest loan (the deductions must fit in it; CONFIRM Q-10.9). */
+    minAmount: money("min_amount").notNull().default(sql`0`),
     maxAmount: money("max_amount"),
     /** Loanable amount as a multiple of paid-up share capital ("3" = 3×); null = no such limit. */
     maxMultipleOfPaidUp: text("max_multiple_of_paid_up"),
@@ -45,12 +47,20 @@ export const loanProducts = pgTable(
     check("loan_products_method_chk", inList("method", LOAN_METHODS)),
     check("loan_products_terms_chk", sql`${t.minTerm} >= 1 AND ${t.maxTerm} >= ${t.minTerm}`),
     check("loan_products_frequency_chk", sql`${t.frequency} = 'MONTHLY'`),
-    check("loan_products_amounts_chk", sql`(${t.maxAmount} IS NULL OR ${t.maxAmount} > 0) AND ${t.requiredComakers} >= 0 AND ${t.graceDays} >= 0`),
+    check("loan_products_amounts_chk", sql`${t.minAmount} >= 0 AND (${t.maxAmount} IS NULL OR ${t.maxAmount} >= ${t.minAmount}) AND ${t.requiredComakers} >= 0 AND ${t.graceDays} >= 0`),
   ],
 );
 
 export const DEDUCTION_CODES = ["SERVICE_FEE", "CBU", "LPP", "NOTARIAL", "OTHER"] as const;
 export type DeductionCode = (typeof DEDUCTION_CODES)[number];
+/** The accounts each kind of deduction may be credited to on release (DOMAIN §6). */
+export const DEDUCTION_GL: Record<DeductionCode, readonly string[]> = {
+  SERVICE_FEE: ["service_fee_income"],
+  CBU: ["subscription_receivable_common"],
+  LPP: ["lpp_insurance_payable"],
+  NOTARIAL: ["notarial_fee_income"],
+  OTHER: ["service_fee_income", "notarial_fee_income", "lpp_insurance_payable"],
+};
 export const DEDUCTION_BASES = ["PCT_OF_PRINCIPAL", "FIXED"] as const;
 export type DeductionBasis = (typeof DEDUCTION_BASES)[number];
 
@@ -111,6 +121,10 @@ export const loanApplications = pgTable(
     deductions: jsonb("deductions").$type<DeductionLine[]>().notNull(),
     netProceeds: money("net_proceeds").notNull(),
     totalInterest: money("total_interest").notNull(),
+    /** More product terms at submission, for the release and the disclosure (Phase 11). */
+    receivableGlKey: text("receivable_gl_key").notNull(),
+    penaltyRatePm: text("penalty_rate_pm").notNull(),
+    graceDays: integer("grace_days").notNull(),
     encodedBy: uuid("encoded_by")
       .notNull()
       .references(() => users.id),
@@ -159,6 +173,10 @@ export const loanApprovals = pgTable(
       .notNull()
       .references(() => users.id),
     at: tstz("at").notNull().defaultNow(),
+    /** The status the decision led to (e.g. a manager's approval above the limit → RECOMMENDED). */
+    resultingStatus: text("resulting_status").$type<LoanApplicationStatus>(),
+    /** The eligibility re-check at an approval. */
+    eligibility: jsonb("eligibility").$type<EligibilityResult[]>(),
     ...createdColumns(),
   },
   (t) => [

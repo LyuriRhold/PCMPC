@@ -10,6 +10,8 @@ type Sample = {
   ratePm: string;
   minTerm: number;
   maxTerm: number;
+  /** CONFIRM Q-10.9. */
+  minAmount: bigint;
   maxAmount: bigint | null;
   maxMultipleOfPaidUp: string | null;
   /** CONFIRM Q-10.1: DOMAIN §2 gives no comaker rule. */
@@ -23,9 +25,9 @@ const notarial = { code: "NOTARIAL" as const, name: "Notarial fee", basis: "FIXE
 
 /** DOMAIN §2 "Sample loan products" (all CONFIRM, to be replaced by the PCMPC loan policy). */
 export const SAMPLE_LOAN_PRODUCTS: Sample[] = [
-  { code: "REG", name: "Regular Loan", method: "DIMINISHING_EQUAL_AMORT", ratePm: "0.015", minTerm: 6, maxTerm: 24, maxAmount: null, maxMultipleOfPaidUp: "3", requiredComakers: 1, deductions: [serviceFee("0.02"), cbu, notarial] },
-  { code: "EMR", name: "Emergency Loan", method: "ADD_ON", ratePm: "0.015", minTerm: 1, maxTerm: 6, maxAmount: 1_000_000n, maxMultipleOfPaidUp: null, requiredComakers: 0, deductions: [serviceFee("0.01")] },
-  { code: "PRD", name: "Productive/Livelihood Loan", method: "DIMINISHING_EQUAL_PRINCIPAL", ratePm: "0.01", minTerm: 6, maxTerm: 12, maxAmount: 5_000_000n, maxMultipleOfPaidUp: null, requiredComakers: 1, deductions: [serviceFee("0.02"), cbu] },
+  { code: "REG", name: "Regular Loan", method: "DIMINISHING_EQUAL_AMORT", ratePm: "0.015", minTerm: 6, maxTerm: 24, minAmount: 100_000n, maxAmount: null, maxMultipleOfPaidUp: "3", requiredComakers: 1, deductions: [serviceFee("0.02"), cbu, notarial] },
+  { code: "EMR", name: "Emergency Loan", method: "ADD_ON", ratePm: "0.015", minTerm: 1, maxTerm: 6, minAmount: 100_000n, maxAmount: 1_000_000n, maxMultipleOfPaidUp: null, requiredComakers: 0, deductions: [serviceFee("0.01")] },
+  { code: "PRD", name: "Productive/Livelihood Loan", method: "DIMINISHING_EQUAL_PRINCIPAL", ratePm: "0.01", minTerm: 6, maxTerm: 12, minAmount: 100_000n, maxAmount: 5_000_000n, maxMultipleOfPaidUp: null, requiredComakers: 1, deductions: [serviceFee("0.02"), cbu] },
 ];
 
 /** Loan products and their deductions. Idempotent: products that exist are left as they are. */
@@ -42,6 +44,7 @@ export async function seedLoanProducts(tx: Tx): Promise<void> {
         ratePm: s.ratePm,
         minTerm: s.minTerm,
         maxTerm: s.maxTerm,
+        minAmount: s.minAmount,
         maxAmount: s.maxAmount,
         maxMultipleOfPaidUp: s.maxMultipleOfPaidUp,
         requiredComakers: s.requiredComakers,

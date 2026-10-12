@@ -6,12 +6,11 @@ import { Suspense } from "react";
 import { z } from "zod";
 import { Forbidden } from "@/components/forbidden";
 import { PageLoading } from "@/components/page-loading";
-import { businessToday, formatDate } from "@/lib/dates";
+import { businessToday, formatDate, formatDateTime } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPage } from "@/lib/page-guard";
 import { PrintButton } from "@/modules/cashiering/ui/buttons";
-import { effectiveMonthlyRate } from "@/modules/loans/amortization";
-import { getApplication } from "@/modules/loans/service";
+import { effectiveRateOf, getApplication } from "@/modules/loans/service";
 import { pct } from "@/modules/loans/ui/options";
 import { METHOD_LABEL, ScheduleTable } from "@/modules/loans/ui/schedule-table";
 import { getSetting } from "@/modules/settings/service";
@@ -41,6 +40,16 @@ async function DisclosureContent(props: PageProps<"/loans/applications/[id]/disc
   const data = await getApplication(id);
   if (!data) notFound();
   const { application: a, product, member } = data;
+  if (a.status === "REJECTED" || a.status === "CANCELLED") {
+    return (
+      <div className="flex flex-col gap-2">
+        <Link href={`/loans/applications/${a.id}`} className="text-sm text-muted-foreground underline underline-offset-4">
+          ← {a.appNo}
+        </Link>
+        <p role="status" className="text-sm">There is no disclosure statement for a {a.status.toLowerCase()} application.</p>
+      </div>
+    );
+  }
   const coop = await getSetting("coop.name");
   const fees = a.deductions.filter((d) => d.code !== "CBU");
   const others = a.deductions.filter((d) => d.code === "CBU");
@@ -48,7 +57,9 @@ async function DisclosureContent(props: PageProps<"/loans/applications/[id]/disc
   const financeCharge = feeTotal + a.totalInterest;
   const amountFinanced = a.amount - feeTotal;
   const payments = a.schedulePreview.map((r) => BigInt(r.payment));
-  const eir = effectiveMonthlyRate(amountFinanced, payments);
+  const eir = effectiveRateOf(a.amount, a.deductions.map((d) => ({ code: d.code, amount: BigInt(d.amount) })), payments);
+  const approvedAt = data.approvals.find((x) => x.resultingStatus === "APPROVED")?.at ?? null;
+  const final = a.status === "APPROVED" || a.status === "RELEASED";
   const rows = a.schedulePreview.map((r) => ({ no: r.no, dueDate: r.dueDate, principal: BigInt(r.principal), interest: BigInt(r.interest), payment: BigInt(r.payment), balance: BigInt(r.balance) }));
 
   return (
@@ -59,6 +70,11 @@ async function DisclosureContent(props: PageProps<"/loans/applications/[id]/disc
         </Link>
         <PrintButton />
       </div>
+      {!final ? (
+        <p role="status" className="rounded border border-amber-500/60 p-2 text-center text-sm font-medium text-amber-800 dark:text-amber-300">
+          PREVIEW: the application is {a.status.toLowerCase()} and not yet approved.
+        </p>
+      ) : null}
       <div className="text-center">
         <p className="font-semibold">{coop}</p>
         <h1 className="text-xl font-semibold">Disclosure Statement on Loan Transaction</h1>
@@ -70,7 +86,7 @@ async function DisclosureContent(props: PageProps<"/loans/applications/[id]/disc
         </p>
         <p>Application: {a.appNo}</p>
         <p>Loan: {product.name} · {METHOD_LABEL[a.method]}</p>
-        <p>Date: {formatDate(businessToday())}</p>
+        <p>{approvedAt ? `Approved: ${formatDateTime(approvedAt)}` : `Printed: ${formatDate(businessToday())}`}</p>
       </div>
       <div className="flex flex-col">
         <Line label="1. Amount of the loan" value={format(a.amount)} />
@@ -86,7 +102,7 @@ async function DisclosureContent(props: PageProps<"/loans/applications/[id]/disc
           <Line key={d.code + d.name} label={`    ${d.name} (credited to your share capital)`} value={format(BigInt(d.amount))} />
         ))}
         <Line label="7. Net proceeds you receive" value={format(a.netProceeds)} strong />
-        <Line label="8. Effective interest rate" value={`${pct(eir)}% a month (${pct(new Decimal(eir).mul(12).toFixed())}% a year)`} strong />
+        <Line label="8. Effective interest rate (on the unpaid balance)" value={`${pct(eir)}% a month, ${pct(new Decimal(eir).mul(12).toFixed())}% a year (simple annual rate)`} strong />
         <Line label={`9. Total of ${a.term} payments`} value={format(payments.reduce((s, p) => s + p, 0n))} />
       </div>
       <div>
@@ -94,7 +110,7 @@ async function DisclosureContent(props: PageProps<"/loans/applications/[id]/disc
         <ScheduleTable rows={rows} />
       </div>
       <p className="text-xs text-muted-foreground">
-        Late payments are charged {pct(product.penaltyRatePm)}% a month on the overdue amount after {product.graceDays} grace days.
+        Late payments are charged {pct(a.penaltyRatePm)}% a month on the overdue amount after {a.graceDays} grace days.
       </p>
       <div className="mt-8 grid grid-cols-2 gap-10 text-center text-sm">
         <div>

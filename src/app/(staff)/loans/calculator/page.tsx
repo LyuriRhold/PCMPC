@@ -35,11 +35,18 @@ async function CalculatorContent({ searchParams }: { searchParams: Promise<Recor
   const term = sp.term && /^\d{1,3}$/.test(sp.term) ? Number(sp.term) : null;
   let result: ReturnType<typeof previewLoan> | null = null;
   let error: string | null = null;
-  if (product && amount !== null && term !== null) {
-    try {
-      result = previewLoan(product, { amount, term, firstDueDate: firstDue });
-    } catch (e) {
-      error = e instanceof Error ? e.message : "Can't compute this loan";
+  if (product && sp.amount && amount === null) error = "Enter the amount in pesos, e.g. 10,000.00";
+  else if (product && amount !== null && term === null) error = "Enter the term in months";
+  else if (product && amount !== null && term !== null) {
+    if (term < product.minTerm || term > product.maxTerm) error = `${product.name}: the term is ${product.minTerm} to ${product.maxTerm} months`;
+    else if (amount < product.minAmount || (product.maxAmount !== null && amount > product.maxAmount)) {
+      error = `${product.name}: from ${format(product.minAmount)}${product.maxAmount !== null ? ` up to ${format(product.maxAmount)}` : ""}`;
+    } else {
+      try {
+        result = previewLoan(product, { amount, term, firstDueDate: firstDue });
+      } catch (e) {
+        error = e instanceof Error ? e.message : "Can't compute this loan";
+      }
     }
   }
 
@@ -76,8 +83,8 @@ async function CalculatorContent({ searchParams }: { searchParams: Promise<Recor
       </form>
       {product ? (
         <p className="text-xs text-muted-foreground">
-          {product.name}: {METHOD_LABEL[product.method]} · {pct(product.ratePm)}% a month · {product.minTerm}–{product.maxTerm} months
-          {product.maxAmount !== null ? ` · up to ${format(product.maxAmount)}` : ""}
+          {product.name}: {METHOD_LABEL[product.method]} · {pct(product.ratePm)}% a month · {product.minTerm}–{product.maxTerm} months · from {format(product.minAmount)}
+          {product.maxAmount !== null ? ` up to ${format(product.maxAmount)}` : ""}
           {product.maxMultipleOfPaidUp ? ` · up to ${product.maxMultipleOfPaidUp}× paid-up share capital` : ""}
         </p>
       ) : null}
@@ -110,7 +117,7 @@ async function CalculatorContent({ searchParams }: { searchParams: Promise<Recor
                 </p>
               </div>
               <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">Effective interest rate</p>
+                <p className="text-xs text-muted-foreground">Effective interest rate (as on the disclosure)</p>
                 <p className="text-lg font-semibold tabular-nums">
                   {pct(result.effectiveRatePm)}% a month
                 </p>

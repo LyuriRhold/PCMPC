@@ -158,6 +158,7 @@ describe("products and data rules", () => {
       ratePct: "2",
       minTerm: 1,
       maxTerm: 6,
+      minAmount: "1,000.00",
       maxAmount: "10,000.00",
       maxMultipleOfPaidUp: "",
       requiredComakers: 0,
@@ -186,5 +187,93 @@ describe("products and data rules", () => {
     await expect(pool.query("DELETE FROM loan_applications WHERE id = $1", [r.data.id])).rejects.toThrow(/can't be deleted/);
     await expect(pool.query("UPDATE loan_approvals SET decision = 'REJECT', remarks = 'x' WHERE application_id = $1", [r.data.id])).rejects.toThrow(/immutable/);
     await expect(pool.query("DELETE FROM loan_application_comakers WHERE application_id = $1", [r.data.id])).rejects.toThrow(/immutable/);
+  });
+});
+
+describe("review follow-ups", () => {
+  const admin = async () => (await makeUser("ADMIN", `admin10r${Math.random().toString(36).slice(2, 6)}`)).id;
+  const emrChange = async (over: Record<string, unknown>) => {
+    const emr = (await getLoanProduct(await productId("EMR")))!;
+    return {
+      productId: emr.id,
+      name: emr.name,
+      ratePct: "1.5",
+      minTerm: 1,
+      maxTerm: 6,
+      minAmount: "1,000.00",
+      maxAmount: "10,000.00",
+      maxMultipleOfPaidUp: "",
+      requiredComakers: 0,
+      penaltyPct: "2",
+      graceDays: 3,
+      isActive: true,
+      deductions: [{ code: "SERVICE_FEE" as const, name: "Service fee", basis: "PCT_OF_PRINCIPAL" as const, value: "1", glKey: "service_fee_income" }],
+      ...over,
+    };
+  };
+
+  it("a loan below the product minimum is refused with a message (no server error)", async () => {
+    const m = await goodStandingMember("Borrower");
+    const c = await goodStandingMember("Comaker");
+    expect(await apply({ memberId: m, product: "REG", amount: "50.00", term: 12, comakerIds: [c] })).toMatchObject({ ok: false, error: expect.stringContaining("The smallest Regular Loan is ₱1,000.00") });
+  });
+
+  it("a product whose deductions exceed a small loan refuses it with a message; percentage deductions can't reach 100%", async () => {
+    const a = await admin();
+    expect(await runAs(a, async () => updateLoanProductAction(await emrChange({ deductions: [{ code: "SERVICE_FEE", name: "Service fee", basis: "PCT_OF_PRINCIPAL", value: "60", glKey: "service_fee_income" }, { code: "LPP", name: "LPP", basis: "PCT_OF_PRINCIPAL", value: "40", glKey: "lpp_insurance_payable" }] })))).toMatchObject({
+      ok: false,
+      error: "The percentage deductions add up to 100% or more of the loan",
+    });
+    expect(await runAs(a, async () => updateLoanProductAction(await emrChange({ minAmount: "50.00", deductions: [{ code: "NOTARIAL", name: "Notarial fee", basis: "FIXED", value: "100.00", glKey: "notarial_fee_income" }] })))).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/take the whole minimum loan/),
+    });
+    expect((await runAs(a, async () => updateLoanProductAction(await emrChange({ minAmount: "0", deductions: [{ code: "NOTARIAL", name: "Notarial fee", basis: "FIXED", value: "100.00", glKey: "notarial_fee_income" }] })))).ok).toBe(true);
+    const m = await goodStandingMember();
+    expect(await apply({ memberId: m, product: "EMR", amount: "50.00", term: 6 })).toEqual({ ok: false, error: "The deductions of Emergency Loan are more than ₱50.00" });
+  });
+
+  it("an application keeps the product's account, penalty and grace days; an approval keeps its re-check and the status it led to", async () => {
+    const m = await goodStandingMember("Borrower");
+    const c = await goodStandingMember("Comaker");
+    const r = await apply({ memberId: m, product: "PRD", amount: "40,000.00", term: 12, comakerIds: [c] });
+    if (!r.ok) throw new Error(r.error);
+    expect((await decide(managerId(), r.data.id, "APPROVE")).ok).toBe(true);
+    const app = (await getApplication(r.data.id))!;
+    expect(app.application).toMatchObject({ receivableGlKey: "loans_receivable_PRD", penaltyRatePm: "0.02", graceDays: 3 });
+    expect(app.approvals[0]).toMatchObject({ level: "MANAGER", decision: "APPROVE", resultingStatus: "RECOMMENDED" });
+    expect(app.approvals[0]?.eligibility?.every((e) => e.pass)).toBe(true);
+  });
+
+  it("a person decides once; an encoder never decides at either level", async () => {
+    const m = await goodStandingMember("Borrower");
+    const c = await goodStandingMember("Comaker");
+    const r = await apply({ memberId: m, product: "PRD", amount: "40,000.00", term: 12, comakerIds: [c] });
+    if (!r.ok) throw new Error(r.error);
+    await expect(withTx((tx) => decideApplication(tx, { applicationId: r.data.id, decision: "APPROVE", remarks: "" }, { id: officerId(), canRecommend: false }))).rejects.toBeInstanceOf(SodError);
+    expect((await decide(managerId(), r.data.id, "APPROVE")).ok).toBe(true);
+    // The same person can't also decide at the Credit Committee level.
+    await expect(withTx((tx) => decideApplication(tx, { applicationId: r.data.id, decision: "APPROVE", remarks: "" }, { id: managerId(), canRecommend: false }))).rejects.toThrow(/already decided on this application/);
+  });
+
+  it("status changes only move forward in the database", async () => {
+    const m = await goodStandingMember();
+    const r = await apply({ memberId: m, product: "EMR", amount: "5,000.00", term: 6 });
+    if (!r.ok) throw new Error(r.error);
+    expect((await decide(managerId(), r.data.id, "REJECT", "Not now")).ok).toBe(true);
+    const pool = getPool();
+    await expect(pool.query("UPDATE loan_applications SET status = 'APPROVED' WHERE id = $1", [r.data.id])).rejects.toThrow(/can't go from REJECTED to APPROVED/);
+    const r2 = await apply({ memberId: m, product: "EMR", amount: "5,000.00", term: 6 });
+    if (!r2.ok) throw new Error(r2.error);
+    expect((await decide(managerId(), r2.data.id, "APPROVE")).ok).toBe(true);
+    await expect(pool.query("UPDATE loan_applications SET status = 'SUBMITTED' WHERE id = $1", [r2.data.id])).rejects.toThrow(/can't go from APPROVED to SUBMITTED/);
+  });
+
+  it("the calculator's effective rate is the disclosure's (amount financed, CBU not a finance charge)", async () => {
+    const reg = (await getLoanProduct(await productId("REG")))!;
+    const p = previewLoan(reg, { amount: P(10000), term: 12, firstDueDate: "2026-11-07" });
+    const fees = p.deductions.filter((d) => d.code !== "CBU").reduce((s, d) => s + d.amount, 0n);
+    expect(fees).toBe(P(300));
+    expect(Number(p.effectiveRatePm)).toBeCloseTo(0.019924, 5);
   });
 });

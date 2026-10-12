@@ -49,6 +49,7 @@ async function LoanProductsContent() {
                   ratePct: pct(p.ratePm),
                   minTerm: p.minTerm,
                   maxTerm: p.maxTerm,
+                  minAmount: pesos(p.minAmount),
                   maxAmount: p.maxAmount === null ? "" : pesos(p.maxAmount),
                   maxMultipleOfPaidUp: p.maxMultipleOfPaidUp ?? "",
                   requiredComakers: p.requiredComakers,
@@ -60,8 +61,8 @@ async function LoanProductsContent() {
               />
             ) : (
               <p className="text-sm">
-                {pct(p.ratePm)}% a month · {p.minTerm}–{p.maxTerm} months
-                {p.maxAmount !== null ? ` · up to ${format(p.maxAmount)}` : ""}
+                {pct(p.ratePm)}% a month · {p.minTerm}–{p.maxTerm} months · from {format(p.minAmount)}
+                {p.maxAmount !== null ? ` up to ${format(p.maxAmount)}` : ""}
                 {p.maxMultipleOfPaidUp ? ` · up to ${p.maxMultipleOfPaidUp}× paid-up share capital` : ""} · {p.requiredComakers} comaker(s) · penalty {pct(p.penaltyRatePm)}% a month after {p.graceDays} days
                 <br />
                 Deductions: {p.deductions.length ? p.deductions.map((d) => `${d.name} ${d.basis === "PCT_OF_PRINCIPAL" ? `${pct(d.value)}%` : format(BigInt(d.value))}`).join(" · ") : "none"}

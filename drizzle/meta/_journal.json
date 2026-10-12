@@ -204,6 +204,13 @@
       "when": 1791791283758,
       "tag": "0028_loan_servicing_immutable",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791791511245,
+      "tag": "0029_loan_restructure",
+      "breakpoints": true
     }
   ]
 }

@@ -156,13 +156,13 @@
 
 ### Phase 11 — Loan Release, Collections, Penalties & Aging
 - [x] T11.1 Schema + migrations
-- [ ] T11.2 Release service (GL, CBU, schedule persistence, loan_no)
-- [ ] T11.3 Collection service (allocation, excess handling, GL, reversal of a payment)
-- [ ] T11.4 Penalty engine + daily job + job_runs idempotency
-- [ ] T11.5 Aging/PAR service + snapshot + delinquency list (with comakers and contact numbers)
-- [ ] T11.6 Write-off, restructure, termination offset, eligibility hooks, `canTerminate`
+- [x] T11.2 Release service (GL, CBU, schedule persistence, loan_no)
+- [x] T11.3 Collection service (allocation, excess handling, GL, reversal of a payment)
+- [x] T11.4 Penalty engine + daily job + job_runs idempotency
+- [x] T11.5 Aging/PAR service + snapshot + delinquency list (with comakers and contact numbers)
+- [x] T11.6 Write-off, restructure, termination offset, eligibility hooks, `canTerminate`
 - [ ] T11.7 UI: release screen, loan ledger card, delinquency/aging reports, PAR tile
-- [ ] T11.8 Teller registrations (`LOAN_PAYMENT`, `LOAN_PROCEEDS`) + cross-module receipt test
+- [x] T11.8 Teller registrations (`LOAN_PAYMENT`, `LOAN_PROCEEDS`) + cross-module receipt test
 - [x] Acceptance tests written first (tests/acceptance/phase-11.test.ts)
 - [ ] Exit checks passed
 

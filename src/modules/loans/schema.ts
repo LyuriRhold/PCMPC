@@ -193,7 +193,7 @@ export const loanApprovals = pgTable(
 
 export const LOAN_STATUSES = ["PENDING", "ACTIVE", "PAST_DUE", "PAID", "RESTRUCTURED", "WRITTEN_OFF"] as const;
 export type LoanStatus = (typeof LOAN_STATUSES)[number];
-export const DISBURSEMENTS = ["CASH", "SAVINGS"] as const;
+export const DISBURSEMENTS = ["CASH", "SAVINGS", "RESTRUCTURE"] as const;
 export type Disbursement = (typeof DISBURSEMENTS)[number];
 
 /**

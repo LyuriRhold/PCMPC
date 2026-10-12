@@ -1,9 +1,12 @@
+import { eq } from "drizzle-orm";
+import { getDb } from "@/db/client";
 import { runAs } from "@/lib/auth-guard";
 import { businessToday, now, setClock } from "@/lib/dates";
 import { issueReceiptAction } from "@/modules/cashiering/actions";
 import { approveMemberAction } from "@/modules/members/actions";
 import { decideApplicationAction, submitApplicationAction } from "@/modules/loans/actions";
 import { authorizeReleaseAction, payOutProceedsAction } from "@/modules/loans/servicing-actions";
+import { loanProducts } from "@/modules/loans/schema";
 import { loanProductByCode } from "@/modules/loans/service";
 import { subscribeAction } from "@/modules/share/actions";
 import { makeUser } from "./phase01";
@@ -31,7 +34,12 @@ let seq = 0;
  * releases: never the approver), a loan officer and a Credit Committee member. With `water`, the
  * water collections setup (zone, route, clerk) too. Keeps the business date the caller set.
  */
-export async function setupServicing(opts: { water?: boolean } = {}) {
+type CashBase = Awaited<ReturnType<typeof setupCashiering>>;
+type WaterBase = Awaited<ReturnType<typeof setupCollections>>;
+
+export async function setupServicing(opts: { water: true }): Promise<WaterBase>;
+export async function setupServicing(opts?: { water?: false }): Promise<CashBase>;
+export async function setupServicing(opts: { water?: boolean } = {}): Promise<CashBase | WaterBase> {
   const callerNow = now();
   const base = opts.water ? await setupCollections() : await setupCashiering();
   setClock(() => callerNow);
@@ -42,10 +50,24 @@ export async function setupServicing(opts: { water?: boolean } = {}) {
   tellerDay = "";
   tellerId = "";
   seq = 0;
-  return { ...base, ...users };
+  // The golden A10.1 loan is ₱10,000.00 on ₱2,500.00 paid-up: lend up to 4× paid-up on REG (product configuration).
+  await getDb().update(loanProducts).set({ maxMultipleOfPaidUp: "4" }).where(eq(loanProducts.code, "REG"));
+  // A member paying more than the ₱2,500.00 minimum must stay within 10% of the coop's paid-up
+  // (holding cap): 14 other members with ₱2,500.00 each make room for A11.14's ₱3,700.00.
+  if (opts.water) for (let i = 0; i < 14; i++) await fillerShareholder();
+  return base;
 }
 
 export const people = () => users;
+
+/** Another member with 100 shares and ₱2,500.00 paid-up (always within the holding cap). */
+async function fillerShareholder(): Promise<void> {
+  const id = await member("Filler");
+  const s = await runAs(users.manager, () => subscribeAction({ memberId: id, shares: 100 }));
+  if (!s.ok) throw new Error(s.error);
+  const r = await receipt(id, [{ type: "SHARE_PAYMENT", amount: "2,500.00" }]);
+  if (!r.ok) throw new Error(r.error);
+}
 
 /** A teller with an open session today holding ₱100,000.00 (so loan proceeds can be paid out). */
 export async function tellerToday(): Promise<string> {

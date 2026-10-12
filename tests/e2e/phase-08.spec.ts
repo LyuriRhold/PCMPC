@@ -68,3 +68,82 @@ test("A8.10 subscribe → pay at the teller → ledger shows paid-up", async ({ 
   await expect(page.getByTestId("share-paid-up")).toHaveText("₱2,500.00");
   await expect(page.getByRole("row", { name: /Payment/ })).toContainText("₱2,500.00");
 });
+
+test("withdrawal: the manager approves on the Board's resolution, then the teller pays it out", async ({ page }) => {
+  test.setTimeout(180_000);
+  const run = Date.now().toString(36).toUpperCase();
+  const lc = run.toLowerCase();
+  const mgr = { user: `mgw8_${lc}`, pass: `E2e-Mgr-${run}` };
+  const teller = { user: `tlw8_${lc}`, pass: `E2e-Teller-${run}` };
+  const lastName = `Reyes${run}`;
+
+  await signIn(page, adminUser, adminPass);
+  await createUser(page, mgr.user, "MANAGER", mgr.pass);
+  await createUser(page, teller.user, "TELLER", teller.pass);
+  await signOut(page);
+
+  // Manager: an approved member with a 100-share subscription.
+  await signIn(page, mgr.user, mgr.pass);
+  await page.goto("/members/new");
+  await page.getByLabel("Last name").fill(lastName);
+  await page.getByLabel("First name").fill("Rosa");
+  await page.getByLabel("Birthdate").fill("1979-06-02");
+  await page.getByLabel("Sex").selectOption("FEMALE");
+  await page.getByLabel("Civil status").selectOption("MARRIED");
+  await page.getByLabel("Barangay").fill("Pipindan");
+  await page.getByLabel("Municipality").fill("Binangonan");
+  await page.getByLabel("Province").fill("Rizal");
+  await page.getByLabel(/I consent/).check();
+  await page.getByRole("button", { name: "Save application" }).click();
+  await expect(page.getByRole("heading", { name: new RegExp(lastName) })).toBeVisible();
+  await page.getByLabel("PMES date", { exact: true }).fill("2026-10-01");
+  await page.getByLabel("BOD resolution no.", { exact: true }).fill(`BOD-${run}`);
+  await page.getByRole("button", { name: "Approve membership" }).click();
+  await expect(page.getByText(/Approved as M-\d{6}/)).toBeVisible();
+  const memberUrl = page.url().split("?")[0]!;
+  await page.goto(`${memberUrl}?tab=share`);
+  await page.getByLabel("Shares to subscribe").fill("100");
+  await page.getByRole("button", { name: "Subscribe" }).click();
+  await expect(page.getByTestId("share-subscribed")).toHaveText("₱10,000.00");
+  await signOut(page);
+
+  // Teller: ₱2,500.00 paid on the subscription.
+  await signIn(page, teller.user, teller.pass);
+  await page.goto("/cashiering/teller");
+  await page.getByLabel("Opening cash").fill("0");
+  await page.getByRole("button", { name: "Open session" }).click();
+  await expect(page.getByText("Session open")).toBeVisible();
+  await page.getByLabel("Payor type").selectOption("MEMBER");
+  await page.getByLabel("Search payor").fill(lastName);
+  await page.getByRole("button", { name: "Search" }).click();
+  await page.getByRole("button", { name: new RegExp(lastName) }).click();
+  await page.locator("div", { hasText: /^Share capital · unpaid subscription/ }).getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByLabel(/Amount for Share capital/).fill("2500.00");
+  await page.getByLabel("BIR receipt no.").fill(`W8-${run}`);
+  await page.getByRole("button", { name: "Issue receipt" }).click();
+  await expect(page.getByRole("heading", { name: /Acknowledgement receipt AR-/ })).toBeVisible();
+  // Without the manager's approval there is nothing to pay out.
+  await page.goto(`${memberUrl}?tab=share`);
+  await expect(page.getByTestId("share-paid-up")).toHaveText("₱2,500.00");
+  await expect(page.getByRole("button", { name: "Pay out share capital" })).toHaveCount(0);
+  await signOut(page);
+
+  // Manager approves the withdrawal on the Board's termination resolution.
+  await signIn(page, mgr.user, mgr.pass);
+  await page.goto(`${memberUrl}?tab=share`);
+  await page.getByLabel("Reason (termination)").fill("Resignation");
+  await page.getByLabel("Board resolution no. (termination)").fill(`T-${run}`);
+  await page.getByRole("button", { name: "Approve withdrawal" }).click();
+  await expect(page.getByTestId("share-withdrawal-approved")).toContainText(`Board res. T-${run}`);
+  await expect(page.getByRole("button", { name: "Pay out share capital" })).toHaveCount(0);
+  await signOut(page);
+
+  // Teller pays it out from the drawer; the member's share capital is settled.
+  await signIn(page, teller.user, teller.pass);
+  await page.goto(`${memberUrl}?tab=share`);
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "Pay out share capital" }).click();
+  await expect(page.getByTestId("share-paid-up")).toHaveText("₱0.00");
+  await expect(page.getByTestId("share-subscribed")).toHaveText("₱0.00");
+  await expect(page.getByRole("row", { name: /Withdrawal/ })).toContainText(`T-${run}`);
+});

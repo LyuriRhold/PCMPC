@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 11
+**Current phase:** 12
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -19,7 +19,7 @@
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ✅ | phase-08-share-capital · tag `phase-08` | rldejoya (reviewer agent: two-person withdrawal + follow-ups fixed) · 2026-10-12 |
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ✅ | phase-09-savings · tag `phase-09` | rldejoya (reviewer agent: interest opening balance + follow-ups fixed) · 2026-10-12 |
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ✅ | phase-10-loan-applications · tag `phase-10` | rldejoya (reviewer agent: small-loan error + tiny-loan rows fixed; follow-ups) · 2026-10-12 |
-| 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | 🟡 awaiting review | phase-11-loan-servicing | |
+| 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ✅ | phase-11-loan-servicing · tag `phase-11` | rldejoya (reviewer agent: stuck pending release + historical aging fixed; follow-ups) · 2026-10-12 |
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ⬜ | | |
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ⬜ | | |
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ⬜ | | |

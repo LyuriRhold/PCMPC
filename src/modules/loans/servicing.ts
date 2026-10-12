@@ -644,6 +644,12 @@ registerTerminationRule({
   },
 });
 
+/** The loan released from an application, if any. */
+export async function loanForApplication(applicationId: string, db: Db | Tx = getDb()) {
+  const [l] = await db.select({ id: loans.id, loanNo: loans.loanNo }).from(loans).where(eq(loans.applicationId, applicationId));
+  return l ?? null;
+}
+
 /** Loans waiting for their release (approved applications) and their cash payout (Releases & collections page). */
 export async function releaseQueue(db: Db | Tx = getDb()) {
   const approved = await db

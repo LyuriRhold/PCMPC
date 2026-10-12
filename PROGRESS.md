@@ -161,7 +161,7 @@
 - [x] T11.4 Penalty engine + daily job + job_runs idempotency
 - [x] T11.5 Aging/PAR service + snapshot + delinquency list (with comakers and contact numbers)
 - [x] T11.6 Write-off, restructure, termination offset, eligibility hooks, `canTerminate`
-- [ ] T11.7 UI: release screen, loan ledger card, delinquency/aging reports, PAR tile
+- [x] T11.7 UI: release screen, loan ledger card, delinquency/aging reports, PAR tile
 - [x] T11.8 Teller registrations (`LOAN_PAYMENT`, `LOAN_PROCEEDS`) + cross-module receipt test
 - [x] Acceptance tests written first (tests/acceptance/phase-11.test.ts)
 - [ ] Exit checks passed

@@ -307,6 +307,16 @@ export async function applicationRegistry(filters: { status?: LoanApplicationSta
     .limit(200);
 }
 
+/** A member's loan applications, newest first. */
+export async function memberApplications(memberId: string, db: Db | Tx = getDb()) {
+  return db
+    .select({ application: loanApplications, productName: loanProducts.name })
+    .from(loanApplications)
+    .innerJoin(loanProducts, eq(loanProducts.id, loanApplications.productId))
+    .where(eq(loanApplications.memberId, memberId))
+    .orderBy(desc(loanApplications.createdAt));
+}
+
 /** A member found by member no., with what the application form needs to know. */
 export async function borrowerByNo(memberNo: string, db: Db | Tx = getDb()) {
   const [m] = await db.select().from(members).where(eq(members.memberNo, memberNo.trim().toUpperCase()));

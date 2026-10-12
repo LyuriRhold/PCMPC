@@ -9,6 +9,7 @@ import { businessToday, formatDate } from "@/lib/dates";
 import { ROLES } from "@/modules/auth/permissions";
 import { WATER_REPORT_VIEWERS } from "@/modules/water/ui/report-access";
 import { Tiles } from "@/modules/water/ui/tiles";
+import { LoanTiles } from "@/modules/loans/ui/loan-panels";
 
 async function DashboardContent() {
   const user = await getCurrentUser();
@@ -53,6 +54,13 @@ async function DashboardContent() {
           </CardContent>
         </Card>
       </div>
+
+      {user?.permissions.has("loans.read") ? (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold">Loans today</h2>
+          <LoanTiles />
+        </section>
+      ) : null}
 
       {seesWater ? (
         <section className="flex flex-col gap-2">

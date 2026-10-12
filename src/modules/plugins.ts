@@ -6,3 +6,4 @@ import "@/modules/water/service";
 import "@/modules/water/teller";
 import "@/modules/water/jobs";
 import "@/modules/share/teller";
+import "@/modules/savings/teller";

@@ -307,6 +307,9 @@ export async function cancelReceipt(tx: Tx, receiptId: string, reason: string, s
   }
 
   const items = await tx.select().from(receiptItems).where(eq(receiptItems.receiptId, receiptId)).orderBy(asc(receiptItems.lineNo));
+  // The reversal entry first, so modules can tie their correction rows to it; an item that refuses
+  // the cancellation throws and the whole transaction (reversal included) rolls back.
+  const rev = await reverseJournal(tx, r.jeId, today, `Receipt ${r.receiptNo} cancelled: ${reason.trim()}`, supervisorId);
   const ctx: ReceiptContext = {
     receiptId,
     receiptNo: r.receiptNo,
@@ -314,13 +317,13 @@ export async function cancelReceipt(tx: Tx, receiptId: string, reason: string, s
     payor: { type: r.payorType, id: r.payorId, name: r.payorName },
     actorId: supervisorId,
     sessionId: r.sessionId,
+    cancelJeId: rev.id,
   };
   for (const item of [...items].reverse()) {
     const def = receiptItem(item.type);
     if (!def) throw new Error(`receipt item type ${item.type} is no longer registered`);
     await def.reverse(tx, { id: item.id, type: item.type, refId: item.refId, amount: item.amount, breakdown: item.breakdown }, ctx);
   }
-  const rev = await reverseJournal(tx, r.jeId, today, `Receipt ${r.receiptNo} cancelled: ${reason.trim()}`, supervisorId);
   const [cancelled] = await tx
     .update(receipts)
     .set({ status: "CANCELLED", cancelJeId: rev.id, cancelReason: reason.trim(), cancelledBy: supervisorId, cancelledAt: now() })

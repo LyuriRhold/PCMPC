@@ -136,10 +136,10 @@
 
 ### Phase 09 — Savings & Time Deposits
 - [x] T9.1 Schema + migrations
-- [ ] T9.2 Deposit service (open, deposit, withdraw, close, reactivate, ledger)
-- [ ] T9.3 ADB + interest engine (pure functions + tests), interest run with preview and post
-- [ ] T9.4 Time deposits (place, mature, pre-terminate, rollover)
-- [ ] T9.5 Dormancy job + teller registrations (`SAVINGS_DEPOSIT`, `SAVINGS_WITHDRAWAL`)
+- [x] T9.2 Deposit service (open, deposit, withdraw, close, reactivate, ledger)
+- [x] T9.3 ADB + interest engine (pure functions + tests), interest run with preview and post
+- [x] T9.4 Time deposits (place, mature, pre-terminate, rollover)
+- [x] T9.5 Dormancy job + teller registrations (`SAVINGS_DEPOSIT`, `SAVINGS_WITHDRAWAL`)
 - [ ] T9.6 UI + actions + permissions + audit
 - [x] Acceptance tests written first (tests/acceptance/phase-09.test.ts)
 - [ ] Exit checks passed

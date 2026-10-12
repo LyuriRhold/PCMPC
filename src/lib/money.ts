@@ -134,6 +134,16 @@ export function allocate(total: Money, weights: readonly (bigint | number)[]): M
   return negative ? parts.map((p) => -p) : parts;
 }
 
+/**
+ * `amount × rate × numerator ÷ denominator`, computed exactly and rounded once to the centavo:
+ * e.g. interest = balance × rate × days ÷ 365 → `mulRateRatio(balance, "0.02", 90n, 365n)`.
+ */
+export function mulRateRatio(amount: Money, rate: string | Decimal, numerator: bigint, denominator: bigint, mode: RoundingMode = "HALF_UP"): Money {
+  if (numerator < 0n) throw new Error("numerator must not be negative");
+  const { num, scale } = parseRate(rate);
+  return divRound(amount * num * numerator, scale * denominator, mode);
+}
+
 /** `amount ÷ divisor` (a positive whole number), rounded to the centavo: `divide(1000n, 3n)` → `333n`. */
 export function divide(amount: Money, divisor: bigint, mode: RoundingMode = "HALF_UP"): Money {
   return divRound(amount, divisor, mode);

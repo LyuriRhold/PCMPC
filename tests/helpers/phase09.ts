@@ -1,6 +1,6 @@
 import { withTx } from "@/db/client";
 import { runAs } from "@/lib/auth-guard";
-import { businessToday, setClock } from "@/lib/dates";
+import { businessToday, now, setClock } from "@/lib/dates";
 import { issueReceiptAction } from "@/modules/cashiering/actions";
 import { ensureFiscalYear } from "@/modules/ledger/periods";
 import { approveMemberAction } from "@/modules/members/actions";
@@ -26,9 +26,14 @@ let tellerDay = "";
 let tellerId = "";
 let seq = 0;
 
-/** Reference data, FY 2026, a manager, a bookkeeper (interest runs) and a teller per business day. */
+/**
+ * Reference data, FY 2026, a manager, a bookkeeper (interest runs) and a teller per business day.
+ * Keeps the business date the caller set (setupCashiering moves the clock to its own fixture day).
+ */
 export async function setupSavings() {
+  const callerNow = now();
   const base = await setupCashiering();
+  setClock(() => callerNow);
   manager = base.manager.id;
   bookkeeper = (await makeUser("BOOKKEEPER", "bookkeeper9")).id;
   tellerDay = "";

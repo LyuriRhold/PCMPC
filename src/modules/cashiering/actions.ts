@@ -155,12 +155,12 @@ export async function searchPayorsAction(input: z.input<typeof payorSearchSchema
 }
 
 const duesSchema = z.object({ payor: payorSchema });
-export async function duesAction(input: z.input<typeof duesSchema>): Promise<ActionResult<Array<{ type: string; refId: string | null; description: string; amount: string; payable: boolean }>>> {
+export async function duesAction(input: z.input<typeof duesSchema>): Promise<ActionResult<Array<{ type: string; refId: string | null; description: string; amount: string; payable: boolean; openAmount?: true }>>> {
   await requirePermission("cash.session");
   try {
     const { payor } = duesSchema.parse(input);
     const dues = await duesFor(getDb(), payor);
-    return ok(dues.map((d) => ({ ...d, amount: String(d.amount) })));
+    return ok(dues.map(({ openAmount, ...d }) => ({ ...d, amount: String(d.amount), ...(openAmount ? { openAmount: true as const } : {}) })));
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

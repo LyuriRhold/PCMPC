@@ -104,7 +104,7 @@ export function ReceiptBuilder({
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<Match[]>([]);
   const [payor, setPayor] = useState<Match | null>(null);
-  const [dues, setDues] = useState<Array<{ type: string; refId: string | null; description: string; amount: string; payable: boolean }>>([]);
+  const [dues, setDues] = useState<Array<{ type: string; refId: string | null; description: string; amount: string; payable: boolean; openAmount?: true }>>([]);
   const [loadingDues, setLoadingDues] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [nextKey, setNextKey] = useState(1);
@@ -118,7 +118,10 @@ export function ReceiptBuilder({
   const freeText = payorTypes.find((p) => p.type === type)?.freeText ?? false;
   const total = cart.reduce((s, c) => s + (centavos(c.amount) ?? 0n), 0n);
   // A due already in the cart is not offered again (remove it from the cart to get it back).
-  const openDues = dues.filter((d) => !cart.some((c) => c.type === d.type && c.refId === d.refId));
+  const notInCart = dues.filter((d) => !cart.some((c) => c.type === d.type && c.refId === d.refId));
+  const openDues = notInCart.filter((d) => !d.openAmount);
+  // Things the payor can pay into without owing them (e.g. savings deposits): the teller enters the amount.
+  const deposits = notInCart.filter((d) => d.openAmount && d.payable);
 
   const add = (item: Omit<CartItem, "key">) => {
     setCart((c) => [...c, { ...item, key: nextKey }]);
@@ -257,6 +260,20 @@ export function ReceiptBuilder({
                   </Button>
                 ) : null}
               </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {deposits.length ? (
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-medium text-muted-foreground">Deposits (enter the amount in the cart)</p>
+          {deposits.map((d, i) => (
+            <div key={`${d.type}-${d.refId}-${i}`} className="flex items-center justify-between rounded border px-3 py-1.5 text-sm">
+              <span>{d.description}</span>
+              <Button type="button" size="sm" variant="outline" onClick={() => add({ type: d.type, refId: d.refId, label: d.description, description: null, amount: "" })}>
+                Add
+              </Button>
             </div>
           ))}
         </div>

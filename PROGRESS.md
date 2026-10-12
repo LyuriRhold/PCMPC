@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 09
+**Current phase:** 10
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -17,7 +17,7 @@
 | 06 | [Water: Meter Reading & Billing](docs/phases/PHASE-06-water-billing.md) | ✅ | phase-06-water-billing · tag `phase-06` | rldejoya (reviewer agent: memo cap + phone re-read fixed) · 2026-10-09 |
 | 07 | [Water: Collections, Penalties, Disconnection & Water Reports](docs/phases/PHASE-07-water-collections.md) | ✅ | phase-07-water-collections · tag `phase-07` | rldejoya (reviewer agent: reconnection-fee rules fixed) · 2026-10-09 |
 | 08 | [Share Capital & CBU](docs/phases/PHASE-08-share-capital.md) | ✅ | phase-08-share-capital · tag `phase-08` | rldejoya (reviewer agent: two-person withdrawal + follow-ups fixed) · 2026-10-12 |
-| 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ⬜ | | |
+| 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ✅ | phase-09-savings · tag `phase-09` | rldejoya (reviewer agent: interest opening balance + follow-ups fixed) · 2026-10-12 |
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ⬜ | | |
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ⬜ | | |
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ⬜ | | |
@@ -135,14 +135,14 @@
 - [x] Exit checks passed
 
 ### Phase 09 — Savings & Time Deposits
-- [ ] T9.1 Schema + migrations
-- [ ] T9.2 Deposit service (open, deposit, withdraw, close, reactivate, ledger)
-- [ ] T9.3 ADB + interest engine (pure functions + tests), interest run with preview and post
-- [ ] T9.4 Time deposits (place, mature, pre-terminate, rollover)
-- [ ] T9.5 Dormancy job + teller registrations (`SAVINGS_DEPOSIT`, `SAVINGS_WITHDRAWAL`)
-- [ ] T9.6 UI + actions + permissions + audit
-- [ ] Acceptance tests written first (tests/acceptance/phase-09.test.ts)
-- [ ] Exit checks passed
+- [x] T9.1 Schema + migrations
+- [x] T9.2 Deposit service (open, deposit, withdraw, close, reactivate, ledger)
+- [x] T9.3 ADB + interest engine (pure functions + tests), interest run with preview and post
+- [x] T9.4 Time deposits (place, mature, pre-terminate, rollover)
+- [x] T9.5 Dormancy job + teller registrations (`SAVINGS_DEPOSIT`, `SAVINGS_WITHDRAWAL`)
+- [x] T9.6 UI + actions + permissions + audit
+- [x] Acceptance tests written first (tests/acceptance/phase-09.test.ts)
+- [x] Exit checks passed
 
 ### Phase 10 — Loan Products, Amortization Engine & Applications
 - [ ] T10.1 Schema, migrations, product + deduction seed (DOMAIN sample products, flagged CONFIRM)
@@ -300,6 +300,16 @@
 - [ ] Q-08.4 (phase 08) Partial payments at the teller. | default used: the teller can change the amount of any item in the cart (e.g. ₱2,500.00 of a ₱10,000.00 unpaid subscription); the server re-checks each amount against the module's rules | answer:
 - [ ] Q-08.5 (phase 08) Average share month (ASM) rounding. | default used: each member's ASM for a year is rounded HALF-UP to the centavo (DOMAIN §3 doesn't list it); Phase 15 may compute interest on share capital from the unrounded sum if PCMPC prefers | answer:
 - [ ] Q-08.6 (phase 08) Good standing for associate members. | default used: the same minimum paid-up (₱2,500.00) and membership fee as regular members | answer:
+- [ ] Q-09.1 (phase 09) One regular savings account per member? | default used: yes, one Regular Savings account per member that isn't closed (spec CONFIRM) | answer:
+- [ ] Q-09.2 (phase 09) Time-deposit rates and terms. | default used: one Time Deposit product at 3% a year (the A9.8 rate), any term in days; the rate is fixed when the deposit is placed. Change it on Savings products | answer:
+- [ ] Q-09.3 (phase 09) How time deposits are funded and paid out. | default used: from the member's savings account and back to it (cash goes through savings deposits and withdrawals at the teller). GL: placement Dr Savings Deposits / Cr Time Deposits (DOMAIN §6 shows Dr Cash) | answer:
+- [ ] Q-09.4 (phase 09) Interest on an account closed during the quarter, and on dormant accounts. | default used: an account earns nothing for the quarter it is closed in; it can only be closed after the last finished quarter's interest was posted (so that interest is credited first); dormant accounts still earn | answer:
+- [ ] Q-09.5 (phase 09) Withholding tax on deposit interest. | default used: 0% (DOMAIN); if set, it is computed HALF-UP per account and credited to Withholding Tax Payable | answer:
+- [ ] Q-09.6 (phase 09) Who reactivates a dormant account, and who handles withdrawals. | default used: the manager reactivates (with a reason; the dormancy period restarts); a deposit at the teller reactivates automatically (spec). Tellers open accounts, take deposits, pay withdrawals and close accounts, with no approval or limit for large withdrawals | answer:
+- [ ] Q-09.7 (phase 09) Interest rate changes during a quarter. | default used: the run uses the product's rate at the time of the run for the whole quarter; interest is dated the quarter end, so the quarter's last month must still be open in the ledger (a closed month blocks the run until it is reopened); quarters must be run in order | answer:
+- [ ] Q-09.8 (phase 09) An account opened during a quarter. | default used: its average daily balance is over the whole quarter (spec: ADB = Σ daily balances ÷ days in the period), so ₱1,000.00 opened on Mar 20 averages ₱133.33 and earns nothing under the ₱500.00 minimum | answer:
+- [ ] Q-09.9 (phase 09) Deposits and withdrawals for INACTIVE, TERMINATED or DECEASED members. | default used: no member-status check (an INACTIVE member keeps using the account; a deceased member's account is paid out to the heirs at the counter with the usual documents) | answer:
+- [ ] Q-09.10 (phase 09) Time-deposit interest rounding. | default used: principal × rate × days ÷ 365, rounded HALF-UP to the centavo once per certificate (DOMAIN §3 doesn't list it; the A9.8/A9.9 golden values imply it) | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -331,6 +341,9 @@
 - Editable role → permission matrix in the UI (v1: read-only grid, changed via seed)
 - Photo / signature capture (Vercel Blob); meter photo on reading
 - Smart/IoT meters
+- Printable passbook layout for the passbook printer (PHASE-09 Out)
+- Approval or limits for large savings withdrawals (Q-09.6)
+- Corrections for savings postings (a wrong interest run, a manual adjustment); today a GL reversal of a savings entry from the Journal screen would leave the passbook unchanged, so savings entries should be reversed only through the savings module
 
 ## Phase summaries
 <!-- Claude appends "### Phase XX summary" here at the end of each phase:
@@ -931,3 +944,116 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - The Vitest worker-count change stays on this branch (it was needed to get the gate green).
   - The fourth copy of the Excel `pesos()` helper and fractional-share transfers are left as they are.
 - **After the fixes:** `npm run gate` green (430 tests, 35 files; 2 DB workers at 2.2 GB free memory, 260 s), `npm run build` green, `npm run e2e -- phase-08` green (A8.10 and the new withdrawal flow: the manager approves, the teller pays out, the balances settle to ₱0.00).
+
+### Phase 09 summary
+**Built**
+- **Schema (T9.1):**
+  - `deposit_products`: the configuration, seeded with Regular Savings "SAV" from the DOMAIN §2 savings defaults and Time Deposit "TD" at 3%, CONFIRM.
+  - `deposit_accounts` (SA-/TD- numbers): OPEN / DORMANT / CLOSED.
+  - `deposit_transactions`, the passbook: signed amounts with `balance_after`; immutable (trigger).
+  - `time_deposits`: certificates; after placement only the closing fields change, once (trigger).
+  - A unit test checks the GL mappings.
+- **Deposit service (T9.2):**
+  - Open: ACTIVE members only, "Member must be ACTIVE"; one Regular Savings account per member.
+  - Deposits: teller receipt item `SAVINGS_DEPOSIT`. A deposit to a dormant account reopens it. Cancelling the receipt adds an ADJUSTMENT on the reversal entry, refused if the money was already withdrawn.
+  - Withdrawals: teller cash-out `SAVINGS_WITHDRAWAL`, never below the maintaining balance, and not from a dormant account.
+  - Close: pays out the whole balance. Refused while a time deposit pays back into the account.
+  - Reactivate: manager, with a reason.
+  - Passbook with a date range.
+  - Termination rule: "all deposit accounts must be closed (zero balance) first (…)".
+- **Interest (T9.3):**
+  - Pure engine (`savings/interest.ts`): Σ daily closing balances, ADB, and interest = Σ × rate ÷ 365, rounded HALF-UP once per account (new exact `mulRateRatio()` in `money.ts`). Zero below the minimum ADB.
+  - Quarterly run `savings-interest:{product}:{periodEnd}` (runOnce): preview, then post.
+  - One GJ entry dated the quarter end: Dr Interest Expense / Cr Savings Deposits per member (net) / Cr Withholding Tax Payable. INTEREST and WTAX passbook rows.
+  - Only after the quarter ends, and only on quarter ends.
+- **Time deposits (T9.4):**
+  - Place: from the member's savings account, keeping its maintaining balance (GJ Dr Savings Deposits / Cr Time Deposits).
+  - Mature: from the maturity date; principal × rate × term ÷ 365, to savings.
+  - Pre-terminate: before maturity, at the regular savings rate for the days held.
+  - Roll over: a new certificate on the same TD account, with or without the interest.
+- **Dormancy job and teller (T9.5):**
+  - Daily job `savings-dormancy`: OPEN accounts with no deposit or withdrawal for the product's months (counted from the opening if there was none) become DORMANT. The job is idempotent per date.
+  - Teller: the member's savings accounts appear as **open-amount** deposits (a new `openAmount` option on cashiering dues; the teller types the amount in the cart).
+- **Screens (T9.6):**
+  - Member profile **Savings** tab (`savings.read`): balance, passbook, withdraw / close / reactivate, time deposits (place, mature, pre-terminate, roll over).
+  - **Savings accounts**: totals, search, dormant filter.
+  - **Time deposits**: by maturity, flagging the ones due.
+  - **Interest runs** (`savings.run_interest`): preview by product and quarter, then post once; list of posted runs.
+  - **Savings products** (admin edits, others view). The savings settings on Coop settings are now read-only and link there.
+
+**Decisions** (see Questions Q-09.1–Q-09.7)
+- One Regular Savings account per member.
+- TD at 3% with any term in days; the rate is fixed at placement.
+- TDs are funded from and paid back to savings.
+- Closed accounts earn no interest for the quarter; dormant accounts earn.
+- Withholding tax 0% (HALF-UP per account when set).
+- The manager reactivates dormant accounts; tellers handle accounts and cash.
+- The interest run uses the product's current rate for the whole quarter.
+
+**Deviations from spec (with reason)**
+- **TD placement posts Dr Savings Deposits instead of Dr Cash (DOMAIN §6).** Time deposits move money to and from the member's savings account, so every peso still passes through the teller once (PLAN rule 9) without a third teller registration. Q-09.3.
+- **Extra columns:**
+  - `deposit_transactions.receipt_item_id`, `seq` and `remarks`;
+  - `time_deposits.savings_account_id`, `rolled_from_id`, `closed_at` and `close_je_id`;
+  - `deposit_products.active` and the three GL keys.
+
+  They tie rows to their source and keep the passbook in order.
+- **Cashiering changes:**
+  - Receipt cancellation now posts the reversal entry *before* running the items' `reverse` hooks (same transaction), and gives them `ctx.cancelJeId`, so corrections tie to the reversal.
+  - Dues can be `openAmount`; the teller desk lists them under "Deposits".
+- **E2E:** the UI-shell and nav examples of a "coming soon" screen moved to Phase 10 (`/loans/applications`).
+
+**Follow-ups**
+- Answer Q-09.1–Q-09.7, and the TD rate table if PCMPC has rates per term.
+- A printable passbook layout (out of scope; Backlog).
+- Large-withdrawal approval or limits, if PCMPC wants them (Q-09.6).
+
+**Exit checks / counts:**
+- `npm run gate` is green: 470 tests (39 files), scan clean. Phase 09 adds:
+  - 10 acceptance tests (A9.1–A9.10);
+  - 16 integration tests;
+  - 14 unit tests (interest engine including `mulRateRatio`, and mappings).
+- `npm run build` is green (`/savings`, `/savings/interest`, `/savings/products`, `/savings/time-deposits`).
+- `npm run e2e -- phase-09` is green: A9.11, and the products / interest-run smoke test.
+- The full E2E against a production build is green: 17 of 17 (phases 00–09).
+- Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (8 seed steps, including the deposit products); the sample trial balance balances.
+
+**Review follow-ups (reviewer agent, 2026-10-12)**
+- **Fixed (must-fix): the opening balance of an interest quarter.**
+  - It is now the sum of everything dated before the quarter.
+  - Before, it was the stored balance of the last earlier-dated row. Interest dated Mar 31 but posted on Apr 1, after an Apr 1 deposit, made the next quarter count that deposit twice.
+  - The passbook (and its date-range view) is now shown in date order with the running balance computed from the amounts.
+  - A re-preview of a quarter after its run leaves out that quarter's own interest.
+  - Tested: Q2 ADB ₱15,049.32 after an Apr 1 deposit and a late Q1 run; the re-preview equals the posted ₱4,931.51.
+- **Fixed:**
+  - Quarters must be run in order.
+  - An account can be closed only after the last finished quarter's interest is posted (Q-09.4 rewritten to say what the code does).
+- **Lock order fixed:**
+  - Receipt cancellation runs the items' checks (and their sub-ledger locks) *before* the reversal entry again, the same order as issuing.
+  - A new optional `reversed` hook writes the savings ADJUSTMENT on the reversal entry (`ctx.cancelJeId`) afterwards.
+  - Withdrawals and closures lock the teller session before the account.
+- **Permissions:** withdrawals and closures need `savings.post` as well as `cash.session`.
+- **Smaller fixes:**
+  - The rate field accepts tiny rates without "1e-7".
+  - The dormancy job moved to `savings/jobs.ts`.
+  - New index on `time_deposits.savings_account_id` (migration 0023).
+  - The rollover `je_id` comment and the products-page wording were corrected.
+- **New tests:**
+  - mid-quarter opening (Q-09.8);
+  - dormancy from the opening date, leaving closed accounts alone;
+  - time deposit with 20% withholding tax (net ₱591.78 to savings, Withholding Tax Payable credited);
+  - the pre-termination GL;
+  - `lastQuarterEnd`.
+- **Logged as Questions:** Q-09.8 (ADB for mid-quarter openings), Q-09.9 (member status for deposits and withdrawals), Q-09.10 (TD interest rounding). Q-09.7 now notes that interest needs the quarter's last month open.
+- **Backlog:** a correction path for savings postings (a JV reversal from the Journal screen would not update the passbook).
+- **Not changed (noted):**
+  - Reactivation keeps `members.approve` (the manager, as for share transfers and withdrawal approvals).
+  - The "one Regular Savings account" rule is enforced under the member row lock, not by an index.
+  - `interest_basis` and `crediting` describe the only method the engine has.
+  - TD accounts show their certificates, not a separate passbook.
+  - Pre-termination uses the Regular Savings product's rate (the only `td.pretermination_rate` choice).
+  - The deviation "TD funded from savings (Dr Savings Deposits)" needs PCMPC's sign-off (Q-09.3).
+- **After the fixes:**
+  - `npm run gate` green: 478 tests, 39 files. Only 1.5 GB of memory was free, so it ran on 1 DB worker (572 s).
+  - `npm run build` green.
+  - `npm run e2e -- phase-09` green: 2 tests.

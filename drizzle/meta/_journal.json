@@ -148,6 +148,27 @@
       "when": 1791763914246,
       "tag": "0020_share_withdrawals",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791773773961,
+      "tag": "0021_savings",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791773790550,
+      "tag": "0022_savings_immutable",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791780377185,
+      "tag": "0023_td_savings_index",
+      "breakpoints": true
     }
   ]
 }

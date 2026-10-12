@@ -12,8 +12,11 @@ import type { LineInput } from "@/modules/ledger/service";
 
 export type Payor = { type: string; id: string | null; name: string };
 
-/** Something the payor owes now, shown in the teller's cart (e.g. an unpaid water bill). */
-export type Due = { type: string; refId: string | null; description: string; amount: Money; payable: boolean };
+/**
+ * Something the payor owes now, shown in the teller's cart (e.g. an unpaid water bill). With
+ * `openAmount`, nothing is owed: the teller enters the amount (e.g. a savings deposit; `amount` is 0).
+ */
+export type Due = { type: string; refId: string | null; description: string; amount: Money; payable: boolean; openAmount?: boolean };
 
 export type ItemInput = { type: string; refId: string | null; amount: Money; description: string | null };
 
@@ -24,6 +27,8 @@ export type ReceiptContext = {
   payor: Payor;
   actorId: string;
   sessionId: string;
+  /** Set while a receipt is being cancelled, for `reversed` hooks: the reversal entry. */
+  cancelJeId?: string;
 };
 
 export type ApplyResult = {
@@ -57,6 +62,11 @@ export type ReceiptItemDef = {
   reverse: (tx: Tx, item: StoredItem, ctx: ReceiptContext) => Promise<void>;
   /** Optional: runs after the receipt and its item rows exist (e.g. to write rows that reference the item). */
   recorded?: (tx: Tx, item: StoredItem, ctx: ReceiptContext) => Promise<void>;
+  /**
+   * Optional: runs during a cancellation after the reversal entry exists (`ctx.cancelJeId`), e.g. to
+   * write correction rows that reference it. `reverse` (the checks, and any locks) runs before it.
+   */
+  reversed?: (tx: Tx, item: StoredItem, ctx: ReceiptContext) => Promise<void>;
 };
 
 export type CashOutDef = {

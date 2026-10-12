@@ -1,0 +1,1 @@
+CREATE INDEX "time_deposits_savings_account_idx" ON "time_deposits" USING btree ("savings_account_id");

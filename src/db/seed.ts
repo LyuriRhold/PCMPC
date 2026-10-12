@@ -3,6 +3,7 @@ import { seedAdmin, seedRoles } from "@/modules/auth/service";
 import { seedCoa } from "@/modules/ledger/coa";
 import { seedCurrentFiscalYear } from "@/modules/ledger/periods";
 import { seedWater } from "@/modules/water/seed";
+import { seedDepositProducts } from "@/modules/savings/seed";
 import { seedNumberSeries } from "@/modules/numbering/series";
 import { seedSettings } from "@/modules/settings/service";
 
@@ -22,6 +23,7 @@ export const SEED_STEPS: SeedStep[] = [
   { name: "chart of accounts + account mappings (DOMAIN §6)", run: seedCoa },
   { name: "fiscal year and periods", run: seedCurrentFiscalYear },
   { name: "water zones/routes, sample tariff versions and fees (CONFIRM)", run: seedWater },
+  { name: "deposit products: Regular Savings, Time Deposit (CONFIRM)", run: seedDepositProducts },
 ];
 
 /** The first admin, from SEED_ADMIN_USERNAME / SEED_ADMIN_PASSWORD. */

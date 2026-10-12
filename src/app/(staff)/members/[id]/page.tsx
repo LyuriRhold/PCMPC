@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { allowedStatusTargets, getMemberProfile } from "@/modules/members/service";
 import { ApprovePanel, BeneficiariesEditor, StatusChangeForm } from "@/modules/members/ui/profile-panels";
 import { MemberStatusBadge } from "@/modules/members/ui/status-badge";
+import { SavingsPanel } from "@/modules/savings/ui/savings-panel";
 import { SharePanel } from "@/modules/share/ui/share-panel";
 
 export const metadata: Metadata = { title: "Member · PCMPC MIS" };
@@ -21,6 +22,7 @@ export const metadata: Metadata = { title: "Member · PCMPC MIS" };
 const TABS = [
   { id: "profile", label: "Profile" },
   { id: "share", label: "Share capital" },
+  { id: "savings", label: "Savings" },
   { id: "beneficiaries", label: "Beneficiaries" },
   { id: "history", label: "Status history" },
 ] as const;
@@ -42,7 +44,7 @@ async function MemberContent(props: PageProps<"/members/[id]">) {
   const { id } = await props.params;
   if (!z.uuid().safeParse(id).success) notFound();
   const sp = await props.searchParams;
-  const tabs = TABS.filter((t) => t.id !== "share" || can(access.user, "share.read"));
+  const tabs = TABS.filter((t) => (t.id !== "share" || can(access.user, "share.read")) && (t.id !== "savings" || can(access.user, "savings.read")));
   const tab = tabs.find((t) => t.id === sp.tab)?.id ?? "profile";
   const approvedNo = typeof sp.approved === "string" && /^M-\d+$/.test(sp.approved) ? sp.approved : null;
 
@@ -148,6 +150,10 @@ async function MemberContent(props: PageProps<"/members/[id]">) {
           to={typeof sp.to === "string" ? sp.to : null}
           can={{ subscribe: canWrite, approve: canApprove, payOut: can(access.user, "cash.session") }}
         />
+      ) : null}
+
+      {tab === "savings" ? (
+        <SavingsPanel memberId={m.id} memberStatus={m.status} can={{ post: can(access.user, "savings.post"), cash: can(access.user, "cash.session") && can(access.user, "savings.post"), approve: canApprove }} />
       ) : null}
 
       {tab === "beneficiaries" ? (

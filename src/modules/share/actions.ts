@@ -10,7 +10,7 @@ import { parse as parseMoney } from "@/lib/money";
 import { CashieringError } from "@/modules/cashiering/builtins";
 import { LedgerError } from "@/modules/ledger/service";
 import { members } from "@/modules/members/schema";
-import { ShareError, subscribe, transfer, withdraw } from "./service";
+import { approveWithdrawal, cancelWithdrawal, ShareError, subscribe, transfer, withdraw } from "./service";
 
 const EXPECTED = [ShareError, LedgerError, CashieringError];
 
@@ -47,8 +47,33 @@ export async function transferAction(input: z.input<typeof transferSchema>): Pro
   }
 }
 
-const withdrawSchema = z.object({ memberId: z.uuid(), reason: z.string().trim().max(300) });
-/** Pays out a terminating member's share capital at the teller (cash-out from the open session). */
+const approveWithdrawalSchema = z.object({ memberId: z.uuid(), reason: z.string().trim().max(300), bodRef: z.string().trim().max(100) });
+/** Step 1 (manager): approves paying out a terminating member's share capital, on the Board's resolution. */
+export async function approveWithdrawalAction(input: z.input<typeof approveWithdrawalSchema>): Promise<ActionResult<{ id: string }>> {
+  const actor = await requirePermission("members.approve");
+  try {
+    const data = approveWithdrawalSchema.parse(input);
+    return ok(await withTx((tx) => approveWithdrawal(tx, data, actor.id)));
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const cancelWithdrawalSchema = z.object({ memberId: z.uuid(), reason: z.string().trim().max(300) });
+/** Cancels an approved withdrawal that wasn't paid out (manager). */
+export async function cancelWithdrawalAction(input: z.input<typeof cancelWithdrawalSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("members.approve");
+  try {
+    const data = cancelWithdrawalSchema.parse(input);
+    await withTx((tx) => cancelWithdrawal(tx, data, actor.id));
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const withdrawSchema = z.object({ memberId: z.uuid() });
+/** Step 2 (teller, not the approver): pays out the approved withdrawal from the open session's drawer. */
 export async function withdrawSharesAction(input: z.input<typeof withdrawSchema>): Promise<ActionResult<{ jeId: string; cash: string }>> {
   const actor = await requirePermission("cash.session");
   try {

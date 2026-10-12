@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import "@/modules/plugins";
-import { getDb, withTx } from "@/db/client";
-import { runAs } from "@/lib/auth-guard";
+import { getDb, getPool, withTx } from "@/db/client";
+import { ForbiddenError, runAs } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
 import { cancelReceiptAction } from "@/modules/cashiering/actions";
 import { cashOuts } from "@/modules/cashiering/schema";
@@ -10,9 +10,14 @@ import { journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal } from "@/modules/ledger/service";
 import { changeMemberStatusAction } from "@/modules/members/actions";
 import { updateSetting } from "@/modules/settings/service";
-import { subscribeAction, transferAction, withdrawSharesAction } from "@/modules/share/actions";
-import { averageShareMonth, cbuLines, membershipFeePaid, memberShareLedger, retainCbu, shareBalance } from "@/modules/share/service";
+import { approveWithdrawalAction, cancelWithdrawalAction, subscribeAction, transferAction, withdrawSharesAction } from "@/modules/share/actions";
+import { shareWithdrawals } from "@/modules/share/schema";
+import { averageShareMonth, cbuLines, membershipFeePaid, memberShareLedger, memberSubscriptions, retainCbu, shareBalance, withdraw } from "@/modules/share/service";
+import { waterCustomers } from "@/modules/water/schema";
+import { makeUser } from "../helpers/phase01";
 import { P } from "../helpers/phase03";
+import { openSessionAs } from "../helpers/phase04";
+import { createCustomerAs, nonMember } from "../helpers/phase05";
 import { at, member, pay, receipt, setupShares, subscribe, tellerToday } from "../helpers/phase08";
 
 let manager = "";
@@ -113,7 +118,7 @@ describe("T8.2 transfers", () => {
 });
 
 describe("T8.2 withdrawal and termination", () => {
-  it("a member with share capital can't be terminated; after the teller pays it out (unpaid subscription cancelled) they can", async () => {
+  it("a member with share capital can't be terminated; after the manager approves and a teller pays it out (unpaid subscription cancelled) they can", async () => {
     const m = await member();
     await subscribe(m, 100);
     expect((await pay(m, "2,500.00")).ok).toBe(true);
@@ -125,7 +130,10 @@ describe("T8.2 withdrawal and termination", () => {
     const other = await member("Other");
     await subscribe(other, 100);
     expect((await pay(other, "2,500.00")).ok).toBe(true);
-    const w = await runAs(teller, () => withdrawSharesAction({ memberId: m, reason: "Resignation (Board res. 2026-30)" }));
+    // Not without the manager's approval on the Board's termination resolution.
+    expect(await runAs(teller, () => withdrawSharesAction({ memberId: m }))).toMatchObject({ ok: false, error: expect.stringMatching(/must first be approved by the manager/) });
+    expect((await runAs(manager, () => approveWithdrawalAction({ memberId: m, reason: "Resignation", bodRef: "2026-30" }))).ok).toBe(true);
+    const w = await runAs(teller, () => withdrawSharesAction({ memberId: m }));
     if (!w.ok) throw new Error(w.error);
     expect(w.data.cash).toBe(String(P(2500)));
     expect(await shareBalance(m)).toEqual({ subscribed: 0n, paidUp: 0n, unpaid: 0n });
@@ -134,18 +142,42 @@ describe("T8.2 withdrawal and termination", () => {
     const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, w.data.jeId));
     expect(lines.reduce((s, l) => s + l.debit, 0n)).toBe(P(10000));
     expect((await memberShareLedger(m)).rows.map((r) => r.type)).toEqual(["SUBSCRIBE", "PAYMENT", "ADJUSTMENT", "WITHDRAWAL"]);
+    expect((await memberSubscriptions(m)).map((s) => s.status)).toEqual(["CANCELLED"]);
+    const [approval] = await getDb().select().from(shareWithdrawals).where(eq(shareWithdrawals.memberId, m));
+    expect(approval).toMatchObject({ status: "PAID", paidBy: teller, jeId: w.data.jeId });
+    const clerk = await makeUser("BILLING_CLERK", "clerk8");
+    const water = await createCustomerAs(clerk.id, nonMember({ type: "MEMBER", memberId: m }));
     expect((await runAs(manager, () => changeMemberStatusAction({ memberId: m, to: "TERMINATED", reason: "Resigned", ref: "Letter" }))).ok).toBe(true);
+    // A terminated member's water customer continues as NON_MEMBER (Phase 05 rule).
+    const [customer] = await getDb().select().from(waterCustomers).where(eq(waterCustomers.id, water.id));
+    expect(customer?.type).toBe("NON_MEMBER");
+  });
+
+  it("only the manager approves and only a teller pays out, never the same person; an approval can be cancelled", async () => {
+    const m = await member();
+    await subscribe(m, 100);
+    expect((await pay(m, "2,500.00")).ok).toBe(true);
+    const teller = await tellerToday();
+    await expect(runAs(teller, () => approveWithdrawalAction({ memberId: m, reason: "Resignation", bodRef: "2026-30" }))).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(runAs(manager, () => withdrawSharesAction({ memberId: m }))).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await runAs(manager, () => approveWithdrawalAction({ memberId: m, reason: "Resignation", bodRef: "" }))).toMatchObject({ ok: false, error: expect.stringMatching(/Board resolution/) });
+    expect((await runAs(manager, () => approveWithdrawalAction({ memberId: m, reason: "Resignation", bodRef: "2026-30" }))).ok).toBe(true);
+    expect(await runAs(manager, () => approveWithdrawalAction({ memberId: m, reason: "Resignation", bodRef: "2026-30" }))).toMatchObject({ ok: false, error: expect.stringMatching(/already approved/) });
+    // No role holds both permissions; the service still refuses the approver as the payer.
+    await expect(withTx((tx) => withdraw(tx, { memberId: m }, manager))).rejects.toThrow(/Segregation of duties/);
+    expect((await runAs(manager, () => cancelWithdrawalAction({ memberId: m, reason: "The member stays" }))).ok).toBe(true);
+    expect(await runAs(teller, () => withdrawSharesAction({ memberId: m }))).toMatchObject({ ok: false, error: expect.stringMatching(/must first be approved/) });
+    expect((await shareBalance(m)).paidUp).toBe(P(2500));
   });
 
   it("the drawer must hold the payout", async () => {
     const m = await member();
     await subscribe(m, 100);
     expect((await pay(m, "2,500.00")).ok).toBe(true);
-    const teller2 = (await import("../helpers/phase01")).makeUser;
-    const t = await teller2("TELLER", "emptydrawer");
-    const { openSessionAs } = await import("../helpers/phase04");
+    const t = await makeUser("TELLER", "emptydrawer");
     await openSessionAs(t.id, "0");
-    expect(await runAs(t.id, () => withdrawSharesAction({ memberId: m, reason: "Resignation" }))).toMatchObject({ ok: false, error: expect.stringMatching(/Not enough cash in the drawer/) });
+    expect((await runAs(manager, () => approveWithdrawalAction({ memberId: m, reason: "Resignation", bodRef: "2026-30" }))).ok).toBe(true);
+    expect(await runAs(t.id, () => withdrawSharesAction({ memberId: m }))).toMatchObject({ ok: false, error: expect.stringMatching(/Not enough cash in the drawer/) });
   });
 });
 
@@ -161,5 +193,75 @@ describe("T8.2 CBU retention (for Phase 11)", () => {
     await withTx((tx) => retainCbu(tx, m, P(120), { jeId: je.id, ref: "LN-TEST" }, manager));
     // Unpaid was ₱50: one more share (₱100) is subscribed, then ₱120 is credited.
     expect(await shareBalance(m)).toEqual({ subscribed: P(10100), paidUp: P(10070), unpaid: P(30) });
+  });
+});
+
+describe("review follow-ups", () => {
+  it("auto-subscribe counts shares already subscribed by an earlier item of the same receipt", async () => {
+    await withTx((tx) => updateSetting(tx, "share.auto_subscribe_excess", true, manager));
+    await liftCap();
+    const m = await member();
+    await subscribe(m, 100);
+    expect((await pay(m, "9,000.00")).ok).toBe(true);
+    // Unpaid ₱1,000.00: ₱1,500.00 subscribes 5 more shares, then ₱100.00 needs exactly 1 more.
+    const r = await receipt(m, [
+      { type: "SHARE_PAYMENT", amount: "1,500.00" },
+      { type: "SHARE_PAYMENT", amount: "100.00" },
+    ]);
+    if (!r.ok) throw new Error(r.error);
+    expect(await shareBalance(m)).toEqual({ subscribed: P(10600), paidUp: P(10600), unpaid: 0n });
+  });
+
+  it("a payment can't be cancelled once capital was transferred out after it, even if the paid-up still covers it", async () => {
+    const a = await member("Alpha");
+    const b = await member("Bravo");
+    await subscribe(a, 100);
+    await subscribe(b, 100);
+    const r1 = await pay(a, "2,000.00");
+    if (!r1.ok) throw new Error(r1.error);
+    expect((await runAs(manager, () => transferAction({ fromMemberId: a, toMemberId: b, amount: "500.00", bodRef: "BOD 2" }))).ok).toBe(true);
+    expect((await pay(a, "500.00")).ok).toBe(true);
+    expect((await shareBalance(a)).paidUp).toBe(P(2000));
+    expect(await runAs(manager, () => cancelReceiptAction({ receiptId: r1.data.id, reason: "Oops" }))).toMatchObject({ ok: false, error: expect.stringMatching(/transferred or withdrawn afterwards/) });
+  });
+
+  it("no membership fee from a terminated member", async () => {
+    const m = await member();
+    expect((await runAs(manager, () => changeMemberStatusAction({ memberId: m, to: "TERMINATED", reason: "Resigned", ref: "Letter" }))).ok).toBe(true);
+    expect(await receipt(m, [{ type: "MEMBERSHIP_FEE", amount: "500.00" }])).toMatchObject({ ok: false, error: expect.stringMatching(/TERMINATED; no membership fee/) });
+  });
+
+  it("subscriptions need members.write; transfers need members.approve", async () => {
+    const a = await member("Alpha");
+    const b = await member("Bravo");
+    const teller = await tellerToday();
+    const officer = (await makeUser("LOAN_OFFICER", "officer8")).id;
+    await expect(runAs(teller, () => subscribeAction({ memberId: a, shares: 100 }))).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(runAs(teller, () => transferAction({ fromMemberId: a, toMemberId: b, amount: "1.00", bodRef: "X" }))).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(runAs(officer, () => transferAction({ fromMemberId: a, toMemberId: b, amount: "1.00", bodRef: "X" }))).rejects.toBeInstanceOf(ForbiddenError);
+    expect((await runAs(officer, () => subscribeAction({ memberId: a, shares: 100 }))).ok).toBe(true);
+  });
+
+  it("share rows and fees can't be changed or deleted; a subscription can only change status", async () => {
+    const m = await member();
+    await subscribe(m, 100);
+    expect((await receipt(m, [{ type: "MEMBERSHIP_FEE", amount: "500.00" }])).ok).toBe(true);
+    const pool = getPool();
+    await expect(pool.query("UPDATE share_transactions SET amount = 1 WHERE member_id = $1", [m])).rejects.toThrow(/immutable/);
+    await expect(pool.query("DELETE FROM share_transactions WHERE member_id = $1", [m])).rejects.toThrow(/immutable/);
+    await expect(pool.query("UPDATE member_fees SET amount = 1 WHERE member_id = $1", [m])).rejects.toThrow(/immutable/);
+    await expect(pool.query("DELETE FROM member_fees WHERE member_id = $1", [m])).rejects.toThrow(/immutable/);
+    await expect(pool.query("UPDATE share_subscriptions SET shares = 1, amount = par_value WHERE member_id = $1", [m])).rejects.toThrow(/only the status can change/);
+    await expect(pool.query("DELETE FROM share_subscriptions WHERE member_id = $1", [m])).rejects.toThrow(/can't be deleted/);
+    await pool.query("UPDATE share_subscriptions SET status = 'CANCELLED' WHERE member_id = $1", [m]);
+  });
+
+  it("CBU retention is recorded only against an entry that credits the member's share capital with that amount", async () => {
+    const m = await member();
+    await subscribe(m, 100);
+    const [cash, fee] = await Promise.all([accountIdFor("cash_on_hand"), accountIdFor("membership_fee_income")]);
+    const je = await withTx((tx) => postJournal(tx, { date: "2026-10-07", book: "GJ", particulars: "Not a CBU entry", lines: [{ accountId: cash, debit: P(120) }, { accountId: fee, credit: P(120) }] }, manager));
+    await expect(withTx((tx) => retainCbu(tx, m, P(120), { jeId: je.id, ref: "LN-X" }, manager))).rejects.toThrow(/doesn't credit this member's share capital/);
+    expect((await shareBalance(m)).paidUp).toBe(0n);
   });
 });

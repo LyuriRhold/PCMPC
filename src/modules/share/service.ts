@@ -7,12 +7,13 @@ import { divide, format, type Money } from "@/lib/money";
 import { normalizeName } from "@/lib/names";
 import { receiptItems, receipts } from "@/modules/cashiering/schema";
 import { payOut } from "@/modules/cashiering/service";
-import { journalEntries } from "@/modules/ledger/schema";
+import { journalEntries, journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal, type LineInput } from "@/modules/ledger/service";
 import { members } from "@/modules/members/schema";
 import { registerTerminationRule } from "@/modules/members/termination";
 import { getSetting } from "@/modules/settings/service";
-import { memberFees, memberShareBalance, shareSubscriptions, shareTransactions, type ShareTxnType } from "./schema";
+import { users } from "@/modules/auth/schema";
+import { memberFees, memberShareBalance, shareSubscriptions, shareTransactions, shareWithdrawals, type ShareTxnType, type ShareWithdrawal } from "./schema";
 
 /**
  * Share capital (PHASE-08 T8.2/T8.3). Every money movement posts its journal entry in the same
@@ -144,26 +145,57 @@ async function assertHoldingCap(tx: Tx, m: MemberRow, currentPaidUp: Money, incr
 
 export type PaymentPlan = { memberId: string; amount: Money; autoSubscribe: { shares: number; amount: Money } | null };
 
+/** Earlier share items of the same receipt for this member: amounts paid and shares auto-subscribed. */
+export type PendingPayments = { paid: Money; subscribed: Money };
+
+/** The whole shares to subscribe so that `amount` fits in the unpaid subscription (null if it fits). */
+async function autoSubscription(tx: Tx, amount: Money, unpaid: Money): Promise<PaymentPlan["autoSubscribe"]> {
+  if (amount <= unpaid) return null;
+  const par = BigInt(await getSetting("share.par_value", tx));
+  const shares = Number((amount - unpaid + par - 1n) / par);
+  return { shares, amount: par * BigInt(shares) };
+}
+
 /**
  * Checks a share payment and returns its plan: it can't exceed the unpaid subscription, unless
  * share.auto_subscribe_excess, in which case enough whole shares are subscribed for the excess.
- * `pending` = amounts already planned in the same receipt.
  */
-export async function planPayment(tx: Tx, memberId: string, amount: Money, pending: Money = 0n): Promise<PaymentPlan> {
+export async function planPayment(tx: Tx, memberId: string, amount: Money, pending: PendingPayments = { paid: 0n, subscribed: 0n }): Promise<PaymentPlan> {
   const m = await lockMember(tx, memberId);
   assertMember(m, "pay for shares");
   if (amount <= 0n) throw new ShareError("The amount must be more than zero");
   const balance = await shareBalance(m.id, tx);
-  const unpaid = balance.unpaid - pending;
-  let autoSubscribe: PaymentPlan["autoSubscribe"] = null;
-  if (amount > unpaid) {
-    if (!(await getSetting("share.auto_subscribe_excess", tx))) throw new ShareError(`Payment exceeds unpaid subscription (${format(unpaid < 0n ? 0n : unpaid)})`);
-    const par = BigInt(await getSetting("share.par_value", tx));
-    const shares = Number((amount - unpaid + par - 1n) / par);
-    autoSubscribe = { shares, amount: par * BigInt(shares) };
-  }
-  await assertHoldingCap(tx, m, balance.paidUp + pending, amount);
+  const unpaid = balance.unpaid + pending.subscribed - pending.paid;
+  if (amount > unpaid && !(await getSetting("share.auto_subscribe_excess", tx))) throw new ShareError(`Payment exceeds unpaid subscription (${format(unpaid < 0n ? 0n : unpaid)})`);
+  const autoSubscribe = await autoSubscription(tx, amount, unpaid);
+  await assertHoldingCap(tx, m, balance.paidUp + pending.paid, amount);
   return { memberId: m.id, amount, autoSubscribe };
+}
+
+/** Membership fee at the teller: not for terminated/deceased members, and only once (the member row is locked). */
+export async function assertFeePayable(tx: Tx, memberId: string): Promise<void> {
+  const m = await lockMember(tx, memberId);
+  if (m.status === "TERMINATED" || m.status === "DECEASED") throw new ShareError(`${nameOf(m)} is ${m.status}; no membership fee can be collected`);
+  if (await membershipFeePaid(m.id, tx)) throw new ShareError("This member's membership fee is already paid");
+}
+
+/**
+ * A share payment's receipt can be cancelled only while its capital is still with the member: not
+ * after a transfer out or a withdrawal recorded after it (the member row is locked).
+ */
+export async function assertPaymentReversible(tx: Tx, memberId: string, receiptItemId: string, amount: Money): Promise<void> {
+  await lockMember(tx, memberId);
+  const [own] = await tx.select({ seq: sql<number>`max(${shareTransactions.seq})` }).from(shareTransactions).where(eq(shareTransactions.receiptItemId, receiptItemId));
+  if (own?.seq != null) {
+    const [later] = await tx
+      .select({ id: shareTransactions.id })
+      .from(shareTransactions)
+      .where(and(eq(shareTransactions.memberId, memberId), inArray(shareTransactions.type, ["TRANSFER_OUT", "WITHDRAWAL"]), sql`${shareTransactions.seq} > ${own.seq}`))
+      .limit(1);
+    if (later) throw new ShareError("Share capital from this payment was transferred or withdrawn afterwards; the receipt can't be cancelled");
+  }
+  const { paidUp } = await shareBalance(memberId, tx);
+  if (paidUp < amount) throw new ShareError(`Only ${format(paidUp)} of this member's paid-up capital is left (some was transferred or withdrawn); the receipt can't be cancelled`);
 }
 
 /** Credit lines of a share payment for the receipt's entry (plus the auto-subscription, if any). */
@@ -277,15 +309,65 @@ export function registerShareOffset(offset: ShareOffset): void {
   else offsets.push(offset);
 }
 
+async function openWithdrawal(db: Db | Tx, memberId: string): Promise<ShareWithdrawal | undefined> {
+  const [w] = await db.select().from(shareWithdrawals).where(and(eq(shareWithdrawals.memberId, memberId), eq(shareWithdrawals.status, "APPROVED")));
+  return w;
+}
+
+/** The member's approved withdrawal waiting for the teller, with who approved it (for the Share capital tab). */
+export async function pendingWithdrawal(memberId: string, db: Db | Tx = getDb()) {
+  const [w] = await db
+    .select({ w: shareWithdrawals, approvedByName: users.username })
+    .from(shareWithdrawals)
+    .innerJoin(users, eq(users.id, shareWithdrawals.approvedBy))
+    .where(and(eq(shareWithdrawals.memberId, memberId), eq(shareWithdrawals.status, "APPROVED")));
+  return w ? { ...w.w, approvedByName: w.approvedByName } : null;
+}
+
 /**
- * Settles a member's share capital before termination: the unpaid subscription is cancelled
- * (Dr Subscribed Share Capital / Cr Subscription Receivable), obligations are offset, and the rest
- * of the paid-up is paid out in cash by the teller (cash-out SHARE_WITHDRAWAL).
+ * Step 1 of a withdrawal (manager): approves paying out a terminating member's share capital, on
+ * the Board's termination resolution. Nothing is posted yet; a teller pays it out (step 2).
  */
-export async function withdraw(tx: Tx, input: { memberId: string; reason: string }, tellerId: string) {
+export async function approveWithdrawal(tx: Tx, input: { memberId: string; reason: string; bodRef: string }, managerId: string) {
   const m = await lockMember(tx, input.memberId);
   assertMember(m, "withdraw share capital");
-  if (!input.reason.trim()) throw new ShareError("Enter the reason (the member's termination)");
+  const reason = input.reason.trim();
+  const bodRef = input.bodRef.trim();
+  if (!reason) throw new ShareError("Enter the reason (the member's termination)");
+  if (!bodRef) throw new ShareError("Enter the Board resolution no. that approved the termination");
+  const balance = await shareBalance(m.id, tx);
+  if (balance.subscribed <= 0n) throw new ShareError(`${nameOf(m)} has no share capital to withdraw`);
+  if (await openWithdrawal(tx, m.id)) throw new ShareError(`A withdrawal for ${nameOf(m)} is already approved and waiting for the teller`);
+  const [w] = await tx.insert(shareWithdrawals).values({ memberId: m.id, reason, bodRef, approvedBy: managerId, createdBy: managerId }).returning({ id: shareWithdrawals.id });
+  if (!w) throw new Error("withdrawal insert returned no row");
+  await audit(tx, { action: "share.withdraw_approve", entity: "member", entityId: m.id, after: { reason, bodRef, paidUp: format(balance.paidUp), unpaid: format(balance.unpaid) }, userId: managerId });
+  return { id: w.id };
+}
+
+/** Cancels an approved withdrawal that wasn't paid out (manager). */
+export async function cancelWithdrawal(tx: Tx, input: { memberId: string; reason: string }, managerId: string) {
+  const m = await lockMember(tx, input.memberId);
+  const reason = input.reason.trim();
+  if (!reason) throw new ShareError("Enter why the approval is cancelled");
+  const w = await openWithdrawal(tx, m.id);
+  if (!w) throw new ShareError(`${nameOf(m)} has no approved withdrawal to cancel`);
+  await tx.update(shareWithdrawals).set({ status: "CANCELLED", cancelledBy: managerId, cancelReason: reason }).where(and(eq(shareWithdrawals.id, w.id), eq(shareWithdrawals.status, "APPROVED")));
+  await audit(tx, { action: "share.withdraw_cancel", entity: "member", entityId: m.id, before: { bodRef: w.bodRef, reason: w.reason }, after: { cancelReason: reason }, userId: managerId });
+}
+
+/**
+ * Step 2 of a withdrawal (teller, not the approver): settles the member's share capital before
+ * termination. The unpaid subscription is cancelled (Dr Subscribed Share Capital / Cr Subscription
+ * Receivable), obligations are offset, and the rest of the paid-up is paid out in cash from the
+ * teller's drawer (cash-out SHARE_WITHDRAWAL).
+ */
+export async function withdraw(tx: Tx, input: { memberId: string }, tellerId: string) {
+  const m = await lockMember(tx, input.memberId);
+  assertMember(m, "withdraw share capital");
+  const approval = await openWithdrawal(tx, m.id);
+  if (!approval) throw new ShareError(`${nameOf(m)}'s withdrawal must first be approved by the manager (on the Board's termination resolution)`);
+  if (approval.approvedBy === tellerId) throw new ShareError("Segregation of duties: the person who approved the withdrawal can't also pay it out");
+  const reason = `${approval.reason} (${approval.bodRef})`;
   const balance = await shareBalance(m.id, tx);
   if (balance.subscribed <= 0n) throw new ShareError(`${nameOf(m)} has no share capital to withdraw`);
   const rec = await accountIdFor(KEYS.receivable, tx);
@@ -305,7 +387,7 @@ export async function withdraw(tx: Tx, input: { memberId: string; reason: string
   const cash = available;
   const debitLines: LineInput[] = [{ accountId: cap, debit: balance.subscribed, memberId: m.id }];
   const otherCredits: LineInput[] = [...(balance.unpaid > 0n ? [{ accountId: rec, credit: balance.unpaid, memberId: m.id, memo: "Unpaid subscription cancelled" }] : []), ...offsetLines];
-  const particulars = `Share capital withdrawal · ${m.memberNo} ${nameOf(m)} · ${input.reason.trim()}`;
+  const particulars = `Share capital withdrawal · ${m.memberNo} ${nameOf(m)} · ${reason}`;
   const date = businessToday();
   let jeId: string;
   if (cash > 0n) {
@@ -315,8 +397,10 @@ export async function withdraw(tx: Tx, input: { memberId: string; reason: string
     jeId = je.id;
   }
   if (balance.unpaid > 0n) await txn(tx, { memberId: m.id, type: "ADJUSTMENT", amount: balance.unpaid, jeId, date, remarks: "Unpaid subscription cancelled on withdrawal" }, tellerId);
-  if (balance.paidUp > 0n) await txn(tx, { memberId: m.id, type: "WITHDRAWAL", amount: balance.paidUp, jeId, date, remarks: [input.reason.trim(), ...notes].join("; ") }, tellerId);
-  await audit(tx, { action: "share.withdraw", entity: "member", entityId: m.id, after: { paidUp: format(balance.paidUp), cash: format(cash), offsets: notes, reason: input.reason.trim() }, userId: tellerId });
+  if (balance.paidUp > 0n) await txn(tx, { memberId: m.id, type: "WITHDRAWAL", amount: balance.paidUp, jeId, date, refNo: approval.bodRef, remarks: [approval.reason, ...notes].join("; ") }, tellerId);
+  await tx.update(shareWithdrawals).set({ status: "PAID", paidBy: tellerId, paidAt: sql`now()`, jeId }).where(eq(shareWithdrawals.id, approval.id));
+  await tx.update(shareSubscriptions).set({ status: "CANCELLED" }).where(and(eq(shareSubscriptions.memberId, m.id), eq(shareSubscriptions.status, "ACTIVE")));
+  await audit(tx, { action: "share.withdraw", entity: "member", entityId: m.id, after: { paidUp: format(balance.paidUp), cash: format(cash), offsets: notes, reason, approvedBy: approval.approvedBy }, userId: tellerId });
   return { jeId, cash, paidUp: balance.paidUp };
 }
 
@@ -340,24 +424,29 @@ export async function cbuLines(tx: Tx, memberId: string, amount: Money): Promise
   assertMember(m, "have CBU retained");
   if (amount <= 0n) throw new ShareError("The CBU amount must be more than zero");
   const { unpaid } = await shareBalance(m.id, tx);
-  const par = BigInt(await getSetting("share.par_value", tx));
-  const plan: PaymentPlan = { memberId: m.id, amount, autoSubscribe: null };
-  if (amount > unpaid) {
-    const shares = Number((amount - unpaid + par - 1n) / par);
-    plan.autoSubscribe = { shares, amount: par * BigInt(shares) };
-  }
-  return paymentLines(tx, plan);
+  return paymentLines(tx, { memberId: m.id, amount, autoSubscribe: await autoSubscription(tx, amount, unpaid) });
 }
 
-/** Records the CBU retained by an entry the caller posted with `cbuLines` (credits paid-up). */
+/**
+ * Records the CBU retained by an entry the caller posted with `cbuLines` (credits paid-up). The
+ * entry must carry the member's share-capital lines for exactly `amount` (net credit), so the share
+ * ledger can't drift from the GL.
+ */
 export async function retainCbu(tx: Tx, memberId: string, amount: Money, source: { jeId: string; ref: string }, actorId: string | null): Promise<void> {
+  const rec = await accountIdFor(KEYS.receivable, tx);
+  const cap = await accountIdFor(KEYS.capital, tx);
+  const [posted] = await tx
+    .select({ net: sql<string>`coalesce(sum(${journalLines.credit} - ${journalLines.debit}), 0)::text` })
+    .from(journalLines)
+    .where(and(eq(journalLines.jeId, source.jeId), eq(journalLines.memberId, memberId), inArray(journalLines.accountId, [rec, cap])));
+  if (BigInt(posted?.net ?? "0") !== amount) throw new ShareError(`The entry doesn't credit this member's share capital with ${format(amount)}; post it with cbuLines()`);
   const { unpaid } = await shareBalance(memberId, tx);
   const date = businessToday();
-  if (amount > unpaid) {
-    const par = BigInt(await getSetting("share.par_value", tx));
-    const shares = Number((amount - unpaid + par - 1n) / par);
-    const [sub] = await tx.insert(shareSubscriptions).values({ memberId, subDate: date, shares, parValue: par, amount: par * BigInt(shares), jeId: source.jeId, createdBy: actorId }).returning();
-    await txn(tx, { memberId, type: "SUBSCRIBE", amount: par * BigInt(shares), jeId: source.jeId, date, subscriptionId: sub?.id ?? null, refNo: source.ref, remarks: "Subscribed for CBU retention" }, actorId);
+  const auto = await autoSubscription(tx, amount, unpaid);
+  if (auto) {
+    const par = auto.amount / BigInt(auto.shares);
+    const [sub] = await tx.insert(shareSubscriptions).values({ memberId, subDate: date, shares: auto.shares, parValue: par, amount: auto.amount, jeId: source.jeId, createdBy: actorId }).returning();
+    await txn(tx, { memberId, type: "SUBSCRIBE", amount: auto.amount, jeId: source.jeId, date, subscriptionId: sub?.id ?? null, refNo: source.ref, remarks: "Subscribed for CBU retention" }, actorId);
   }
   await txn(tx, { memberId, type: "CBU_RETENTION", amount, jeId: source.jeId, date, refNo: source.ref }, actorId);
 }
@@ -484,11 +573,4 @@ export async function shareRegistry(filters: { q?: string; page?: number }, db: 
     db.select({ n: sql<number>`count(*)::int` }).from(memberShareBalance).innerJoin(members, eq(members.id, memberShareBalance.memberId)).where(where),
   ]);
   return { rows, total: count?.n ?? 0, page, pageSize };
-}
-
-/** Several members' balances at once (for lists). */
-export async function shareBalances(memberIds: string[], db: Db | Tx = getDb()) {
-  if (memberIds.length === 0) return new Map<string, ShareBalance>();
-  const rows = await db.select().from(memberShareBalance).where(inArray(memberShareBalance.memberId, memberIds));
-  return new Map(rows.map((r) => [r.memberId, { subscribed: BigInt(r.subscribed), paidUp: BigInt(r.paidUp), unpaid: BigInt(r.unpaid) }]));
 }

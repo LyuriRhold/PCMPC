@@ -5,7 +5,7 @@ import { GET as ledgerRoute } from "@/app/api/share/ledger/route";
 import { runAs } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
 import { trialBalance } from "@/modules/ledger/service";
-import { transferAction, withdrawSharesAction } from "@/modules/share/actions";
+import { approveWithdrawalAction, transferAction, withdrawSharesAction } from "@/modules/share/actions";
 import { shareLedgerWorkbook } from "@/modules/share/export";
 import { memberShareLedger, shareRegistry, shareTotals } from "@/modules/share/service";
 import { makeUser } from "../helpers/phase01";
@@ -68,6 +68,7 @@ describe("T8.5 member share ledger report", () => {
     const url = (q: string) => new Request(`http://localhost/api/share/ledger?${q}`);
     expect((await runAs(clerk.id, () => ledgerRoute(url(`member=${m}`)))).status).toBe(403);
     expect((await runAs(manager, () => ledgerRoute(url(`member=${m}&from=2026-13-01`)))).status).toBe(400);
+    expect((await runAs(manager, () => ledgerRoute(url(`member=${m}&from=2026-12-01&to=2026-01-01`)))).status).toBe(400);
     expect((await runAs(manager, () => ledgerRoute(url("member=00000000-0000-4000-8000-000000000000")))).status).toBe(404);
     const ok = await runAs(manager, () => ledgerRoute(url(`member=${m}&from=&to=2026-12-31`)));
     expect(ok.status).toBe(200);
@@ -85,7 +86,8 @@ describe("Exit check: TB balances after the fixture", () => {
     expect((await receipt(a, [{ type: "SHARE_PAYMENT", amount: "2,500.00" }, { type: "MEMBERSHIP_FEE", amount: "500.00" }])).ok).toBe(true);
     expect((await pay(b, "2,000.00")).ok).toBe(true);
     expect((await runAs(manager, () => transferAction({ fromMemberId: a, toMemberId: b, amount: "500.00", bodRef: "BOD 9" }))).ok).toBe(true);
-    const w = await runAs(await tellerToday(), () => withdrawSharesAction({ memberId: a, reason: "Resignation" }));
+    expect((await runAs(manager, () => approveWithdrawalAction({ memberId: a, reason: "Resignation", bodRef: "BOD 10" }))).ok).toBe(true);
+    const w = await runAs(await tellerToday(), () => withdrawSharesAction({ memberId: a }));
     if (!w.ok) throw new Error(w.error);
 
     const tb = await trialBalance("2026-12-31");

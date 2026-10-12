@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAction } from "@/components/use-action";
 import { format } from "@/lib/money";
-import { memberByNoAction, subscribeAction, transferAction, withdrawSharesAction } from "../actions";
+import { approveWithdrawalAction, cancelWithdrawalAction, memberByNoAction, subscribeAction, transferAction, withdrawSharesAction } from "../actions";
 
 function Err({ error }: { error: string | null }) {
   return error ? (
@@ -89,29 +89,85 @@ export function TransferForm({ memberId }: { memberId: string }) {
   );
 }
 
-/** Teller: pays out a terminating member's share capital from the open session. */
-export function WithdrawForm({ memberId, paidUp }: { memberId: string; paidUp: string }) {
+/** Manager, step 1 of a withdrawal: approves paying out a terminating member's share capital. */
+export function ApproveWithdrawalForm({ memberId }: { memberId: string }) {
   const { pending, error, done, run } = useAction();
   return (
     <form
       className="flex flex-wrap items-end gap-3"
-      action={(fd) => {
-        if (!window.confirm(`Pay out ${format(BigInt(paidUp))} share capital in cash and cancel the unpaid subscription? Do this only for a member being terminated.`)) return;
-        run(() => withdrawSharesAction({ memberId, reason: String(fd.get("withdrawReason") ?? "") }), { success: "Share capital paid out." });
-      }}
+      action={(fd) => run(() => approveWithdrawalAction({ memberId, reason: String(fd.get("withdrawReason") ?? ""), bodRef: String(fd.get("withdrawBodRef") ?? "") }), { success: "Withdrawal approved. A teller can now pay it out." })}
     >
+      <p className="w-full text-sm text-muted-foreground">Withdrawal (only for a member being terminated): approve it here; a teller then pays it out from the drawer.</p>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="withdrawReason">Reason (termination)</Label>
-        <Input id="withdrawReason" name="withdrawReason" required maxLength={300} className="w-72" placeholder="e.g. Resignation, Board res. 2026-30" />
+        <Input id="withdrawReason" name="withdrawReason" required maxLength={300} className="w-64" placeholder="e.g. Resignation" />
       </div>
-      <Button type="submit" variant="destructive" disabled={pending}>
-        Pay out share capital
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="withdrawBodRef">Board resolution no. (termination)</Label>
+        <Input id="withdrawBodRef" name="withdrawBodRef" required maxLength={100} className="w-48" />
+      </div>
+      <Button type="submit" variant="outline" disabled={pending}>
+        Approve withdrawal
       </Button>
       <div className="w-full">
         <Err error={error} />
         <Done done={done} />
       </div>
     </form>
+  );
+}
+
+/** An approved withdrawal waiting for the teller: the teller pays it out, the manager can cancel it. */
+export function PendingWithdrawal({
+  memberId,
+  paidUp,
+  approval,
+  canPay,
+  canCancel,
+}: {
+  memberId: string;
+  paidUp: string;
+  approval: { reason: string; bodRef: string; approvedBy: string; approvedOn: string };
+  canPay: boolean;
+  canCancel: boolean;
+}) {
+  const pay = useAction();
+  const cancel = useAction();
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-amber-500/50 p-3" data-testid="share-withdrawal-approved">
+      <p className="text-sm">
+        <span className="font-medium">Withdrawal approved</span> by {approval.approvedBy} on {approval.approvedOn} · {approval.reason} · Board res. {approval.bodRef}. Paid-up to pay out: {format(BigInt(paidUp))} (less any
+        obligations).
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        {canPay ? (
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={pay.pending}
+            onClick={() => {
+              if (!window.confirm(`Pay out ${format(BigInt(paidUp))} share capital in cash from your drawer and cancel the unpaid subscription?`)) return;
+              pay.run(() => withdrawSharesAction({ memberId }), { success: "Share capital paid out." });
+            }}
+          >
+            Pay out share capital
+          </Button>
+        ) : null}
+        {canCancel ? (
+          <form className="flex flex-wrap items-end gap-2" action={(fd) => cancel.run(() => cancelWithdrawalAction({ memberId, reason: String(fd.get("cancelReason") ?? "") }), { success: "Approval cancelled." })}>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="cancelReason">Reason for cancelling</Label>
+              <Input id="cancelReason" name="cancelReason" required maxLength={300} className="w-56" />
+            </div>
+            <Button type="submit" variant="outline" disabled={cancel.pending}>
+              Cancel approval
+            </Button>
+          </form>
+        ) : null}
+      </div>
+      <Err error={pay.error ?? cancel.error} />
+      <Done done={pay.done ?? cancel.done} />
+    </div>
   );
 }
 

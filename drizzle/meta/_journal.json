@@ -141,6 +141,13 @@
       "when": 1791573953389,
       "tag": "0019_share_txn_seq",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791763914246,
+      "tag": "0020_share_withdrawals",
+      "breakpoints": true
     }
   ]
 }

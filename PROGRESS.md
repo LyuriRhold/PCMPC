@@ -132,7 +132,7 @@
 - [x] T8.4 Actions, UI tab/forms, teller registrations (fee, share payment, withdrawal)
 - [x] T8.5 Member share ledger report (per member, date range) + Excel export
 - [x] Acceptance tests written first (tests/acceptance/phase-08.test.ts)
-- [ ] Exit checks passed
+- [x] Exit checks passed
 
 ### Phase 09 — Savings & Time Deposits
 - [ ] T9.1 Schema + migrations
@@ -294,10 +294,12 @@
 - [ ] Q-07.5 (phase 07) Deposit refund on closure. | default used: automatic when the account is closed: the deposit offsets everything the account still owes (oldest bill first) and the rest is refunded by a DV (DRAFT, then approved and released as usual) | answer:
 - [ ] Q-07.6 (phase 07) Collection efficiency: do advances applied to a bill count as collected? | default used: yes (cash received earlier, applied to the bill); penalties are not counted | answer:
 - [ ] Q-07.7 (phase 07) Report formats used today (billing summary, collection report, aging, notices). | default used: on-screen tables that print and export to Excel; the notice is a one-page PDF | answer:
-- [ ] Q-08.1 (phase 08) Holding cap (10% of the coop's total paid-up) for new members: with few members, any first payment is a large share of the total. | default used: the cap is checked only when the member's paid-up would go above the minimum paid-up (`share.min_paid_up_regular`, ₱2,500.00); payments up to the minimum are always allowed. Transfers don't check the cap (Board-approved) | answer:
+- [ ] Q-08.1 (phase 08) Holding cap (10% of the coop's total paid-up) for new members: with few members, any first payment is a large share of the total. | default used: the cap is checked only when the member's paid-up would go above the minimum paid-up (`share.min_paid_up_regular`, ₱2,500.00); payments up to the minimum are always allowed. Transfers (Board-approved) and CBU retention on loans (loan policy) don't check the cap | answer:
 - [ ] Q-08.2 (phase 08) CBU retention on a loan (Phase 11) when the member's unpaid subscription is smaller than the retention. | default used: whole shares are subscribed first for the excess (as `share.auto_subscribe_excess`), then the retention is credited to paid-up | answer:
-- [ ] Q-08.3 (phase 08) Who encodes subscriptions, transfers and withdrawals? | default used: subscriptions by membership staff (members.write: manager, loan officer); transfers by the manager (members.approve) with the Board resolution no.; withdrawal paid out by the teller from the open session (cash.session), only to terminate a member; payments and the membership fee only at the teller | answer:
+- [ ] Q-08.3 (phase 08) Who encodes subscriptions, transfers and withdrawals? | default used: subscriptions by membership staff (members.write: manager, loan officer); transfers by the manager (members.approve) with the Board resolution no.; withdrawal in two steps: the manager approves it on the Board's termination resolution (members.approve), then a different person, the teller, pays it out from the drawer (cash.session); payments and the membership fee only at the teller | answer:
 - [ ] Q-08.4 (phase 08) Partial payments at the teller. | default used: the teller can change the amount of any item in the cart (e.g. ₱2,500.00 of a ₱10,000.00 unpaid subscription); the server re-checks each amount against the module's rules | answer:
+- [ ] Q-08.5 (phase 08) Average share month (ASM) rounding. | default used: each member's ASM for a year is rounded HALF-UP to the centavo (DOMAIN §3 doesn't list it); Phase 15 may compute interest on share capital from the unrounded sum if PCMPC prefers | answer:
+- [ ] Q-08.6 (phase 08) Good standing for associate members. | default used: the same minimum paid-up (₱2,500.00) and membership fee as regular members | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -858,7 +860,7 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - **Teller desk:** cart amounts can be edited, so a due can be paid in part (e.g. ₱2,500.00 of a ₱10,000.00 unpaid subscription). The server re-checks every amount.
 - **Report (T8.5):** the member share ledger for a date range, with the opening balance carried, exported to Excel at `/api/share/ledger?member=&from=&to=` (needs `share.read`).
 
-**Decisions** (see Questions Q-08.1–Q-08.4)
+**Decisions** (see Questions Q-08.1–Q-08.6)
 - **Holding cap:** applies only above the minimum paid-up (₱2,500.00). Otherwise no early member could pay the minimum. Transfers don't check the cap.
 - **CBU retention above the unpaid subscription:** subscribes whole shares first.
 - **Who does what:** subscriptions by membership staff (`members.write`); transfers by the manager (`members.approve`); payouts by the teller (`cash.session`); payments and fees only at the teller.
@@ -902,3 +904,29 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - A8.7 checks that the TB control totals are unchanged.
   - A8.9 checks that the ledger equals the GL subsidiary at every row.
 - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK; the sample trial balance balances.
+
+**Review follow-ups (reviewer agent, 2026-10-12)**
+- **Fixed (must-fix): withdrawals need two people.**
+  - The manager approves the withdrawal on the Board's termination resolution (`members.approve`): reason plus resolution no.
+  - A different person, the teller, then pays it out from the drawer (`cash.session`). The amount is the paid-up at payout time.
+  - Approvals can be cancelled; payout is refused without an approval, or by the approver.
+  - New table `share_withdrawals` (migration 0020): APPROVED → PAID or CANCELLED, one open approval per member, with the payout entry. Paying out also marks the member's subscriptions CANCELLED (shown as "withdrawn").
+  - Tested, including the denied paths.
+- **Fixed:**
+  - A second share item in one receipt counts the shares the first item auto-subscribed (it subscribed too many when `share.auto_subscribe_excess` is on).
+  - Cancelling a share payment is refused once capital was transferred out or withdrawn *after* it, even if the paid-up still covers it (and the member row is locked).
+  - The membership fee can't be taken from a TERMINATED or DECEASED member. The member row is locked, so two tellers can't both collect it.
+  - `retainCbu()` checks that the entry credits the member's share capital with exactly that amount, so the share ledger can't drift from the GL. The shares-for-excess maths is now one helper.
+  - The Share tab's ASM year accepts only 1900–2099 (a year like 0000 crashed the page). The ledger export refuses `from` after `to`.
+  - The teller item validates the stored breakdown instead of casting it. The unused `shareBalances` was removed.
+- **New tests:**
+  - immutability triggers (share rows, fees, subscriptions);
+  - the permission matrix of the share actions;
+  - a terminated member's water customer becomes NON_MEMBER;
+  - `divide()` HALF-UP;
+  - the reversed export date range.
+- **Logged as Questions:** Q-08.1 now says the cap doesn't apply to transfers or CBU retention; new Q-08.5 (ASM rounding) and Q-08.6 (good standing for associate members).
+- **Not changed (noted):**
+  - The `/share` registry is the nav item Phase 08 owns (`nav.ts`, phase "08").
+  - The Vitest worker-count change stays on this branch (it was needed to get the gate green).
+  - The fourth copy of the Excel `pesos()` helper and fractional-share transfers are left as they are.

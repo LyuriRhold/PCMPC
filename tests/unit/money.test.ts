@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
-import { add, allocate, format, mulRate, parse, sub, sum } from "@/lib/money";
+import { add, allocate, divide, format, mulRate, parse, sub, sum } from "@/lib/money";
 
 describe("money.parse", () => {
   it.each([
@@ -125,5 +125,16 @@ describe("money.allocate", () => {
     expect(() => allocate(100n, [0, 0])).toThrow(/positive weight/);
     expect(() => allocate(100n, [1, -1])).toThrow(/negative/);
     expect(() => allocate(100n, [0.5, 1])).toThrow(/integer/);
+  });
+});
+
+describe("money.divide", () => {
+  it("rounds HALF-UP to the centavo, away from zero at exactly half", () => {
+    expect(divide(1000n, 3n)).toBe(333n);
+    expect(divide(2000n, 3n)).toBe(667n);
+    expect(divide(150n, 12n)).toBe(13n); // 12.5 → 13
+    expect(divide(138n, 12n)).toBe(12n); // 11.5 → 12
+    expect(divide(-150n, 12n)).toBe(-13n);
+    expect(divide(1_200_000n * 12n, 12n)).toBe(1_200_000n);
   });
 });

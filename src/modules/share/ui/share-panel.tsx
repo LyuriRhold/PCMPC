@@ -4,12 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatDate, isBusinessDate } from "@/lib/dates";
+import { formatDate, formatDateTime, isBusinessDate } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { getSetting } from "@/modules/settings/service";
 import { TXN_LABEL } from "../labels";
-import { averageShareMonth, isGoodStanding, membershipFeePaid, memberShareLedger, memberSubscriptions, shareBalance } from "../service";
-import { SubscribeForm, TransferForm, WithdrawForm } from "./share-forms";
+import { averageShareMonth, isGoodStanding, membershipFeePaid, memberShareLedger, memberSubscriptions, pendingWithdrawal, shareBalance } from "../service";
+import { ApproveWithdrawalForm, PendingWithdrawal, SubscribeForm, TransferForm } from "./share-forms";
 
 const signed = (m: bigint) => (m === 0n ? "" : m < 0n ? `−${format(-m)}` : format(m));
 
@@ -38,10 +38,11 @@ export async function SharePanel({
   year: number;
   from: string | null;
   to: string | null;
-  can: { subscribe: boolean; transfer: boolean; withdraw: boolean };
+  /** approve = transfers and withdrawal approvals (manager); payOut = paying out an approved withdrawal (teller). */
+  can: { subscribe: boolean; approve: boolean; payOut: boolean };
 }) {
   const range = { from: from && isBusinessDate(from) ? from : undefined, to: to && isBusinessDate(to) ? to : undefined };
-  const [balance, fee, standing, asm, ledger, subs, par, minShares] = await Promise.all([
+  const [balance, fee, standing, asm, ledger, subs, par, minShares, approval] = await Promise.all([
     shareBalance(memberId),
     membershipFeePaid(memberId),
     isGoodStanding(memberId),
@@ -50,6 +51,7 @@ export async function SharePanel({
     memberSubscriptions(memberId),
     getSetting("share.par_value"),
     getSetting("share.min_subscription_shares"),
+    pendingWithdrawal(memberId),
   ]);
   const open = memberStatus === "ACTIVE" || memberStatus === "INACTIVE";
   const exportQuery = new URLSearchParams({ member: memberId, ...(range.from ? { from: range.from } : {}), ...(range.to ? { to: range.to } : {}) });
@@ -68,15 +70,24 @@ export async function SharePanel({
         <span className="text-xs text-muted-foreground">Payments and the membership fee are collected at the teller counter.</span>
       </div>
 
-      {open && (can.subscribe || can.transfer || can.withdraw) ? (
+      {open && (can.subscribe || can.approve || can.payOut) ? (
         <Card>
           <CardHeader>
             <CardTitle>Subscribe, transfer or withdraw</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-6">
-            {can.subscribe ? <SubscribeForm memberId={memberId} parValue={par} minShares={minShares} hasSubscription={balance.subscribed > 0n} /> : null}
-            {can.transfer && balance.paidUp > 0n && memberStatus === "ACTIVE" ? <TransferForm memberId={memberId} /> : null}
-            {can.withdraw && balance.subscribed > 0n ? <WithdrawForm memberId={memberId} paidUp={String(balance.paidUp)} /> : null}
+            {approval ? (
+              <PendingWithdrawal
+                memberId={memberId}
+                paidUp={String(balance.paidUp)}
+                approval={{ reason: approval.reason, bodRef: approval.bodRef, approvedBy: approval.approvedByName, approvedOn: formatDateTime(approval.approvedAt) }}
+                canPay={can.payOut}
+                canCancel={can.approve}
+              />
+            ) : null}
+            {can.subscribe && !approval ? <SubscribeForm memberId={memberId} parValue={par} minShares={minShares} hasSubscription={balance.subscribed > 0n} /> : null}
+            {can.approve && !approval && balance.paidUp > 0n && memberStatus === "ACTIVE" ? <TransferForm memberId={memberId} /> : null}
+            {can.approve && !approval && balance.subscribed > 0n ? <ApproveWithdrawalForm memberId={memberId} /> : null}
           </CardContent>
         </Card>
       ) : null}
@@ -106,7 +117,10 @@ export async function SharePanel({
               {subs.map((s) => (
                 <TableRow key={s.id}>
                   <TableCell className="tabular-nums">{formatDate(s.subDate)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{s.shares.toLocaleString("en-US")}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {s.shares.toLocaleString("en-US")}
+                    {s.status === "CANCELLED" ? <span className="ml-1 text-xs text-muted-foreground">(withdrawn)</span> : null}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">{format(s.parValue)}</TableCell>
                   <TableCell className="text-right tabular-nums">{format(s.amount)}</TableCell>
                 </TableRow>

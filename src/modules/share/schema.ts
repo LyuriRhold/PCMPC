@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { bigint, check, date, index, integer, pgTable, pgView, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
-import { createdColumns } from "@/db/columns";
+import { createdColumns, tstz } from "@/db/columns";
+import { users } from "@/modules/auth/schema";
 import { receiptItems } from "@/modules/cashiering/schema";
 import { journalEntries } from "@/modules/ledger/schema";
 import { members } from "@/modules/members/schema";
@@ -102,6 +103,41 @@ export const memberFees = pgTable(
   ],
 );
 
+/**
+ * A share-capital withdrawal for a member being terminated. Two people: the manager approves it
+ * on the Board's termination resolution (APPROVED), then a teller pays it out from the drawer
+ * (PAID, with the entry). The amount is the paid-up at payout time. An approval can be CANCELLED.
+ */
+export const shareWithdrawals = pgTable(
+  "share_withdrawals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => members.id),
+    reason: text("reason").notNull(),
+    bodRef: text("bod_ref").notNull(),
+    status: text("status").$type<"APPROVED" | "PAID" | "CANCELLED">().notNull().default("APPROVED"),
+    approvedBy: uuid("approved_by")
+      .notNull()
+      .references(() => users.id),
+    approvedAt: tstz("approved_at").notNull().defaultNow(),
+    paidBy: uuid("paid_by").references(() => users.id),
+    paidAt: tstz("paid_at"),
+    /** The payout entry (set when PAID). */
+    jeId: uuid("je_id").references(() => journalEntries.id),
+    cancelledBy: uuid("cancelled_by").references(() => users.id),
+    cancelReason: text("cancel_reason"),
+    ...createdColumns(),
+  },
+  (t) => [
+    check("share_withdrawals_status_chk", inList("status", ["APPROVED", "PAID", "CANCELLED"])),
+    check("share_withdrawals_paid_chk", sql`(${t.status} = 'PAID') = (${t.jeId} IS NOT NULL AND ${t.paidBy} IS NOT NULL)`),
+    // One open approval per member.
+    uniqueIndex("share_withdrawals_open_uq").on(t.memberId).where(sql`${t.status} = 'APPROVED'`),
+  ],
+);
+
 /** Subscribed, paid-up and unpaid subscription per member (created in migration 0018). */
 export const memberShareBalance = pgView("v_member_share_balance", {
   memberId: uuid("member_id").notNull(),
@@ -110,5 +146,6 @@ export const memberShareBalance = pgView("v_member_share_balance", {
   unpaid: money("unpaid").notNull(),
 }).existing();
 
+export type ShareWithdrawal = typeof shareWithdrawals.$inferSelect;
 export type ShareTransaction = typeof shareTransactions.$inferSelect;
 export type ShareSubscription = typeof shareSubscriptions.$inferSelect;

@@ -20,6 +20,7 @@ export async function GET(request: Request) {
   const parsed = params.safeParse(q);
   if (!parsed.success) return new Response("member is required; from and to are YYYY-MM-DD", { status: 400 });
   const { member, from, to } = parsed.data;
+  if (from && to && from > to) return new Response("from must not be after to", { status: 400 });
   const wb = await shareLedgerWorkbook(member, { from, to }, await getSetting("coop.name"));
   if (!wb) return new Response("Not found", { status: 404 });
   return new Response(new Uint8Array(wb.body), {

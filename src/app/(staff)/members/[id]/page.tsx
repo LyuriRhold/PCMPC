@@ -143,10 +143,10 @@ async function MemberContent(props: PageProps<"/members/[id]">) {
         <SharePanel
           memberId={m.id}
           memberStatus={m.status}
-          year={typeof sp.year === "string" && /^\d{4}$/.test(sp.year) ? Number(sp.year) : Number(businessToday().slice(0, 4))}
+          year={typeof sp.year === "string" && /^(19|20)\d\d$/.test(sp.year) ? Number(sp.year) : Number(businessToday().slice(0, 4))}
           from={typeof sp.from === "string" ? sp.from : null}
           to={typeof sp.to === "string" ? sp.to : null}
-          can={{ subscribe: canWrite, transfer: canApprove, withdraw: can(access.user, "cash.session") }}
+          can={{ subscribe: canWrite, approve: canApprove, payOut: can(access.user, "cash.session") }}
         />
       ) : null}
 

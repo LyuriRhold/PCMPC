@@ -6,7 +6,19 @@ import { registerCashOut, registerReceiptItem, type ItemInput, type ReceiptConte
 import { receipts } from "@/modules/cashiering/schema";
 import { accountIdFor } from "@/modules/ledger/service";
 import { getSetting } from "@/modules/settings/service";
-import { membershipFeePaid, planPayment, paymentLines, recordMembershipFee, recordPayment, shareBalance, ShareError, type PaymentPlan } from "./service";
+import {
+  assertFeePayable,
+  assertPaymentReversible,
+  membershipFeePaid,
+  planPayment,
+  paymentLines,
+  recordMembershipFee,
+  recordPayment,
+  shareBalance,
+  ShareError,
+  type PaymentPlan,
+  type PendingPayments,
+} from "./service";
 
 /**
  * Share capital at the teller counter (PHASE-08): receipt items MEMBERSHIP_FEE and SHARE_PAYMENT
@@ -26,17 +38,30 @@ async function receiptInfo(tx: Tx, receiptId: string) {
 }
 
 /** Share payments already planned in this receipt (several items for one member add up). */
-const pendingByReceipt = new WeakMap<ReceiptContext, Map<string, bigint>>();
+const pendingByReceipt = new WeakMap<ReceiptContext, Map<string, PendingPayments>>();
 
-async function plan(tx: Tx, input: ItemInput, ctx: ReceiptContext): Promise<PaymentPlan> {
-  const memberId = memberOf(input, ctx);
-  const pending = pendingByReceipt.get(ctx)?.get(memberId) ?? 0n;
+/** Share-module rule errors are shown to the teller like any other receipt error. */
+async function asCashiering<T>(fn: () => Promise<T>): Promise<T> {
   try {
-    return await planPayment(tx, memberId, input.amount, pending);
+    return await fn();
   } catch (e) {
     if (e instanceof ShareError) throw new CashieringError(e.message);
     throw e;
   }
+}
+
+async function plan(tx: Tx, input: ItemInput, ctx: ReceiptContext): Promise<PaymentPlan> {
+  const memberId = memberOf(input, ctx);
+  const pending = pendingByReceipt.get(ctx)?.get(memberId);
+  return asCashiering(() => planPayment(tx, memberId, input.amount, pending));
+}
+
+type PaymentBreakdown = { memberId: string; amount: string; autoSubscribe: { shares: number; amount: string } | null };
+
+function paymentBreakdown(value: unknown): PaymentBreakdown {
+  const b = value as Partial<PaymentBreakdown> | null;
+  if (!b || typeof b.memberId !== "string" || typeof b.amount !== "string") throw new Error("share payment item has no breakdown");
+  return { memberId: b.memberId, amount: b.amount, autoSubscribe: b.autoSubscribe ?? null };
 }
 
 registerReceiptItem({
@@ -54,8 +79,9 @@ registerReceiptItem({
   },
   apply: async (tx, input, ctx) => {
     const p = await plan(tx, input, ctx);
-    const pending = pendingByReceipt.get(ctx) ?? new Map<string, bigint>();
-    pending.set(p.memberId, (pending.get(p.memberId) ?? 0n) + p.amount);
+    const pending = pendingByReceipt.get(ctx) ?? new Map<string, PendingPayments>();
+    const before = pending.get(p.memberId) ?? { paid: 0n, subscribed: 0n };
+    pending.set(p.memberId, { paid: before.paid + p.amount, subscribed: before.subscribed + (p.autoSubscribe?.amount ?? 0n) });
     pendingByReceipt.set(ctx, pending);
     const sub = p.autoSubscribe ? ` (subscribes ${p.autoSubscribe.shares} more shares)` : "";
     return {
@@ -66,7 +92,7 @@ registerReceiptItem({
     };
   },
   recorded: async (tx, item, ctx) => {
-    const b = item.breakdown as { memberId: string; amount: string; autoSubscribe: { shares: number; amount: string } | null };
+    const b = paymentBreakdown(item.breakdown);
     const r = await receiptInfo(tx, ctx.receiptId);
     const p: PaymentPlan = { memberId: b.memberId, amount: BigInt(b.amount), autoSubscribe: b.autoSubscribe ? { shares: b.autoSubscribe.shares, amount: BigInt(b.autoSubscribe.amount) } : null };
     await recordPayment(tx, p, { receiptItemId: item.id, jeId: r.jeId, date: r.date, receiptNo: r.receiptNo, birReceiptNo: r.birReceiptNo }, ctx.actorId);
@@ -74,10 +100,8 @@ registerReceiptItem({
   // The receipt's share rows stop counting once it's CANCELLED; but money already transferred or
   // withdrawn can't be taken back.
   reverse: async (tx, item) => {
-    const b = item.breakdown as { memberId: string } | null;
-    if (!b) return;
-    const { paidUp } = await shareBalance(b.memberId, tx);
-    if (paidUp < item.amount) throw new CashieringError(`Only ${format(paidUp)} of this member's paid-up capital is left (some was transferred or withdrawn); the receipt can't be cancelled`);
+    const b = paymentBreakdown(item.breakdown);
+    await asCashiering(() => assertPaymentReversible(tx, b.memberId, item.id, item.amount));
   },
 });
 
@@ -95,7 +119,7 @@ registerReceiptItem({
     const memberId = memberOf(input, ctx);
     const fee = BigInt(await getSetting("member.fee", tx));
     if (input.amount !== fee) throw new CashieringError(`The membership fee is ${format(fee)}`);
-    if (await membershipFeePaid(memberId, tx)) throw new CashieringError("This member's membership fee is already paid");
+    await asCashiering(() => assertFeePayable(tx, memberId));
   },
   apply: async (tx, input, ctx) => {
     const memberId = memberOf(input, ctx);

@@ -146,8 +146,8 @@
 
 ### Phase 10 — Loan Products, Amortization Engine & Applications
 - [x] T10.1 Schema, migrations, product + deduction seed (DOMAIN sample products, flagged CONFIRM)
-- [ ] T10.2 Amortization engine + golden and property tests
-- [ ] T10.3 Net proceeds calculator
+- [x] T10.2 Amortization engine + golden and property tests
+- [x] T10.3 Net proceeds calculator
 - [ ] T10.4 Eligibility engine with the hook registry
 - [ ] T10.5 Application service + approval matrix + SoD
 - [ ] T10.6 UI: product admin, loan calculator, application form, approval queue, disclosure print

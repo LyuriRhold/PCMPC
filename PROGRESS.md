@@ -21,7 +21,7 @@
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ✅ | phase-10-loan-applications · tag `phase-10` | rldejoya (reviewer agent: small-loan error + tiny-loan rows fixed; follow-ups) · 2026-10-12 |
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ✅ | phase-11-loan-servicing · tag `phase-11` | rldejoya (reviewer agent: stuck pending release + historical aging fixed; follow-ups) · 2026-10-12 |
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ✅ | phase-12-store-inventory · tag `phase-12` | rldejoya (reviewer agent: stock-move order fixed; follow-ups) · 2026-10-13 |
-| 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | 🔨 | phase-13-store-pos | |
+| 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | 🟡 awaiting review | phase-13-store-pos | |
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ⬜ | | |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ⬜ | | |
 | 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ⬜ | | |
@@ -185,7 +185,7 @@
 - [x] T13.6 POS UI (keyboard/barcode-first) and the slip print
 - [x] T13.7 Store reports (sales, margin, top items, slow movers)
 - [x] Acceptance tests written first (tests/acceptance/phase-13.test.ts)
-- [ ] Exit checks passed
+- [x] Exit checks passed
 
 ### Phase 14 — Financial Statements, Period Close & Fixed Assets
 - [ ] T14.1 Schema + migrations + FS line seed (PFRF-for-Coops layout; mark it CONFIRM)
@@ -335,6 +335,14 @@
 - [ ] Q-12.6 (phase 12) Purchasing rules. | default used: deliveries may be received without a PO (small purchases); a PO is received in parts, never more than is still to come; the invoice cost may differ from the PO cost; the manager cancels a PO (what was received stays). Each delivery is due on its receiving date plus the supplier's terms; payments settle the oldest deliveries first. A supplier invoice no. is received once. Should a delivery without a PO above some amount need the manager's approval first (today the manager first sees it when approving the payment)? | answer:
 - [ ] Q-12.7 (phase 12) Counting. | default used: the clerk counts blind (the system quantity is shown only after submission, and taken at submission); the approved adjustment is the variance as counted, even if stock moved before approval; a count covers all active products (and inactive ones still in stock) or one category; a product is on one open count at a time; the manager can send a submitted count back to the clerk. Stock count numbers are SC-{YYYY}-{00000} | answer:
 - [ ] Q-12.8 (phase 12) Supplier payables aging groups. | default used: Not yet due, 1–30, 31–60, 61–90, Over 90 days past due (setting store.ap_aging_buckets) | answer:
+- [ ] Q-13.1 (phase 13) The POS drawer. | default used: each store cashier has their own POS shift (the spec's drawer), separate from teller sessions; cash sales go to Cash on Hand. The shift closes with a cash count and the Z-reading; the manager then verifies it and any shortage or overage is posted to Cash Short/Over (as for teller sessions, cash.short_over_policy). The day's cash stays in Cash on Hand: its turnover to the treasurer or the bank isn't recorded separately. How is the store's cash handed over at day-end? | answer:
+- [ ] Q-13.2 (phase 13) Discounts and member prices. | default used: none; members and non-members pay the shelf price (the sale's discount columns stay at zero). Does PCMPC give member discounts or senior/PWD discounts in the store? | answer:
+- [ ] Q-13.3 (phase 13) VAT on store sales. | default used: none (every product VAT-exempt, Q-12.3); no output VAT is posted | answer:
+- [ ] Q-13.4 (phase 13) Store credit. | default used: charges for ACTIVE members only, up to ₱1,000.00 owed (store.member_credit_limit) unless the manager sets the member's own limit; AR–Members holds only store charges; members pay at the teller (Store charges payment), up to what they owe | answer:
+- [ ] Q-13.5 (phase 13) Voids. | default used: before a sale is completed, a supervisor (a user with store.supervise, the manager) types their username and password at the POS; never the cashier; a wrong password counts toward their lockout. The voided sale keeps its number and lines; nothing is posted | answer:
+- [ ] Q-13.6 (phase 13) Returns. | default used: the cashier records them (no supervisor), any time after the sale; restocked at the sale's cost; refunded in cash from the cashier's open drawer, or for a charge sale credited to the member's account up to what they owe. Should returns need a supervisor, or have a time limit? | answer:
+- [ ] Q-13.7 (phase 13) Store patronage. | default used: a member's completed purchases (cash and charge) in the year less what they returned in the year (by return date); only sales where the cashier picked the member count; walk-in sales never count | answer:
+- [ ] Q-13.8 (phase 13) Sale numbers and the slip. | default used: sales S-{YYYY}-{000000} (a voided sale keeps its number), returns SR-{YYYY}-{000000}; the POS slip says "Not an official receipt" until the store has a BIR-accredited POS or invoice (PLAN R1); a BIR invoice no. can be kept per sale but the POS screen doesn't ask for it yet | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -375,6 +383,9 @@
 - Supplier and customer tags in the manual JV and DV forms (Phase 17 opening balances will need supplier balances)
 - Block manual JVs to Merchandise Inventory (except opening balances, Phase 17), so the valuation can't drift from the GL; today the valuation page shows any difference (Phase 12 review)
 - Truly blind counts: the Products page shows the clerk the quantities on hand (Phase 12 review)
+- The store's cash turnover at day-end (POS drawer → treasurer/teller or bank deposit) recorded as its own entry (Q-13.1)
+- BIR invoice no. on the POS screen once the store has an accredited POS or invoices (Q-13.8, PLAN R1)
+- Store discounts / member prices if PCMPC adopts them (Q-13.2)
 - Corrections for loan payments made without a receipt (pay from savings, share-capital offsets on termination): a reversal in the loans module that also reverses the savings or share posting (Phase 11 review)
 - Penalty on the payment day: a payment made before the day's job runs collects penalties only up to the last run; compute the penalty to the payment date live (Phase 11 review)
 - Lock order between the loans daily job (locks every open loan) and receipts with several loan payments; run the job before the counter opens or lock loans in id order everywhere (Phase 11 review)
@@ -1382,3 +1393,65 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - `npm run build` green.
   - E2E on a production build green: phase-12 (A12.8) and ui-shell.
   - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (migration 0034).
+
+### Phase 13 summary
+**Built**
+- **Schema (T13.1):**
+  - Tables: POS shifts, sales and sale lines, returns and return lines, member charge limits.
+  - Triggers: sales and returns are records, never changed. A shift keeps its cashier, date and opening fund; it moves OPEN → CLOSED → VERIFIED and closes and is verified once. One open shift per cashier.
+  - Number series SR (returns); permission `store.supervise` (manager).
+- **Sales (T13.2):**
+  - A sale needs the cashier's open shift for today. Prices come from the item master, never the screen.
+  - Cash: the amount tendered covers the total, and the change is given. Charge: an ACTIVE member only, and what they owe plus the sale stays within their credit limit; the member is locked while it is checked.
+  - Stock goes out at the moving average (Phase 12 engine).
+  - One Sales Journal entry per sale: Dr Cash or AR–Members (member-tagged) / Cr Sales; Dr COGS / Cr Merchandise Inventory.
+  - `storePatronage(memberId, year)` is ready for Phase 15.
+- **Voids and returns (T13.3):**
+  - **A void** (before completion) needs a supervisor's username and password (`verifySupervisor`: an active, unlocked user with `store.supervise`, never the cashier; a wrong password counts toward their lockout). The voided sale keeps its number and lines, with no entry and no stock.
+  - **A return** can't be more than was sold less earlier returns. It is restocked at the sale's unit cost, and the last units of a line take what is left of its COGS, so nothing drifts.
+  - **The refund** is cash from the cashier's open drawer or, for a charge sale, a credit to the member's account (up to what they owe). One entry: Dr Sales Returns / Cr Cash or AR; Dr Inventory / Cr COGS.
+- **Shifts (T13.4):**
+  - The X/Z-reading: sales (cash and charge), voids, returns (cash and account), net sales, net cash sales, and the expected cash = opening fund + cash sales − cash refunds.
+  - The cashier closes with the cash counted, and the Z-reading is kept. The manager (not the cashier, `cash.verify`) verifies, and a variance goes to Cash Short/Over.
+- **Member charges (T13.5):**
+  - The manager sets a member's own credit limit (the default is `store.member_credit_limit`, ₱1,000.00). The Member charges page shows what each member owes and can still charge; the statement of account comes from the AR–Members sub-ledger.
+  - Teller receipt item STORE_AR_PAYMENT: Cr AR–Members, up to what is owed, one per member per receipt. Cancelling the receipt puts the charge back.
+- **The POS screen (T13.6):**
+  - The barcode/SKU field keeps the focus, with "next quantity" and ×2/×3/×6/×12 shortcuts, +/− per line, member lookup, and cash with exact/quick amounts and the change, or charge to the member.
+  - Void with a supervisor's credential. Large buttons for a tablet.
+  - Shift open/close/verify pages; the sale slip (printable) with the return form.
+- **Reports (T13.7):** sales and gross margin by day, category and product (returns by return date; margin net of returned cost), top items and slow movers (in stock, fewest sold, last sold), on the new Sales & margin page.
+
+**Decisions** (see Questions Q-13.1–Q-13.8)
+- The POS shift is the store's own drawer, verified by the manager like a teller session.
+- No discounts or VAT.
+- Credit limits per member over a default.
+- Supervisor voids by credential; returns by the cashier.
+- Patronage is net of returns by return date.
+
+**Deviations from spec (with reason)**
+- **Shifts have a VERIFIED status** (spec: OPEN|CLOSED). The cash short/over is posted after the manager's verification (`cash.short_over_policy`), as for teller sessions, so a cashier never books their own shortage.
+- **Extra columns:**
+  - `pos_shifts`: expected cash, closed at, verified by/at, the variance entry.
+  - `sales`: the cashier, the voiding supervisor and the void reason.
+  - `sale_returns`: return no., the shift, total, cost, reason and cashier; their lines keep price, amount and cost.
+  - `member_charge_limits`: who set it and when.
+- **New permission and nav item:** `store.supervise` (supervisor voids and credit limits) and Sales & margin (`/store/sales`).
+- **Auth service:** `verifySupervisor` checks a typed credential with the same lockout as sign-in.
+- **Navigation tests:** the "coming soon" example moved to Phase 14 (`/accounting/statements`).
+
+**Follow-ups**
+- Answer Q-13.1–Q-13.8.
+- Backlog: the POS cash turnover at day-end; the BIR invoice no. on the POS screen; discounts / member prices if adopted.
+- Phase 15 reads `storePatronage` (with the loan interest paid) for the patronage refund.
+
+**Exit checks / counts:**
+- `npm run gate` is green: 617 tests (50 files), scan clean. Phase 13 adds:
+  - 9 acceptance tests (A13.1–A13.9);
+  - 14 integration tests (data rules, sales, voids, returns, shifts and the Z-reading, charge accounts and STORE_AR_PAYMENT, reports).
+- `npm run build` is green (`/store/pos`, its shift and sale pages, `/store/charges` and its statements, `/store/sales`).
+- `npm run e2e -- phase-13` is green: A13.10 (scan the barcode → quantity 5 → ₱500.00 tendered → change ₱150.00 shown). The screen was also checked at tablet size (1024 × 768).
+- The full E2E against a production build is green: 22 of 22 (phases 00–13).
+- The trial balance balances after sales, returns, store-charge payments and shift verification (integration tests).
+- Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.
+- Databases set up earlier need `npm run db:migrate && npm run db:seed` (migrations 0035–0036, the SR series, `store.supervise`).

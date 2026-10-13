@@ -6,6 +6,7 @@ import { assertNotSameUser } from "@/lib/auth-guard";
 import { businessToday } from "@/lib/dates";
 import { divide, format, type Money } from "@/lib/money";
 import { next as nextNumber } from "@/lib/numbering";
+import { users } from "@/modules/auth/schema";
 import { accountMappings, journalEntries, journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal, type LineInput } from "@/modules/ledger/service";
 import { members } from "@/modules/members/schema";
@@ -367,4 +368,137 @@ export async function returnSale(tx: Tx, input: { saleId: string; lines: Array<{
   await recordStockMoves(tx, plans, { date: today, refType: "RETURN", refId: returnId, jeId: je.id }, cashierId);
   await audit(tx, { action: "store.sale_return", entity: "sale", entityId: sale.id, after: { returnNo, total: format(total), cost: format(cost), refundMode: input.refundMode, reason }, userId: cashierId });
   return { id: returnId, returnNo, jeId: je.id, total };
+}
+
+// ── Z-reading, closing and verification (T13.4) ──
+
+/**
+ * A shift's reading: sales and returns, cash and charge, and the cash that should be in the
+ * drawer (opening fund + cash sales − cash refunds). The Z-reading is this reading kept at close.
+ */
+export async function shiftReading(shiftId: string, db: Db | Tx = getDb()) {
+  const [shift] = await db.select().from(posShifts).where(eq(posShifts.id, shiftId));
+  if (!shift) throw new StoreError("Shift not found");
+  const [s] = await db
+    .select({
+      count: sql<number>`count(*) FILTER (WHERE ${sales.status} = 'COMPLETED')::int`,
+      voids: sql<number>`count(*) FILTER (WHERE ${sales.status} = 'VOIDED')::int`,
+      gross: sql<string>`coalesce(sum(${sales.total}) FILTER (WHERE ${sales.status} = 'COMPLETED'), 0)::text`,
+      cash: sql<string>`coalesce(sum(${sales.total}) FILTER (WHERE ${sales.status} = 'COMPLETED' AND ${sales.payment} = 'CASH'), 0)::text`,
+      charge: sql<string>`coalesce(sum(${sales.total}) FILTER (WHERE ${sales.status} = 'COMPLETED' AND ${sales.payment} = 'CHARGE'), 0)::text`,
+    })
+    .from(sales)
+    .where(eq(sales.shiftId, shiftId));
+  const [r] = await db
+    .select({
+      count: sql<number>`count(*)::int`,
+      total: sql<string>`coalesce(sum(${saleReturns.total}), 0)::text`,
+      cash: sql<string>`coalesce(sum(${saleReturns.total}) FILTER (WHERE ${saleReturns.refundMode} = 'CASH'), 0)::text`,
+      ar: sql<string>`coalesce(sum(${saleReturns.total}) FILTER (WHERE ${saleReturns.refundMode} = 'AR'), 0)::text`,
+    })
+    .from(saleReturns)
+    .where(eq(saleReturns.shiftId, shiftId));
+  const grossSales = BigInt(s?.gross ?? "0");
+  const cashSales = BigInt(s?.cash ?? "0");
+  const returns = BigInt(r?.total ?? "0");
+  const cashRefunds = BigInt(r?.cash ?? "0");
+  return {
+    shift,
+    openingFund: shift.openingFund,
+    salesCount: s?.count ?? 0,
+    voidsCount: s?.voids ?? 0,
+    returnsCount: r?.count ?? 0,
+    grossSales,
+    cashSales,
+    chargeSales: BigInt(s?.charge ?? "0"),
+    returns,
+    cashRefunds,
+    arRefunds: BigInt(r?.ar ?? "0"),
+    netSales: grossSales - returns,
+    netCashSales: cashSales - cashRefunds,
+    expectedCash: shift.openingFund + cashSales - cashRefunds,
+  };
+}
+
+/** The cashier closes their shift with the cash counted; the Z-reading is kept. */
+export async function closeShift(tx: Tx, input: { shiftId: string; countedCash: Money }, cashierId: string) {
+  const [s] = await tx.select().from(posShifts).where(eq(posShifts.id, input.shiftId)).for("update");
+  if (!s) throw new StoreError("Shift not found");
+  if (s.cashierId !== cashierId) throw new StoreError("Only the cashier who opened the shift can close it");
+  if (s.status !== "OPEN") throw new StoreError(`This shift is already ${s.status}`);
+  if (input.countedCash < 0n) throw new StoreError("The cash counted can't be negative");
+  const z = await shiftReading(s.id, tx);
+  const variance = input.countedCash - z.expectedCash;
+  const zReading = {
+    salesCount: z.salesCount,
+    voidsCount: z.voidsCount,
+    returnsCount: z.returnsCount,
+    openingFund: String(z.openingFund),
+    grossSales: String(z.grossSales),
+    cashSales: String(z.cashSales),
+    chargeSales: String(z.chargeSales),
+    returns: String(z.returns),
+    cashRefunds: String(z.cashRefunds),
+    arRefunds: String(z.arRefunds),
+    netSales: String(z.netSales),
+    netCashSales: String(z.netCashSales),
+    expectedCash: String(z.expectedCash),
+    countedCash: String(input.countedCash),
+    variance: String(variance),
+  };
+  await tx.update(posShifts).set({ status: "CLOSED", expectedCash: z.expectedCash, countedCash: input.countedCash, variance, zReading, closedAt: sql`now()` }).where(eq(posShifts.id, s.id));
+  await audit(tx, { action: "store.shift_close", entity: "pos_shift", entityId: s.id, after: { expected: format(z.expectedCash), counted: format(input.countedCash), variance: format(variance) }, userId: cashierId });
+  return { expectedCash: z.expectedCash, variance };
+}
+
+/**
+ * The manager (not the cashier) verifies a closed shift; a variance is posted to Cash Short/Over
+ * on the shift's business date (short: Dr Short/Over / Cr Cash; over: Dr Cash / Cr Short/Over).
+ */
+export async function verifyShift(tx: Tx, input: { shiftId: string }, managerId: string) {
+  const [s] = await tx.select().from(posShifts).where(eq(posShifts.id, input.shiftId)).for("update");
+  if (!s) throw new StoreError("Shift not found");
+  if (s.status !== "CLOSED") throw new StoreError(s.status === "OPEN" ? "The cashier closes the shift first" : "This shift is already verified");
+  assertNotSameUser(s.cashierId, managerId);
+  const variance = s.variance ?? 0n;
+  let varianceJeId: string | null = null;
+  if (variance !== 0n) {
+    const [cash, shortOver] = [await accountIdFor("cash_on_hand", tx), await accountIdFor("cash_short_over", tx)];
+    const abs = variance < 0n ? -variance : variance;
+    const je = await postJournal(
+      tx,
+      {
+        date: s.businessDate,
+        book: "GJ",
+        particulars: `Cash ${variance < 0n ? "short" : "over"} of the store POS shift of ${s.businessDate}`,
+        source: { module: "store", id: s.id },
+        lines:
+          variance < 0n
+            ? [
+                { accountId: shortOver, debit: abs },
+                { accountId: cash, credit: abs },
+              ]
+            : [
+                { accountId: cash, debit: abs },
+                { accountId: shortOver, credit: abs },
+              ],
+      },
+      managerId,
+    );
+    varianceJeId = je.id;
+  }
+  await tx.update(posShifts).set({ status: "VERIFIED", verifiedBy: managerId, verifiedAt: sql`now()`, varianceJeId }).where(eq(posShifts.id, s.id));
+  await audit(tx, { action: "store.shift_verify", entity: "pos_shift", entityId: s.id, after: { variance: format(variance), varianceJeId }, userId: managerId });
+  return { varianceJeId };
+}
+
+/** Shifts, newest first, with their cashier. */
+export async function listShifts(filter: { status?: "OPEN" | "CLOSED" | "VERIFIED" } = {}, db: Db | Tx = getDb()) {
+  return db
+    .select({ shift: posShifts, cashier: users.username })
+    .from(posShifts)
+    .innerJoin(users, eq(users.id, posShifts.cashierId))
+    .where(filter.status ? eq(posShifts.status, filter.status) : undefined)
+    .orderBy(desc(posShifts.businessDate), desc(posShifts.createdAt))
+    .limit(100);
 }

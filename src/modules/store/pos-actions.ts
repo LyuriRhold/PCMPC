@@ -12,7 +12,7 @@ import { AuthError, verifySupervisor } from "@/modules/auth/service";
 import { CashieringError } from "@/modules/cashiering/builtins";
 import { LedgerError } from "@/modules/ledger/service";
 import { members } from "@/modules/members/schema";
-import { completeSale, openShift, returnSale, voidSale } from "./pos";
+import { closeShift, completeSale, openShift, returnSale, verifyShift, voidSale } from "./pos";
 import { products, REFUND_MODES, SALE_PAYMENTS, stockBalances } from "./schema";
 import { StockError, StoreError } from "./service";
 
@@ -130,6 +130,31 @@ export async function returnSaleAction(input: z.input<typeof returnSchema>): Pro
     const data = returnSchema.parse(input);
     const r = await withTx((tx) => returnSale(tx, data, actor.id));
     return ok({ id: r.id, returnNo: r.returnNo, jeId: r.jeId });
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const closeSchema = z.object({ shiftId: id, countedCash: z.string().trim().max(20) });
+/** Cashier: closes the shift with the cash counted (the Z-reading is kept). */
+export async function closeShiftAction(input: z.input<typeof closeSchema>): Promise<ActionResult<{ expectedCash: string; variance: string }>> {
+  const actor = await requirePermission("store.pos");
+  try {
+    const data = closeSchema.parse(input);
+    const r = await withTx((tx) => closeShift(tx, { shiftId: data.shiftId, countedCash: pesos(data.countedCash, "cash counted") }, actor.id));
+    return ok({ expectedCash: format(r.expectedCash), variance: format(r.variance) });
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const shiftIdSchema = z.object({ shiftId: id });
+/** Manager (not the cashier): verifies a closed shift; a variance is posted to Cash Short/Over. */
+export async function verifyShiftAction(input: z.input<typeof shiftIdSchema>): Promise<ActionResult<{ varianceJeId: string | null }>> {
+  const actor = await requirePermission("cash.verify");
+  try {
+    const data = shiftIdSchema.parse(input);
+    return ok(await withTx((tx) => verifyShift(tx, data, actor.id)));
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

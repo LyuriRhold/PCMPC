@@ -9,10 +9,11 @@ import { changeMemberStatusAction } from "@/modules/members/actions";
 import { journalEntries, journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, subsidiaryLedger, trialBalance } from "@/modules/ledger/service";
 import { updateProductAction } from "@/modules/store/actions";
-import { findMembersAction, findProductAction, openShiftAction, returnSaleAction, voidSaleAction } from "@/modules/store/pos-actions";
-import { getSale } from "@/modules/store/pos";
+import { closeShiftAction, findMembersAction, findProductAction, openShiftAction, returnSaleAction, verifyShiftAction, voidSaleAction } from "@/modules/store/pos-actions";
+import { getSale, shiftReading } from "@/modules/store/pos";
 import { posShifts, sales, stockMoves } from "@/modules/store/schema";
 import { stockBalance } from "@/modules/store/service";
+import { makeUser } from "../helpers/phase01";
 import { P } from "../helpers/phase03";
 import { product, receive } from "../helpers/phase12";
 import { member, openShift, posFixture, sell, setupPos, storePeople, supervisor } from "../helpers/phase13";
@@ -194,5 +195,73 @@ describe("T13.3 returns", () => {
     if (!v.ok) throw new Error(v.error);
     const line = (await getSale(v.data.id))!.lines[0]!;
     expect(await giveBack(v.data.id, [{ saleLineId: line.id, qty: 1 }])).toEqual({ ok: false, error: "S-2026-000001 was voided; nothing to return" });
+  });
+});
+
+describe("T13.4 shifts, Z-reading and the cash count", () => {
+  it("the Z-reading: cash and charge sales, voids, cash and account refunds; the drawer should hold the opening fund + cash sales − cash refunds", async () => {
+    const { p1 } = posFixture();
+    const { clerk } = storePeople();
+    const m = await member();
+    const shiftId = await openShift("500.00");
+    const cash = await sell({ lines: [[p1, 4]], tendered: "300.00" });
+    const charge = await sell({ lines: [[p1, 2]], payment: "CHARGE", memberId: m.id });
+    if (!cash.ok || !charge.ok) throw new Error("sales failed");
+    await runAs(clerk, () => voidSaleAction({ memberId: null, lines: [{ productId: p1, qty: 1 }], reason: "Customer left", supervisor: supervisor() }));
+    const cashLine = (await getSale(cash.data.id))!.lines[0]!;
+    const chargeLine = (await getSale(charge.data.id))!.lines[0]!;
+    await runAs(clerk, () => returnSaleAction({ saleId: cash.data.id, lines: [{ saleLineId: cashLine.id, qty: 1 }], refundMode: "CASH", reason: "Dented" }));
+    await runAs(clerk, () => returnSaleAction({ saleId: charge.data.id, lines: [{ saleLineId: chargeLine.id, qty: 1 }], refundMode: "AR", reason: "Dented" }));
+    const z = await shiftReading(shiftId);
+    expect(z).toMatchObject({
+      salesCount: 2,
+      voidsCount: 1,
+      returnsCount: 2,
+      grossSales: P(420),
+      cashSales: P(280),
+      chargeSales: P(140),
+      returns: P(140),
+      cashRefunds: P(70),
+      arRefunds: P(70),
+      netSales: P(280),
+      netCashSales: P(210),
+      expectedCash: P(710),
+    });
+  });
+
+  it("the cashier closes with the count; the manager (not the cashier) verifies and a variance goes to Cash Short/Over", async () => {
+    const { p1 } = posFixture();
+    const { clerk, manager } = storePeople();
+    const shiftId = await openShift("1,000.00");
+    const s = await sell({ lines: [[p1, 5]], tendered: "500.00" });
+    if (!s.ok) throw new Error(s.error);
+    const otherClerk = (await makeUser("STORE_CLERK", "clerk2")).id;
+    expect(await runAs(otherClerk, () => closeShiftAction({ shiftId, countedCash: "1,350.00" }))).toEqual({ ok: false, error: "Only the cashier who opened the shift can close it" });
+    expect(await runAs(manager, () => verifyShiftAction({ shiftId }))).toEqual({ ok: false, error: "The cashier closes the shift first" });
+    // ₱1,350.00 expected; ₱1,340.00 counted: ₱10.00 short.
+    expect(await runAs(clerk, () => closeShiftAction({ shiftId, countedCash: "1,340.00" }))).toEqual({ ok: true, data: { expectedCash: "₱1,350.00", variance: "-₱10.00" } });
+    const [closed] = await getDb().select().from(posShifts).where(eq(posShifts.id, shiftId));
+    expect(closed).toMatchObject({ status: "CLOSED", expectedCash: P(1350), countedCash: P(1340), variance: -P(10) });
+    expect(closed?.zReading).toMatchObject({ salesCount: 1, grossSales: "35000", netCashSales: "35000", expectedCash: "135000", variance: "-1000" });
+    expect(await sell({ lines: [[p1, 1]], tendered: "70.00" })).toEqual({ ok: false, error: "Open your shift first" });
+    expect(await runAs(clerk, () => closeShiftAction({ shiftId, countedCash: "1,340.00" }))).toEqual({ ok: false, error: "This shift is already CLOSED" });
+    await expect(runAs(clerk, () => verifyShiftAction({ shiftId }))).rejects.toBeInstanceOf(ForbiddenError);
+    const v = await runAs(manager, () => verifyShiftAction({ shiftId }));
+    if (!v.ok) throw new Error(v.error);
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, v.data.varianceJeId!));
+    const [shortOver, cash] = [await accountIdFor("cash_short_over"), await accountIdFor("cash_on_hand")];
+    expect(lines.map((l) => [l.accountId, l.debit, l.credit])).toEqual([
+      [shortOver, P(10), 0n],
+      [cash, 0n, P(10)],
+    ]);
+    expect(await runAs(manager, () => verifyShiftAction({ shiftId }))).toEqual({ ok: false, error: "This shift is already verified" });
+    // A cash refund needs the cashier's open drawer.
+    const line = (await getSale(s.data.id))!.lines[0]!;
+    expect(await runAs(clerk, () => returnSaleAction({ saleId: s.data.id, lines: [{ saleLineId: line.id, qty: 1 }], refundMode: "CASH", reason: "x" }))).toEqual({ ok: false, error: "Open your shift first" });
+    // The next shift opens; a count that agrees posts nothing.
+    const next = await openShift("1,000.00");
+    expect(await runAs(clerk, () => closeShiftAction({ shiftId: next, countedCash: "1,000.00" }))).toEqual({ ok: true, data: { expectedCash: "₱1,000.00", variance: "₱0.00" } });
+    expect(await runAs(manager, () => verifyShiftAction({ shiftId: next }))).toEqual({ ok: true, data: { varianceJeId: null } });
+    expect((await trialBalance("2026-12-31")).balanced).toBe(true);
   });
 });

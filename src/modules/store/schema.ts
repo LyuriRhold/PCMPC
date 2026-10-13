@@ -1,9 +1,10 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, check, date, index, integer, numeric, pgTable, text, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, date, index, integer, jsonb, numeric, pgTable, text, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { createdColumns, tstz } from "@/db/columns";
 import { users } from "@/modules/auth/schema";
 import { disbursementVouchers } from "@/modules/cashiering/schema";
 import { journalEntries } from "@/modules/ledger/schema";
+import { members } from "@/modules/members/schema";
 
 /**
  * The consumer store's inventory and purchasing (PHASE-12): the item master and its price history,
@@ -327,3 +328,215 @@ export type ReceivingReport = typeof receivingReports.$inferSelect;
 export type StockMove = typeof stockMoves.$inferSelect;
 export type StockCount = typeof stockCounts.$inferSelect;
 export type StockCountLine = typeof stockCountLines.$inferSelect;
+
+// ── Phase 13: the point of sale ──
+
+export const SHIFT_STATUSES = ["OPEN", "CLOSED", "VERIFIED"] as const;
+export type ShiftStatus = (typeof SHIFT_STATUSES)[number];
+
+/** The Z-reading kept when a shift closes (amounts are centavo strings). */
+export type ZReading = Record<string, string | number>;
+
+/**
+ * A POS shift: the store cashier's drawer for one business day. OPEN while selling; CLOSED with the
+ * cash count and the Z-reading; VERIFIED by the manager, which posts any cash short/over
+ * (cash.short_over_policy, as for teller sessions).
+ */
+export const posShifts = pgTable(
+  "pos_shifts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cashierId: uuid("cashier_id")
+      .notNull()
+      .references(() => users.id),
+    businessDate: date("business_date", { mode: "string" }).notNull(),
+    openingFund: money("opening_fund").notNull(),
+    status: text("status").$type<ShiftStatus>().notNull().default("OPEN"),
+    expectedCash: money("expected_cash"),
+    countedCash: money("counted_cash"),
+    variance: money("variance"),
+    zReading: jsonb("z_reading").$type<ZReading>(),
+    closedAt: tstz("closed_at"),
+    verifiedBy: uuid("verified_by").references(() => users.id),
+    verifiedAt: tstz("verified_at"),
+    /** The cash short/over entry posted on verification (none when the count agreed). */
+    varianceJeId: uuid("variance_je_id").references(() => journalEntries.id),
+    ...createdColumns(),
+  },
+  (t) => [
+    check("pos_shifts_status_chk", inList("status", SHIFT_STATUSES)),
+    check("pos_shifts_amounts_chk", sql`${t.openingFund} >= 0 AND (${t.countedCash} IS NULL OR ${t.countedCash} >= 0)`),
+    check("pos_shifts_closed_chk", sql`(${t.status} = 'OPEN') = (${t.countedCash} IS NULL)`),
+    check("pos_shifts_sod_chk", sql`${t.verifiedBy} IS NULL OR ${t.verifiedBy} <> ${t.cashierId}`),
+    /** One open drawer per cashier. */
+    uniqueIndex("pos_shifts_open_uq").on(t.cashierId).where(sql`${t.status} = 'OPEN'`),
+    index("pos_shifts_date_idx").on(t.businessDate),
+  ],
+);
+
+export const SALE_CUSTOMER_TYPES = ["MEMBER", "NON_MEMBER"] as const;
+export type SaleCustomerType = (typeof SALE_CUSTOMER_TYPES)[number];
+export const SALE_PAYMENTS = ["CASH", "CHARGE"] as const;
+export type SalePayment = (typeof SALE_PAYMENTS)[number];
+export const SALE_STATUSES = ["COMPLETED", "VOIDED"] as const;
+export type SaleStatus = (typeof SALE_STATUSES)[number];
+
+/**
+ * A sale. COMPLETED: one Sales Journal entry (Dr Cash or AR–Members / Cr Sales; Dr COGS / Cr
+ * Merchandise Inventory) with the stock moves. VOIDED: cancelled before completion with a
+ * supervisor's credential; no entry, no stock. Never changed afterwards; corrected by a return.
+ */
+export const sales = pgTable(
+  "sales",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    saleNo: text("sale_no").notNull().unique(),
+    shiftId: uuid("shift_id")
+      .notNull()
+      .references(() => posShifts.id),
+    saleDate: date("sale_date", { mode: "string" }).notNull(),
+    cashierId: uuid("cashier_id")
+      .notNull()
+      .references(() => users.id),
+    memberId: uuid("member_id").references(() => members.id),
+    customerType: text("customer_type").$type<SaleCustomerType>().notNull(),
+    payment: text("payment").$type<SalePayment>().notNull(),
+    subtotal: money("subtotal").notNull(),
+    discount: money("discount").notNull().default(sql`0`),
+    total: money("total").notNull(),
+    tendered: money("tendered"),
+    change: money("change"),
+    status: text("status").$type<SaleStatus>().notNull(),
+    jeId: uuid("je_id").references(() => journalEntries.id),
+    /** The BIR invoice / OR no. when the POS issues one (PLAN R1). */
+    birInvoiceNo: text("bir_invoice_no"),
+    voidedBy: uuid("voided_by").references(() => users.id),
+    voidReason: text("void_reason"),
+    ...createdColumns(),
+  },
+  (t) => [
+    check("sales_customer_type_chk", inList("customer_type", SALE_CUSTOMER_TYPES)),
+    check("sales_payment_chk", inList("payment", SALE_PAYMENTS)),
+    check("sales_status_chk", inList("status", SALE_STATUSES)),
+    check("sales_member_chk", sql`(${t.customerType} = 'MEMBER') = (${t.memberId} IS NOT NULL) AND (${t.payment} = 'CASH' OR ${t.memberId} IS NOT NULL)`),
+    check("sales_amounts_chk", sql`${t.subtotal} >= 0 AND ${t.discount} >= 0 AND ${t.total} = ${t.subtotal} - ${t.discount} AND (${t.change} IS NULL OR (${t.change} >= 0 AND ${t.tendered} = ${t.total} + ${t.change}))`),
+    check("sales_posted_chk", sql`(${t.status} = 'COMPLETED') = (${t.jeId} IS NOT NULL) AND (${t.status} = 'COMPLETED' OR (${t.voidedBy} IS NOT NULL AND ${t.voidReason} IS NOT NULL AND ${t.voidedBy} <> ${t.cashierId}))`),
+    index("sales_shift_idx").on(t.shiftId),
+    index("sales_member_idx").on(t.memberId, t.saleDate),
+    index("sales_date_idx").on(t.saleDate),
+  ],
+);
+
+export const saleLines = pgTable(
+  "sale_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    saleId: uuid("sale_id")
+      .notNull()
+      .references(() => sales.id),
+    lineNo: integer("line_no").notNull(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id),
+    qty: integer("qty").notNull(),
+    /** The selling price when sold (centavos per unit). */
+    unitPrice: money("unit_price").notNull(),
+    discount: money("discount").notNull().default(sql`0`),
+    lineTotal: money("line_total").notNull(),
+    /** The moving-average cost per unit when sold (pesos, 4 decimals); 0 on a voided sale. */
+    unitCost: unitCost4("unit_cost").notNull(),
+    cogs: money("cogs").notNull(),
+    ...createdColumns(),
+  },
+  (t) => [
+    unique("sale_lines_line_uq").on(t.saleId, t.lineNo),
+    check("sale_lines_amounts_chk", sql`${t.qty} > 0 AND ${t.unitPrice} >= 0 AND ${t.discount} >= 0 AND ${t.lineTotal} = ${t.qty} * ${t.unitPrice} - ${t.discount} AND ${t.cogs} >= 0`),
+    index("sale_lines_product_idx").on(t.productId),
+  ],
+);
+
+export const REFUND_MODES = ["CASH", "AR"] as const;
+export type RefundMode = (typeof REFUND_MODES)[number];
+
+/**
+ * Goods returned from a completed sale: restocked at the sale's unit cost; refunded in cash from
+ * the cashier's drawer, or (for a charge sale) taken off the member's account. One entry: Dr Sales
+ * Returns / Cr Cash or AR–Members; Dr Merchandise Inventory / Cr COGS.
+ */
+export const saleReturns = pgTable(
+  "sale_returns",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    returnNo: text("return_no").notNull().unique(),
+    saleId: uuid("sale_id")
+      .notNull()
+      .references(() => sales.id),
+    /** The drawer a cash refund came out of. */
+    shiftId: uuid("shift_id").references(() => posShifts.id),
+    returnDate: date("return_date", { mode: "string" }).notNull(),
+    refundMode: text("refund_mode").$type<RefundMode>().notNull(),
+    total: money("total").notNull(),
+    cost: money("cost").notNull(),
+    reason: text("reason").notNull(),
+    cashierId: uuid("cashier_id")
+      .notNull()
+      .references(() => users.id),
+    jeId: uuid("je_id")
+      .notNull()
+      .references(() => journalEntries.id),
+    ...createdColumns(),
+  },
+  (t) => [
+    check("sale_returns_mode_chk", inList("refund_mode", REFUND_MODES)),
+    check("sale_returns_amounts_chk", sql`${t.total} > 0 AND ${t.cost} >= 0 AND (${t.refundMode} = 'AR' OR ${t.shiftId} IS NOT NULL)`),
+    index("sale_returns_sale_idx").on(t.saleId),
+    index("sale_returns_shift_idx").on(t.shiftId),
+  ],
+);
+
+export const saleReturnLines = pgTable(
+  "sale_return_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    returnId: uuid("return_id")
+      .notNull()
+      .references(() => saleReturns.id),
+    saleLineId: uuid("sale_line_id")
+      .notNull()
+      .references(() => saleLines.id),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id),
+    qty: integer("qty").notNull(),
+    unitPrice: money("unit_price").notNull(),
+    amount: money("amount").notNull(),
+    unitCost: unitCost4("unit_cost").notNull(),
+    cost: money("cost").notNull(),
+    ...createdColumns(),
+  },
+  (t) => [check("sale_return_lines_amounts_chk", sql`${t.qty} > 0 AND ${t.amount} >= 0 AND ${t.cost} >= 0`), index("sale_return_lines_line_idx").on(t.saleLineId)],
+);
+
+/** A member's own store credit limit (otherwise store.member_credit_limit applies). */
+export const memberChargeLimits = pgTable(
+  "member_charge_limits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    memberId: uuid("member_id")
+      .notNull()
+      .unique()
+      .references(() => members.id),
+    limitAmount: money("limit_amount").notNull(),
+    setBy: uuid("set_by")
+      .notNull()
+      .references(() => users.id),
+    updatedAt: tstz("updated_at").notNull().defaultNow(),
+    ...createdColumns(),
+  },
+  (t) => [check("member_charge_limits_amount_chk", sql`${t.limitAmount} >= 0`)],
+);
+
+export type PosShift = typeof posShifts.$inferSelect;
+export type Sale = typeof sales.$inferSelect;
+export type SaleLine = typeof saleLines.$inferSelect;
+export type SaleReturn = typeof saleReturns.$inferSelect;

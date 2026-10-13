@@ -26,6 +26,7 @@ export const NUMBER_SERIES: Array<{ code: string; format: string; resetsYearly: 
   { code: "RR", format: "RR-{YYYY}-{00000}", resetsYearly: true },
   { code: "S", format: "S-{YYYY}-{000000}", resetsYearly: true },
   { code: "SC", format: "SC-{YYYY}-{00000}", resetsYearly: true },
+  { code: "SR", format: "SR-{YYYY}-{000000}", resetsYearly: true },
 ];
 
 /** Creates each series (the current business year's row for yearly series). Idempotent. */

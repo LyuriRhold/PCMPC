@@ -177,7 +177,7 @@
 - [x] Exit checks passed
 
 ### Phase 13 — Store: POS, Charge-to-Member & Store Patronage
-- [ ] T13.1 Schema + migrations
+- [x] T13.1 Schema + migrations
 - [ ] T13.2 Sale service (cash/charge) with stock + GL in one transaction
 - [ ] T13.3 Returns and voids
 - [ ] T13.4 Shifts + Z-reading + cash count

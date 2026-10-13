@@ -58,7 +58,7 @@ test("A12.8 create product → PO → receive → the stock card shows qty and a
   // Store clerk: receives the delivery against the PO (on account).
   await signIn(page, clerk.user, clerk.pass);
   await page.goto(poUrl);
-  await page.getByRole("link", { name: "Receive delivery" }).click();
+  await page.getByRole("button", { name: "Receive delivery" }).click();
   await page.getByLabel("Supplier invoice no.").fill(`SI-${run}`);
   await page.getByRole("button", { name: "Post receiving report" }).click();
   await expect(page.getByRole("heading", { name: /Receiving report RR-\d{4}-\d{5}/ })).toBeVisible();

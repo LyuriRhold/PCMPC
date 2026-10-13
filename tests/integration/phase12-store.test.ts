@@ -8,7 +8,7 @@ import { setClock } from "@/lib/dates";
 import { approveDvAction, createDvAction, releaseDvAction } from "@/modules/cashiering/actions";
 import { cashOuts, disbursementVouchers } from "@/modules/cashiering/schema";
 import { journalEntries, journalLines } from "@/modules/ledger/schema";
-import { accountIdFor, postJournal, supplierLedger, trialBalance } from "@/modules/ledger/service";
+import { accountIdFor, postJournal, reverseJournal, supplierLedger, trialBalance } from "@/modules/ledger/service";
 import {
   approveCountAction,
   approvePoAction,
@@ -22,6 +22,7 @@ import {
   enterCountAction,
   paySupplierAction,
   receiveAction,
+  returnCountAction,
   submitCountAction,
   updateCategoryAction,
   updateProductAction,
@@ -30,7 +31,7 @@ import {
 import { approvePo, getPo, getRr } from "@/modules/store/purchasing";
 import { apAging, inventoryValuation, reorderList, stockCard } from "@/modules/store/reports";
 import { productPriceHistory, products, purchaseOrders, receivingReports, stockMoves, suppliers } from "@/modules/store/schema";
-import { approveCount, getCount, getProduct, listProducts, pendingSupplierPayments, stockBalance, supplierBalance } from "@/modules/store/service";
+import { approveCount, getCount, getProduct, listProducts, pendingSupplierPayments, planStockMoves, recordStockMoves, stockBalance, supplierBalance } from "@/modules/store/service";
 import { makeUser } from "../helpers/phase01";
 import { acct, P } from "../helpers/phase03";
 import { openSessionAs } from "../helpers/phase04";
@@ -150,12 +151,12 @@ describe("T12.4 purchase orders, receiving, payables and supplier payments", () 
     ]);
     expect(po.poNo).toBe("PO-2026-00001");
     const lines = (await getPo(po.id))!.lines;
-    const recv = (qtys: [number, number], supplierId = s1) =>
+    const recv = (qtys: [number, number], supplierId = s1, invoiceNo = "SI-1") =>
       runAs(clerk, () =>
         receiveAction({
           supplierId,
           poId: po.id,
-          invoiceNo: "SI-1",
+          invoiceNo,
           payment: "ON_ACCOUNT",
           lines: lines.map((l, i) => ({ productId: l.product.id, poLineId: l.line.id, qty: qtys[i]!, unitCost: i === 0 ? "50.00" : "10.01" })).filter((l) => l.qty > 0),
         }),
@@ -170,7 +171,7 @@ describe("T12.4 purchase orders, receiving, payables and supplier payments", () 
     if (!first.ok) throw new Error(first.error);
     expect((await getPo(po.id))!.po.status).toBe("PARTIAL");
     expect(await recv([5, 4])).toMatchObject({ ok: false, error: expect.stringMatching(/only 4 still to come on PO-2026-00001/) });
-    const second = await recv([4, 4]);
+    const second = await recv([4, 4], s1, "SI-2");
     if (!second.ok) throw new Error(second.error);
     const after = (await getPo(po.id))!;
     expect(after.po.status).toBe("RECEIVED");
@@ -187,7 +188,7 @@ describe("T12.4 purchase orders, receiving, payables and supplier payments", () 
     expect(await supplierBalance(s1)).toBe(P(540, 4));
     expect((await getRr(second.data.id))!.rr).toMatchObject({ rrNo: "RR-2026-00002", total: P(240, 4), dueDate: "2026-11-06", payment: "ON_ACCOUNT" });
     const [je] = await getDb().select().from(journalEntries).where(eq(journalEntries.id, second.data.jeId));
-    expect(je).toMatchObject({ book: "PJ", sourceModule: "store", reference: "SI-1" });
+    expect(je).toMatchObject({ book: "PJ", sourceModule: "store", reference: "SI-2" });
   });
 
   it("a PO is cancelled by the manager with a reason", async () => {
@@ -206,7 +207,7 @@ describe("T12.4 purchase orders, receiving, payables and supplier payments", () 
     const p1 = await product();
     const bad = (lines: Array<{ qty: number; unitCost: string }>) =>
       runAs(clerk, () => receiveAction({ supplierId: s1, poId: null, invoiceNo: null, payment: "ON_ACCOUNT", lines: lines.map((l) => ({ productId: p1, poLineId: null, ...l })) }));
-    expect(await bad([{ qty: 0, unitCost: "1.00" }])).toMatchObject({ ok: false, error: expect.stringMatching(/whole number more than zero/) });
+    expect(await bad([{ qty: 0, unitCost: "1.00" }])).toMatchObject({ ok: false, error: expect.stringMatching(/whole number from 1 to 1,000,000/) });
     expect(await bad([{ qty: 2, unitCost: "0.00" }])).toMatchObject({ ok: false, error: "The delivery's total must be more than zero" });
     expect(await bad([{ qty: 2, unitCost: "x" }])).toMatchObject({ ok: false, error: expect.stringMatching(/unit cost on line 1 in pesos/) });
     expect(await getDb().select().from(receivingReports)).toHaveLength(0);
@@ -315,7 +316,7 @@ describe("T12.5 stock counts", () => {
     expect((await getCount(all.data.id))!.lines.map((l) => l.sku).sort()).toEqual(["C1", "C2"]);
     expect((await runAs(clerk, () => enterCountAction({ countId: all.data.id, lines: [{ productId: p1, countedQty: 9 }] }))).ok).toBe(true);
     expect(await runAs(clerk, () => enterCountAction({ countId: all.data.id, lines: [{ productId: p3, countedQty: 1 }] }))).toMatchObject({ ok: false, error: expect.stringMatching(/isn't on SC-2026-00001/) });
-    expect(await runAs(clerk, () => enterCountAction({ countId: all.data.id, lines: [{ productId: p2, countedQty: -1 }] }))).toMatchObject({ ok: false, error: expect.stringMatching(/whole number, 0 or more/) });
+    expect(await runAs(clerk, () => enterCountAction({ countId: all.data.id, lines: [{ productId: p2, countedQty: -1 }] }))).toMatchObject({ ok: false, error: expect.stringMatching(/whole number from 0 to 10,000,000/) });
     expect(await runAs(clerk, () => submitCountAction({ countId: all.data.id }))).toMatchObject({ ok: false, error: "Count every product first (1 not counted)" });
     // Stock moves between the count and its submission are in the system quantity.
     await receive(s1, [[p1, 1, "4.00"]]);
@@ -477,5 +478,129 @@ describe("T12.6 reports: stock card, valuation, reorder list, payables aging", (
     const feb = await apAging("2027-02-01");
     expect(feb.rows[0]?.buckets).toMatchObject({ "61–90": P(600), "Over 90": P(200) });
     expect((await apAging("2026-09-30")).rows).toEqual([]);
+  });
+});
+
+describe("review follow-ups", () => {
+  async function submitted(lines: Array<[string, number]>) {
+    const { clerk } = storePeople();
+    const c = await runAs(clerk, () => createCountAction({ productIds: lines.map(([p]) => p), remarks: null }));
+    if (!c.ok) throw new Error(c.error);
+    await runAs(clerk, () => enterCountAction({ countId: c.data.id, lines: lines.map(([productId, countedQty]) => ({ productId, countedQty })) }));
+    const s = await runAs(clerk, () => submitCountAction({ countId: c.data.id }));
+    if (!s.ok) throw new Error(s.error);
+    return c.data;
+  }
+
+  it("moves keep the order they were applied in: the same product twice on one report, and two reports at once", async () => {
+    const { clerk } = storePeople();
+    const s1 = await supplier();
+    const p1 = await product({ sku: "M1" });
+    // One report, two lines of the same product (one transaction, one insert).
+    const rr = await runAs(clerk, () =>
+      receiveAction({
+        supplierId: s1,
+        poId: null,
+        invoiceNo: null,
+        payment: "ON_ACCOUNT",
+        lines: [
+          { productId: p1, poLineId: null, qty: 10, unitCost: "50.00" },
+          { productId: p1, poLineId: null, qty: 10, unitCost: "60.00" },
+        ],
+      }),
+    );
+    if (!rr.ok) throw new Error(rr.error);
+    // Two reports for the same product at the same time.
+    const both = await Promise.all([receive(s1, [[p1, 3, "10.00"]]), receive(s1, [[p1, 4, "10.01"]])]);
+    expect(both).toHaveLength(2);
+    const balance = await stockBalance(p1);
+    expect(balance).toMatchObject({ qty: 27, value: P(1100) + P(30) + P(40, 4) });
+    const card = await stockCard(p1, "2026-01-01", "2026-12-31");
+    expect(card.closing).toEqual(balance);
+    expect(card.moves.map((m) => m.qtyAfter).filter((q, i) => i !== 2)).toEqual([10, 20, 27]);
+    expect([23, 24]).toContain(card.moves[2]!.qtyAfter);
+    const v = await inventoryValuation();
+    expect(v.rows.map((r) => [r.qty, r.value])).toEqual([[27, balance.value]]);
+    expect(v.difference).toBe(0n);
+  });
+
+  it("a supplier invoice is received once", async () => {
+    const { clerk } = storePeople();
+    const s1 = await supplier();
+    const p1 = await product();
+    const rr = (invoiceNo: string) => runAs(clerk, () => receiveAction({ supplierId: s1, poId: null, invoiceNo, payment: "ON_ACCOUNT", lines: [{ productId: p1, poLineId: null, qty: 1, unitCost: "5.00" }] }));
+    expect((await rr("SI-100")).ok).toBe(true);
+    expect(await rr("si-100")).toMatchObject({ ok: false, error: "S1 Trading's invoice si-100 is already received (RR-2026-00001)" });
+    const other = await supplier("S2 Supply");
+    expect((await runAs(clerk, () => receiveAction({ supplierId: other, poId: null, invoiceNo: "SI-100", payment: "ON_ACCOUNT", lines: [{ productId: p1, poLineId: null, qty: 1, unitCost: "5.00" }] }))).ok).toBe(true);
+  });
+
+  it("quantities and costs stay within their limits", async () => {
+    const { clerk } = storePeople();
+    const s1 = await supplier();
+    const p1 = await product();
+    const rr = (qty: number, unitCost: string) => runAs(clerk, () => receiveAction({ supplierId: s1, poId: null, invoiceNo: null, payment: "ON_ACCOUNT", lines: [{ productId: p1, poLineId: null, qty, unitCost }] }));
+    expect(await rr(3_000_000_000, "1.00")).toMatchObject({ ok: false, error: "Line 1: the quantity is a whole number from 1 to 1,000,000" });
+    expect(await rr(1, "10,000,000.01")).toMatchObject({ ok: false, error: "Line 1: the unit cost is more than ₱10,000,000.00" });
+  });
+
+  it("a product is on one open count at a time; the manager can send a count back to the clerk", async () => {
+    const { clerk } = storePeople();
+    const s1 = await supplier();
+    const p1 = await product({ sku: "O1" });
+    await receive(s1, [[p1, 15, "55.00"]]);
+    const first = await submitted([[p1, 130]]);
+    expect(await runAs(clerk, () => createCountAction({ productIds: [p1], remarks: null }))).toMatchObject({ ok: false, error: "Already on an open count: O1 (SC-2026-00001); finish or return that count first" });
+    await expect(runAs(clerk, () => returnCountAction({ countId: first.id, reason: "x" }))).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await runAs(manager, () => returnCountAction({ countId: first.id, reason: " " }))).toMatchObject({ ok: false, error: "Enter why the count goes back to the clerk" });
+    expect((await runAs(manager, () => returnCountAction({ countId: first.id, reason: "130 looks wrong; recount" }))).ok).toBe(true);
+    const back = (await getCount(first.id))!;
+    expect(back.count).toMatchObject({ status: "DRAFT", submittedBy: null });
+    expect(back.lines.map((l) => [l.systemQty, l.countedQty, l.variance])).toEqual([[null, 130, null]]);
+    await runAs(clerk, () => enterCountAction({ countId: first.id, lines: [{ productId: p1, countedQty: 13 }] }));
+    expect((await runAs(clerk, () => submitCountAction({ countId: first.id }))).ok).toBe(true);
+    expect((await runAs(manager, () => approveCountAction({ countId: first.id }))).ok).toBe(true);
+    expect(await stockBalance(p1)).toMatchObject({ qty: 13, value: P(715) });
+    expect(await runAs(manager, () => returnCountAction({ countId: first.id, reason: "late" }))).toMatchObject({ ok: false, error: expect.stringMatching(/APPROVED; only a submitted count/) });
+    // The database keeps the approver apart from whoever prepared or submitted the count.
+    const po = await runAs(clerk, () => createPoAction({ supplierId: s1, remarks: null, lines: [{ productId: p1, qty: 1, unitCost: "1.00" }] }));
+    if (!po.ok) throw new Error(po.error);
+    await expect(getPool().query("UPDATE purchase_orders SET approved_by = prepared_by WHERE id = $1", [po.data.id])).rejects.toThrow(/purchase_orders_sod_chk/);
+    const c2 = await submitted([[p1, 13]]);
+    await expect(getPool().query("UPDATE stock_counts SET status = 'APPROVED', approved_by = prepared_by WHERE id = $1", [c2.id])).rejects.toThrow(/stock_counts_sod_chk/);
+  });
+
+  it("an issue through the stock service (as the POS will) never goes below zero; a count's shortage left without stock is worth nothing", async () => {
+    const s1 = await supplier();
+    const p1 = await product({ sku: "I1", name: "Sardines" });
+    await receive(s1, [[p1, 15, "55.00"]]);
+    const c = await submitted([[p1, 13]]);
+    await expect(withTx((tx) => planStockMoves(tx, [{ productId: p1, type: "SALE", qty: -16 }]))).rejects.toThrow("I1 Sardines: Insufficient stock (15)");
+    // A sale of all 15 (Phase 13 posts it with its entry).
+    await withTx(async (tx) => {
+      const plans = await planStockMoves(tx, [{ productId: p1, type: "SALE", qty: -15 }]);
+      expect(plans[0]!.totalCost).toBe(-P(825));
+      const je = await postJournal(tx, { date: "2026-10-07", book: "SJ", particulars: "Sale", lines: [{ accountId: await accountIdFor("cost_of_sales", tx), debit: P(825) }, { accountId: await accountIdFor("merchandise_inventory", tx), credit: P(825) }] }, manager);
+      await recordStockMoves(tx, plans, { date: "2026-10-07", refType: "SALE", refId: je.id, jeId: je.id }, manager);
+    });
+    expect(await stockBalance(p1)).toEqual({ qty: 0, avgCost: "55.0000", value: 0n });
+    expect((await getCount(c.id))!.lines[0]).toMatchObject({ variance: -2, varianceValue: 0n });
+    expect((await inventoryValuation()).difference).toBe(0n);
+  });
+
+  it("a reversal of a supplier entry keeps the supplier tag", async () => {
+    const s1 = await supplier();
+    const p1 = await product();
+    const rr = await receive(s1, [[p1, 2, "5.00"]]);
+    const rev = await withTx((tx) => reverseJournal(tx, rr.jeId, "2026-10-07", "test", manager));
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, rev.id));
+    expect(lines.filter((l) => l.supplierId === s1).map((l) => l.debit)).toEqual([P(10)]);
+    expect(await supplierBalance(s1)).toBe(0n);
+  });
+
+  it("the reorder list leaves out products with no reorder level", async () => {
+    await product({ sku: "R0", reorderLevel: 0 });
+    await product({ sku: "R5", reorderLevel: 5 });
+    expect((await reorderList()).map((r) => r.product.sku)).toEqual(["R5"]);
   });
 });

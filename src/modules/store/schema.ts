@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, check, date, index, integer, numeric, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, date, index, integer, numeric, pgTable, text, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { createdColumns, tstz } from "@/db/columns";
 import { users } from "@/modules/auth/schema";
 import { disbursementVouchers } from "@/modules/cashiering/schema";
@@ -110,7 +110,12 @@ export const purchaseOrders = pgTable(
     cancelReason: text("cancel_reason"),
     ...createdColumns(),
   },
-  (t) => [check("purchase_orders_status_chk", inList("status", PO_STATUSES)), check("purchase_orders_total_chk", sql`${t.total} >= 0`), index("purchase_orders_supplier_idx").on(t.supplierId)],
+  (t) => [
+    check("purchase_orders_status_chk", inList("status", PO_STATUSES)),
+    check("purchase_orders_total_chk", sql`${t.total} >= 0`),
+    check("purchase_orders_sod_chk", sql`${t.approvedBy} IS NULL OR ${t.approvedBy} <> ${t.preparedBy}`),
+    index("purchase_orders_supplier_idx").on(t.supplierId),
+  ],
 );
 
 export const poLines = pgTable(
@@ -171,7 +176,13 @@ export const receivingReports = pgTable(
       .references(() => journalEntries.id),
     ...createdColumns(),
   },
-  (t) => [check("receiving_reports_payment_chk", inList("payment", RR_PAYMENTS)), check("receiving_reports_total_chk", sql`${t.total} > 0`), index("receiving_reports_supplier_idx").on(t.supplierId, t.rrDate)],
+  (t) => [
+    check("receiving_reports_payment_chk", inList("payment", RR_PAYMENTS)),
+    check("receiving_reports_total_chk", sql`${t.total} > 0`),
+    index("receiving_reports_supplier_idx").on(t.supplierId, t.rrDate),
+    /** A supplier invoice is received once. */
+    uniqueIndex("receiving_reports_invoice_uq").on(t.supplierId, sql`lower(${t.invoiceNo})`).where(sql`${t.invoiceNo} IS NOT NULL`),
+  ],
 );
 
 export const rrLines = pgTable(
@@ -207,6 +218,8 @@ export const stockMoves = pgTable(
   "stock_moves",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** The order the moves were applied in (taken while the product balance is locked). */
+    seq: bigint("seq", { mode: "number" }).generatedAlwaysAsIdentity().notNull(),
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id),
@@ -229,6 +242,7 @@ export const stockMoves = pgTable(
     check("stock_moves_je_chk", sql`${t.jeId} IS NOT NULL OR ${t.totalCost} = 0`),
     check("stock_moves_amounts_chk", sql`${t.qty} <> 0 AND ((${t.qty} > 0 AND ${t.totalCost} >= 0) OR (${t.qty} < 0 AND ${t.totalCost} <= 0)) AND ${t.qtyAfter} >= 0 AND ${t.valueAfter} >= 0`),
     index("stock_moves_product_idx").on(t.productId, t.moveDate),
+    index("stock_moves_product_seq_idx").on(t.productId, t.seq),
     index("stock_moves_ref_idx").on(t.refType, t.refId),
   ],
 );
@@ -267,13 +281,17 @@ export const stockCounts = pgTable(
       .notNull()
       .references(() => users.id),
     submittedAt: tstz("submitted_at"),
+    submittedBy: uuid("submitted_by").references(() => users.id),
     approvedBy: uuid("approved_by").references(() => users.id),
     approvedAt: tstz("approved_at"),
     /** The adjustment entry (none when nothing differed). */
     jeId: uuid("je_id").references(() => journalEntries.id),
     ...createdColumns(),
   },
-  () => [check("stock_counts_status_chk", inList("status", COUNT_STATUSES))],
+  (t) => [
+    check("stock_counts_status_chk", inList("status", COUNT_STATUSES)),
+    check("stock_counts_sod_chk", sql`${t.approvedBy} IS NULL OR (${t.approvedBy} <> ${t.preparedBy} AND ${t.approvedBy} IS DISTINCT FROM ${t.submittedBy})`),
+  ],
 );
 
 export const stockCountLines = pgTable(

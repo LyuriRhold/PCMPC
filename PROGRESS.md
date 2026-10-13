@@ -332,8 +332,8 @@
 - [ ] Q-12.3 (phase 12) VAT class of products. | default used: every product is VAT-exempt (a cooperative's sales to members); the class is kept per product for the BIR set-up but isn't used in the postings yet | answer:
 - [ ] Q-12.4 (phase 12) Deliveries paid in cash. | default used: the receiving report posts Dr Merchandise Inventory / Cr AP–Trade (the supplier) like any delivery, and creates a cash payment voucher for it; the manager approves the voucher and a teller pays it from the drawer (Dr AP–Trade / Cr Cash on Hand), so the cash leaves through the counter (PLAN §5 rule 9). The spec says the RR credits Cash directly | answer:
 - [ ] Q-12.5 (phase 12) Stock count overages. | default used: an overage comes in at the product's average cost, Dr Merchandise Inventory / Cr a new account 44150 Inventory Overage (Other Income); a shortage goes out at the average cost, Dr Inventory Losses (DOMAIN §6). Should overages instead reduce Inventory Losses? | answer:
-- [ ] Q-12.6 (phase 12) Purchasing rules. | default used: deliveries may be received without a PO (small purchases); a PO is received in parts, never more than is still to come; the invoice cost may differ from the PO cost; the manager cancels a PO (what was received stays). Each delivery is due on its receiving date plus the supplier's terms; payments settle the oldest deliveries first | answer:
-- [ ] Q-12.7 (phase 12) Counting. | default used: the clerk counts blind (the system quantity is shown only after submission, and taken at submission); the approved adjustment is the variance as counted, even if stock moved before approval; a count covers all active products or one category. Stock count numbers are SC-{YYYY}-{00000} | answer:
+- [ ] Q-12.6 (phase 12) Purchasing rules. | default used: deliveries may be received without a PO (small purchases); a PO is received in parts, never more than is still to come; the invoice cost may differ from the PO cost; the manager cancels a PO (what was received stays). Each delivery is due on its receiving date plus the supplier's terms; payments settle the oldest deliveries first. A supplier invoice no. is received once. Should a delivery without a PO above some amount need the manager's approval first (today the manager first sees it when approving the payment)? | answer:
+- [ ] Q-12.7 (phase 12) Counting. | default used: the clerk counts blind (the system quantity is shown only after submission, and taken at submission); the approved adjustment is the variance as counted, even if stock moved before approval; a count covers all active products (and inactive ones still in stock) or one category; a product is on one open count at a time; the manager can send a submitted count back to the clerk. Stock count numbers are SC-{YYYY}-{00000} | answer:
 - [ ] Q-12.8 (phase 12) Supplier payables aging groups. | default used: Not yet due, 1–30, 31–60, 61–90, Over 90 days past due (setting store.ap_aging_buckets) | answer:
 
 ## Decisions log
@@ -373,6 +373,8 @@
   - Since the Phase 11 review the Journal screen refuses to reverse module entries (only manual JVs), so the gap is now "no correction path" instead of "drift".
 - Purchase returns to a supplier (debit memo) and corrections of a posted receiving report (Phase 12: an RR is immutable; a wrong one can't be reversed yet)
 - Supplier and customer tags in the manual JV and DV forms (Phase 17 opening balances will need supplier balances)
+- Block manual JVs to Merchandise Inventory (except opening balances, Phase 17), so the valuation can't drift from the GL; today the valuation page shows any difference (Phase 12 review)
+- Truly blind counts: the Products page shows the clerk the quantities on hand (Phase 12 review)
 - Corrections for loan payments made without a receipt (pay from savings, share-capital offsets on termination): a reversal in the loans module that also reverses the savings or share posting (Phase 11 review)
 - Penalty on the payment day: a payment made before the day's job runs collects penalties only up to the last run; compute the penalty to the payment date live (Phase 11 review)
 - Lock order between the loans daily job (locks every open loan) and receipts with several loan payments; run the job before the counter opens or lock loans in id order everywhere (Phase 11 review)
@@ -1347,3 +1349,36 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - The full E2E against a production build is green: 21 of 21 (phases 00–12).
 - The valuation total equals the GL Merchandise Inventory balance (A12.7 and on past dates), and the trial balance balances after receiving, supplier payments and counts (integration tests).
 - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (9 seed steps); the sample trial balance balances.
+
+**Review follow-ups (reviewer agent, 2026-10-13)**
+- **Fixed (must-fix): the stock card and the valuation could read a stale balance.**
+  - Moves were ordered by date, then the transaction's start time and a random id. Two lines of the same product on one receiving report (one insert), or two reports at the same moment, could sort in the wrong order. "Latest" then picked an earlier balance: the valuation disagreed with the GL, and the stock card closing was wrong.
+  - Moves now carry `seq`, an identity taken while the product's balance is locked, so it is the order they were applied. The stock card and the valuation order by it (migration 0034).
+  - Tests: a report with the same product on two lines; two reports at once (the stock card closing equals the balance, and the valuation equals the GL).
+- **Fixed:**
+  - **One open count per product:** a product on a draft or submitted count can't be put on another, so a variance can't be posted twice. Creating a count locks the products' balances.
+  - **The manager sends a submitted count back to the clerk** with a reason; it is a draft again, and the system quantities are taken again on the next submission. The trigger now allows SUBMITTED → DRAFT.
+  - **Separation of duties in the database:** a PO's approver isn't its preparer, and a count's approver is neither its preparer nor whoever submitted it (`submitted_by`, new).
+  - **A supplier invoice no. is received once** (unique per supplier, ignoring case), with a plain message.
+  - **The count page no longer fails** when a shortage's product has since run out (it is worth ₱0.00 then).
+  - **Limits:** quantities 1 to 1,000,000 and unit costs up to ₱10,000,000.00 per line, and counted quantities up to 10,000,000, all with plain messages (no database error).
+  - **A count of all products** includes inactive products that still have stock.
+  - **The reorder list** leaves out products with no reorder level.
+  - **docs/coa/README.md:** PCMPC's chart must also map the CONFIRM keys `recovery_income_loans` and `inventory_gains`.
+- **New tests:**
+  - an issue through the stock service (as the POS will), refused below zero with nothing written;
+  - a reversal keeps the supplier tag;
+  - the database's SoD checks;
+  - return to the clerk;
+  - one open count per product;
+  - duplicate invoices;
+  - the limits.
+- **Logged:**
+  - As Questions: Q-12.6 now asks whether a delivery without a PO above an amount needs approval; Q-12.7 notes one open count per product and the return.
+  - As Backlog: block manual JVs to Merchandise Inventory; truly blind counts (the Products page shows quantities).
+- **Note:** databases set up before Phase 12 need `npm run db:migrate && npm run db:seed` (the SC series, account 44150 and its mapping, `store.ap_aging_buckets`, the new permissions).
+- **After the fixes:**
+  - `npm run gate` green: 594 tests, 48 files, scan clean. Phase 12 now has 27 integration tests.
+  - `npm run build` green.
+  - E2E on a production build green: phase-12 (A12.8) and ui-shell.
+  - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (migration 0034).

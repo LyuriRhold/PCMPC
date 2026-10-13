@@ -10,7 +10,7 @@ import { CashieringError } from "@/modules/cashiering/builtins";
 import { LedgerError } from "@/modules/ledger/service";
 import { approvePo, cancelPo, createPo, paySupplier, receive } from "./purchasing";
 import { RR_PAYMENTS, VAT_CLASSES } from "./schema";
-import { approveCount, changePrice, createCategory, createCount, createProduct, createSupplier, enterCounts, StockError, StoreError, submitCount, updateCategory, updateProduct, updateSupplier } from "./service";
+import { approveCount, changePrice, createCategory, createCount, createProduct, createSupplier, enterCounts, returnCount, StockError, StoreError, submitCount, updateCategory, updateProduct, updateSupplier } from "./service";
 
 const EXPECTED = [StoreError, StockError, LedgerError, CashieringError];
 
@@ -233,6 +233,19 @@ export async function submitCountAction(input: z.input<typeof countIdSchema>): P
   try {
     const data = countIdSchema.parse(input);
     await withTx((tx) => submitCount(tx, data, actor.id));
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const returnCountSchema = z.object({ countId: id, reason: text(300) });
+/** Manager: sends a submitted count back to the clerk (a draft again). */
+export async function returnCountAction(input: z.input<typeof returnCountSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("store.approve_adjust");
+  try {
+    const data = returnCountSchema.parse(input);
+    await withTx((tx) => returnCount(tx, data, actor.id));
     return ok(null);
   } catch (e) {
     return failFrom(e, EXPECTED);

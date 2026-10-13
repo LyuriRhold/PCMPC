@@ -347,17 +347,38 @@ async function lockCount(tx: Tx, countId: string) {
   return c;
 }
 
-/** The store clerk starts a count sheet: the chosen products, else the active products of a category, else all active products. */
+/**
+ * The store clerk starts a count sheet: the chosen products, else a category's, else all products
+ * that are active or still have stock. A product is on one open (draft or submitted) count at a
+ * time, so a variance is never posted twice.
+ */
 export async function createCount(tx: Tx, input: { productIds: string[]; categoryId?: string | null; remarks: string | null }, clerkId: string) {
   const ids = [...new Set(input.productIds)];
   const chosen = ids.length
-    ? await tx.select({ id: products.id, isActive: products.isActive }).from(products).where(inArray(products.id, ids))
+    ? await tx.select({ id: products.id, sku: products.sku }).from(products).where(inArray(products.id, ids))
     : await tx
-        .select({ id: products.id, isActive: products.isActive })
+        .select({ id: products.id, sku: products.sku })
         .from(products)
-        .where(and(eq(products.isActive, true), input.categoryId ? eq(products.categoryId, input.categoryId) : undefined));
+        .innerJoin(stockBalances, eq(stockBalances.productId, products.id))
+        .where(and(or(eq(products.isActive, true), sql`${stockBalances.qty} > 0`), input.categoryId ? eq(products.categoryId, input.categoryId) : undefined));
   if (ids.length && chosen.length !== ids.length) throw new StoreError("Product not found");
   if (chosen.length === 0) throw new StoreError("There are no products to count");
+  // Lock the products' balances (in order) so two sheets for the same product can't start at once.
+  await tx
+    .select({ id: stockBalances.id })
+    .from(stockBalances)
+    .where(inArray(stockBalances.productId, chosen.map((p) => p.id)))
+    .orderBy(asc(stockBalances.productId))
+    .for("update");
+  const open = await tx
+    .select({ sku: products.sku, countNo: stockCounts.countNo })
+    .from(stockCountLines)
+    .innerJoin(stockCounts, eq(stockCounts.id, stockCountLines.countId))
+    .innerJoin(products, eq(products.id, stockCountLines.productId))
+    .where(and(inArray(stockCountLines.productId, chosen.map((p) => p.id)), inArray(stockCounts.status, ["DRAFT", "SUBMITTED"])))
+    .orderBy(asc(products.sku))
+    .limit(3);
+  if (open.length) throw new StoreError(`Already on an open count: ${open.map((o) => `${o.sku} (${o.countNo})`).join(", ")}; finish or return that count first`);
   const today = businessToday();
   const countNo = await nextNumber("SC", tx, today);
   const [c] = await tx.insert(stockCounts).values({ countNo, countDate: today, remarks: clean(input.remarks) || null, preparedBy: clerkId, createdBy: clerkId }).returning();
@@ -376,7 +397,7 @@ export async function enterCounts(tx: Tx, input: { countId: string; lines: Array
   for (const l of input.lines) {
     const line = byProduct.get(l.productId);
     if (!line) throw new StoreError(`That product isn't on ${c.countNo}`);
-    if (l.countedQty !== null && (!Number.isSafeInteger(l.countedQty) || l.countedQty < 0)) throw new StoreError("A counted quantity is a whole number, 0 or more");
+    if (l.countedQty !== null && (!Number.isSafeInteger(l.countedQty) || l.countedQty < 0 || l.countedQty > 10_000_000)) throw new StoreError("A counted quantity is a whole number from 0 to 10,000,000");
     await tx.update(stockCountLines).set({ countedQty: l.countedQty }).where(eq(stockCountLines.id, line.id));
   }
   await audit(tx, { action: "store.count_enter", entity: "stock_count", entityId: c.id, after: { countNo: c.countNo, lines: input.lines.length }, userId: clerkId });
@@ -398,13 +419,15 @@ export async function submitCount(tx: Tx, input: { countId: string }, clerkId: s
     const systemQty = qtyOf.get(l.productId) ?? 0;
     await tx.update(stockCountLines).set({ systemQty, variance: (l.countedQty ?? 0) - systemQty }).where(eq(stockCountLines.id, l.id));
   }
-  await tx.update(stockCounts).set({ status: "SUBMITTED", submittedAt: sql`now()` }).where(eq(stockCounts.id, c.id));
+  await tx.update(stockCounts).set({ status: "SUBMITTED", submittedAt: sql`now()`, submittedBy: clerkId }).where(eq(stockCounts.id, c.id));
   await audit(tx, { action: "store.count_submit", entity: "stock_count", entityId: c.id, after: { countNo: c.countNo, variances: lines.filter((l) => (l.countedQty ?? 0) !== (qtyOf.get(l.productId) ?? 0)).length }, userId: clerkId });
 }
 
 /** What a variance is worth now: a shortage at the moving average (or the remaining value when it empties the stock), an overage at the average cost. */
 function varianceValueOf(balance: StockBalance, variance: number): Money {
   if (variance === 0) return 0n;
+  // A shortage no longer on the shelf (the stock moved since submission) has nothing left to value.
+  if (variance < 0 && balance.qty === 0) return 0n;
   if (variance > 0) return costOf(variance, balance.avgCost);
   return -issueStock(balance, Math.min(-variance, balance.qty)).cogs;
 }
@@ -418,6 +441,7 @@ export async function approveCount(tx: Tx, input: { countId: string }, managerId
   const c = await lockCount(tx, input.countId);
   if (c.status !== "SUBMITTED") throw new StoreError(c.status === "DRAFT" ? `${c.countNo} isn't submitted yet` : `${c.countNo} is already ${c.status}`);
   assertNotSameUser(c.preparedBy, managerId);
+  if (c.submittedBy) assertNotSameUser(c.submittedBy, managerId);
   const lines = (await tx.select().from(stockCountLines).where(eq(stockCountLines.countId, c.id))).filter((l) => (l.variance ?? 0) !== 0);
   // Shortages go out at the moving average; overages come in at it (no cost given).
   const priced = await planStockMoves(
@@ -465,6 +489,17 @@ export async function approveCount(tx: Tx, input: { countId: string }, managerId
   await tx.update(stockCounts).set({ status: "APPROVED", approvedBy: managerId, approvedAt: sql`now()`, jeId }).where(eq(stockCounts.id, c.id));
   await audit(tx, { action: "store.count_approve", entity: "stock_count", entityId: c.id, after: { countNo: c.countNo, shortage: format(shortage), overage: format(overage) }, userId: managerId });
   return { jeId, shortage, overage };
+}
+
+/** The manager sends a submitted sheet back to the clerk (e.g. a miscount) with a reason; it is a draft again. */
+export async function returnCount(tx: Tx, input: { countId: string; reason: string }, managerId: string) {
+  const reason = clean(input.reason);
+  if (!reason) throw new StoreError("Enter why the count goes back to the clerk");
+  const c = await lockCount(tx, input.countId);
+  if (c.status !== "SUBMITTED") throw new StoreError(`${c.countNo} is ${c.status}; only a submitted count goes back to the clerk`);
+  await tx.update(stockCounts).set({ status: "DRAFT", submittedAt: null, submittedBy: null }).where(eq(stockCounts.id, c.id));
+  await tx.update(stockCountLines).set({ systemQty: null, variance: null }).where(eq(stockCountLines.countId, c.id));
+  await audit(tx, { action: "store.count_return", entity: "stock_count", entityId: c.id, after: { countNo: c.countNo, reason }, userId: managerId });
 }
 
 export async function listCounts(db: Db | Tx = getDb()) {

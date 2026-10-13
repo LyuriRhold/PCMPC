@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAction } from "@/components/use-action";
 import { selectClass } from "@/modules/members/ui/member-form";
-import { approveCountAction, createCountAction, enterCountAction, submitCountAction } from "../actions";
+import { approveCountAction, createCountAction, enterCountAction, returnCountAction, submitCountAction } from "../actions";
 import { Done, Err } from "./store-forms";
 
 /** Store clerk: starts a count sheet (a category's products, or all active products). */
@@ -112,6 +112,25 @@ export function CountSheetForm({ countId, lines }: { countId: string; lines: She
       <Err error={error} />
       <Done done={done} />
     </div>
+  );
+}
+
+/** Manager: sends a submitted count back to the clerk (e.g. a miscount); it is a draft again. */
+export function ReturnCountForm({ countId }: { countId: string }) {
+  const { pending, error, run } = useAction();
+  return (
+    <form className="flex flex-wrap items-end gap-2" action={(fd) => run(() => returnCountAction({ countId, reason: String(fd.get("returnReason") ?? "") }))}>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="returnReason">Reason for sending it back</Label>
+        <Input id="returnReason" name="returnReason" maxLength={300} className="w-72" placeholder="e.g. recount the rice, 130 looks wrong" />
+      </div>
+      <Button type="submit" variant="outline" disabled={pending}>
+        Return to the clerk
+      </Button>
+      <div className="w-full">
+        <Err error={error} />
+      </div>
+    </form>
   );
 }
 

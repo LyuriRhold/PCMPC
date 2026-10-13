@@ -11,7 +11,7 @@ import { formatDate } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPage } from "@/lib/page-guard";
 import { getCount } from "@/modules/store/service";
-import { ApproveCountButton, CountSheetForm } from "@/modules/store/ui/count-forms";
+import { ApproveCountButton, CountSheetForm, ReturnCountForm } from "@/modules/store/ui/count-forms";
 
 export const metadata: Metadata = { title: "Stock count · PCMPC MIS" };
 
@@ -95,7 +95,12 @@ async function CountContent(props: PageProps<"/store/inventory/counts/[id]">) {
               </TableRow>
             </TableFooter>
           </Table>
-          {c.status === "SUBMITTED" && can(user, "store.approve_adjust") && c.preparedBy !== user.id ? <ApproveCountButton countId={c.id} /> : null}
+          {c.status === "SUBMITTED" && can(user, "store.approve_adjust") && c.preparedBy !== user.id && c.submittedBy !== user.id ? (
+            <div className="flex flex-col gap-3">
+              <ApproveCountButton countId={c.id} />
+              <ReturnCountForm countId={c.id} />
+            </div>
+          ) : null}
           {c.status === "SUBMITTED" && c.preparedBy === user.id ? <p className="text-sm text-muted-foreground">You prepared this count. The manager approves it.</p> : null}
         </>
       )}

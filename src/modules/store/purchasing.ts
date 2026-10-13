@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { assertNotSameUser } from "@/lib/auth-guard";
@@ -37,9 +37,14 @@ async function activeProducts(tx: Tx, ids: string[]) {
   return byId;
 }
 
+/** Line limits keep quantities and amounts well inside the database's ranges. */
+const MAX_QTY = 1_000_000;
+const MAX_UNIT_COST = 1_000_000_000n; // ₱10,000,000.00
+
 function checkLine(l: { qty: number; unitCost: Money }, i: number) {
-  if (!Number.isSafeInteger(l.qty) || l.qty <= 0) throw new StoreError(`Line ${i + 1}: the quantity is a whole number more than zero`);
+  if (!Number.isSafeInteger(l.qty) || l.qty <= 0 || l.qty > MAX_QTY) throw new StoreError(`Line ${i + 1}: the quantity is a whole number from 1 to 1,000,000`);
   if (l.unitCost < 0n) throw new StoreError(`Line ${i + 1}: the unit cost can't be negative`);
+  if (l.unitCost > MAX_UNIT_COST) throw new StoreError(`Line ${i + 1}: the unit cost is more than ${format(MAX_UNIT_COST)}`);
 }
 
 // ── Purchase orders ──
@@ -164,10 +169,17 @@ export async function receive(tx: Tx, input: { supplierId: string; poId: string 
 
   const total = input.lines.reduce((s, l) => s + BigInt(l.qty) * l.unitCost, 0n);
   if (total <= 0n) throw new StoreError("The delivery's total must be more than zero");
+  const invoiceNo = input.invoiceNo?.trim() || null;
+  if (invoiceNo) {
+    const [dup] = await tx
+      .select({ rrNo: receivingReports.rrNo })
+      .from(receivingReports)
+      .where(and(eq(receivingReports.supplierId, supplier.id), sql`lower(${receivingReports.invoiceNo}) = lower(${invoiceNo})`));
+    if (dup) throw new StoreError(`${supplier.name}'s invoice ${invoiceNo} is already received (${dup.rrNo})`);
+  }
   const today = businessToday();
   const rrId = randomUUID();
   const rrNo = await nextNumber("RR", tx, today);
-  const invoiceNo = input.invoiceNo?.trim() || null;
   const plans = await planStockMoves(
     tx,
     input.lines.map((l) => ({ productId: l.productId, type: "RECEIVE" as const, qty: l.qty, cost: BigInt(l.qty) * l.unitCost })),

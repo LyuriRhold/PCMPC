@@ -19,13 +19,13 @@ export async function stockCard(productId: string, from: BusinessDate, to: Busin
     .select({ qty: stockMoves.qtyAfter, avgCost: stockMoves.avgCostAfter, value: stockMoves.valueAfter })
     .from(stockMoves)
     .where(and(eq(stockMoves.productId, productId), lt(stockMoves.moveDate, from)))
-    .orderBy(desc(stockMoves.moveDate), desc(stockMoves.createdAt), desc(stockMoves.id))
+    .orderBy(desc(stockMoves.seq))
     .limit(1);
   const moves = await db
     .select()
     .from(stockMoves)
     .where(and(eq(stockMoves.productId, productId), gte(stockMoves.moveDate, from), lte(stockMoves.moveDate, to)))
-    .orderBy(asc(stockMoves.moveDate), asc(stockMoves.createdAt), asc(stockMoves.id));
+    .orderBy(asc(stockMoves.seq));
   const rrIds = moves.filter((m) => m.refType === "RR").map((m) => m.refId);
   const countIds = moves.filter((m) => m.refType === "COUNT").map((m) => m.refId);
   const docs = new Map<string, string>();
@@ -50,7 +50,7 @@ export async function inventoryValuation(asOf: BusinessDate = businessToday(), d
     .selectDistinctOn([stockMoves.productId], { productId: stockMoves.productId, qty: stockMoves.qtyAfter, avgCost: stockMoves.avgCostAfter, value: stockMoves.valueAfter })
     .from(stockMoves)
     .where(lte(stockMoves.moveDate, asOf))
-    .orderBy(stockMoves.productId, desc(stockMoves.moveDate), desc(stockMoves.createdAt), desc(stockMoves.id))
+    .orderBy(stockMoves.productId, desc(stockMoves.seq))
     .as("latest");
   const rows = await db
     .select({ product: { id: products.id, sku: products.sku, name: products.name, unit: products.unit }, category: productCategories.name, qty: latest.qty, avgCost: latest.avgCost, value: latest.value })
@@ -64,7 +64,7 @@ export async function inventoryValuation(asOf: BusinessDate = businessToday(), d
   return { asOf, rows, total, glBalance: gl.net, difference: total - gl.net };
 }
 
-/** Active products at or below their reorder level, with what is already on order (approved POs still to come). */
+/** Active products with a reorder level, at or below it, with what is already on order (approved POs still to come). */
 export async function reorderList(db: Db | Tx = getDb()) {
   const onOrder = db
     .select({ productId: poLines.productId, qty: sql<number>`sum(${poLines.qty} - ${poLines.qtyReceived})::int`.as("on_order") })
@@ -79,7 +79,7 @@ export async function reorderList(db: Db | Tx = getDb()) {
     .innerJoin(stockBalances, eq(stockBalances.productId, products.id))
     .leftJoin(productCategories, eq(productCategories.id, products.categoryId))
     .leftJoin(onOrder, eq(onOrder.productId, products.id))
-    .where(and(eq(products.isActive, true), sql`${stockBalances.qty} <= ${products.reorderLevel}`))
+    .where(and(eq(products.isActive, true), sql`${products.reorderLevel} > 0`, sql`${stockBalances.qty} <= ${products.reorderLevel}`))
     .orderBy(asc(products.name));
 }
 

@@ -21,7 +21,7 @@
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ✅ | phase-10-loan-applications · tag `phase-10` | rldejoya (reviewer agent: small-loan error + tiny-loan rows fixed; follow-ups) · 2026-10-12 |
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ✅ | phase-11-loan-servicing · tag `phase-11` | rldejoya (reviewer agent: stuck pending release + historical aging fixed; follow-ups) · 2026-10-12 |
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ✅ | phase-12-store-inventory · tag `phase-12` | rldejoya (reviewer agent: stock-move order fixed; follow-ups) · 2026-10-13 |
-| 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ⬜ | | |
+| 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | 🔨 | phase-13-store-pos | |
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ⬜ | | |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ⬜ | | |
 | 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ⬜ | | |
@@ -184,7 +184,7 @@
 - [ ] T13.5 Member charge accounts, statement of account, `STORE_AR_PAYMENT` receipt item in cashiering
 - [ ] T13.6 POS UI (keyboard/barcode-first) and the slip print
 - [ ] T13.7 Store reports (sales, margin, top items, slow movers)
-- [ ] Acceptance tests written first (tests/acceptance/phase-13.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-13.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 14 — Financial Statements, Period Close & Fixed Assets

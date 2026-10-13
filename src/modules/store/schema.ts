@@ -273,7 +273,7 @@ export const stockCounts = pgTable(
     jeId: uuid("je_id").references(() => journalEntries.id),
     ...createdColumns(),
   },
-  (t) => [check("stock_counts_status_chk", inList("status", COUNT_STATUSES))],
+  () => [check("stock_counts_status_chk", inList("status", COUNT_STATUSES))],
 );
 
 export const stockCountLines = pgTable(

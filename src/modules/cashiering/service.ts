@@ -6,7 +6,7 @@ import { assertNotSameUser } from "@/lib/auth-guard";
 import { businessToday, formatDate, now, type BusinessDate } from "@/lib/dates";
 import { format, type Money } from "@/lib/money";
 import { next as nextNumber } from "@/lib/numbering";
-import { accounts } from "@/modules/ledger/schema";
+import { accountMappings, accounts } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal, reverseJournal, type LineInput } from "@/modules/ledger/service";
 import { getSetting } from "@/modules/settings/service";
 import { CashieringError } from "./builtins";
@@ -356,7 +356,7 @@ async function recordCashOut(tx: Tx, input: { sessionId: string; type: string; r
   });
 }
 
-export type DvLineInput = { accountId: string; memberId: string | null; customerId?: string | null; amount: Money; memo: string | null };
+export type DvLineInput = { accountId: string; memberId: string | null; customerId?: string | null; supplierId?: string | null; amount: Money; memo: string | null };
 export type CreateDvInput = { date: BusinessDate; payee: string; particulars: string; mode: DvMode; checkNo: string | null; lines: DvLineInput[] };
 
 /** Prepares a disbursement voucher (DRAFT). It gets its DV number now; cancelled DVs keep theirs. */
@@ -367,10 +367,12 @@ export async function createDv(tx: Tx, input: CreateDvInput, preparerId: string)
   if (input.mode === "CHECK" && !input.checkNo?.trim()) throw new CashieringError("Enter the check number");
   const ids = [...new Set(input.lines.map((l) => l.accountId))];
   const found = await tx.select().from(accounts).where(inArray(accounts.id, ids));
+  const supplierLedgers = new Set((await tx.select({ accountId: accountMappings.accountId }).from(accountMappings).where(and(inArray(accountMappings.accountId, ids), eq(accountMappings.requiresSupplier, true)))).map((m) => m.accountId));
   input.lines.forEach((l, i) => {
     if (l.amount <= 0n) throw new CashieringError(`Line ${i + 1}: the amount must be more than zero`);
     const a = found.find((x) => x.id === l.accountId);
     if (!a || !a.isPostable || !a.isActive) throw new CashieringError(`Line ${i + 1}: choose an active postable account`);
+    if (supplierLedgers.has(l.accountId) && !l.supplierId) throw new CashieringError(`Line ${i + 1}: supplier payables are paid from Store › Payables (the line needs the supplier)`);
   });
   const amount = input.lines.reduce((s, l) => s + l.amount, 0n);
   const dvNo = await nextNumber("DV", tx, input.date);
@@ -389,7 +391,7 @@ export async function createDv(tx: Tx, input: CreateDvInput, preparerId: string)
     })
     .returning();
   if (!dv) throw new Error("DV insert returned no row");
-  await tx.insert(dvLines).values(input.lines.map((l, i) => ({ dvId: dv.id, lineNo: i + 1, accountId: l.accountId, memberId: l.memberId, customerId: l.customerId ?? null, amount: l.amount, memo: l.memo, createdBy: preparerId })));
+  await tx.insert(dvLines).values(input.lines.map((l, i) => ({ dvId: dv.id, lineNo: i + 1, accountId: l.accountId, memberId: l.memberId, customerId: l.customerId ?? null, supplierId: l.supplierId ?? null, amount: l.amount, memo: l.memo, createdBy: preparerId })));
   await audit(tx, { action: "dv.create", entity: "disbursement_voucher", entityId: dv.id, after: { dvNo, payee: dv.payee, amount, mode: dv.mode }, userId: preparerId });
   return dv;
 }
@@ -431,7 +433,7 @@ export async function releaseDv(tx: Tx, dvId: string, tellerId: string): Promise
       particulars: `${dv.dvNo} · ${dv.payee} · ${dv.particulars}`,
       reference: dv.checkNo ?? dv.dvNo,
       source: { module: "cashiering.dv", id: dv.id },
-      lines: [...lines.map((l) => ({ accountId: l.accountId, debit: l.amount, memberId: l.memberId, customerId: l.customerId, memo: l.memo })), { accountId: credit, credit: dv.amount }],
+      lines: [...lines.map((l) => ({ accountId: l.accountId, debit: l.amount, memberId: l.memberId, customerId: l.customerId, supplierId: l.supplierId, memo: l.memo })), { accountId: credit, credit: dv.amount }],
     },
     tellerId,
   );

@@ -16,6 +16,7 @@ import {
 import { createdColumns, tstz } from "@/db/columns";
 import { users } from "@/modules/auth/schema";
 import { members } from "@/modules/members/schema";
+import { suppliers } from "@/modules/store/schema";
 import { waterCustomers } from "@/modules/water/schema";
 
 export const ACCOUNT_TYPES = ["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"] as const;
@@ -68,6 +69,8 @@ export const accountMappings = pgTable("account_mappings", {
   requiresMember: boolean("requires_member").notNull().default(false),
   /** Lines must carry a water customer (AR–Water, Customers' Deposits/Advances sub-ledgers; Phase 05). */
   requiresCustomer: boolean("requires_customer").notNull().default(false),
+  /** Lines must carry a store supplier (AP–Trade sub-ledger; Phase 12). */
+  requiresSupplier: boolean("requires_supplier").notNull().default(false),
   ...createdColumns(),
 });
 
@@ -150,6 +153,8 @@ export const journalLines = pgTable(
     memberId: uuid("member_id").references(() => members.id),
     /** Water customer for customer-tagged accounts (Phase 05). */
     customerId: uuid("customer_id").references(() => waterCustomers.id),
+    /** Store supplier for supplier-tagged accounts (AP–Trade sub-ledger; Phase 12). */
+    supplierId: uuid("supplier_id").references(() => suppliers.id),
     /** Centavos. Exactly one of debit / credit is > 0. */
     debit: bigint("debit", { mode: "bigint" }).notNull().default(sql`0`),
     credit: bigint("credit", { mode: "bigint" }).notNull().default(sql`0`),
@@ -162,6 +167,7 @@ export const journalLines = pgTable(
     index("journal_lines_account_idx").on(t.accountId),
     index("journal_lines_member_idx").on(t.memberId, t.accountId),
     index("journal_lines_customer_idx").on(t.customerId, t.accountId),
+    index("journal_lines_supplier_idx").on(t.supplierId, t.accountId),
   ],
 );
 

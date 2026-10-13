@@ -267,6 +267,20 @@ export const PRESENTATION: Record<SettingKey, Presentation> = {
   // ── Store ──
   "store.cost_method": { label: "Store cost method", help: "Item costs are averaged each time stock is received.", spec: { type: "text" }, readonly: fixedPolicy("Fixed method.") },
   "store.allow_negative_stock": { label: "Selling more than the stock on hand", help: "Not allowed: the count must be corrected first.", spec: { type: "text" }, readonly: fixedPolicy("Always refused.") },
+  "store.ap_aging_buckets": {
+    label: "Supplier payables aging groups",
+    help: "How what the store owes suppliers is grouped by days past the due date (delivery date + the supplier's terms). Leave “to” blank on the last group.",
+    spec: {
+      type: "list",
+      columns: [
+        { key: "label", label: "Group name", spec: { type: "text" } },
+        { key: "fromDays", label: "From (days)", spec: { type: "number", min: 0 } },
+        { key: "toDays", label: "To (days)", spec: { type: "number", min: 0, blankLabel: "and over" } },
+      ],
+      addLabel: "Add group",
+      newRow: { label: "", fromDays: 0, toDays: null },
+    },
+  },
   "store.member_credit_limit": { label: "Store credit limit per member", help: "The most a member may owe the store at any time.", spec: { type: "money" } },
 
   // ── Net surplus ──

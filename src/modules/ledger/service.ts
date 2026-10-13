@@ -6,6 +6,7 @@ import { now, type BusinessDate } from "@/lib/dates";
 import { format, type Money } from "@/lib/money";
 import { next as nextNumber } from "@/lib/numbering";
 import { members } from "@/modules/members/schema";
+import { suppliers } from "@/modules/store/schema";
 import { waterCustomers } from "@/modules/water/schema";
 import { periodKey, periodOf } from "./periods";
 import { accountMappings, accounts, journalEntries, journalLines, type Account, type Book, type JournalEntry, type NormalBalance } from "./schema";
@@ -22,6 +23,8 @@ export type LineInput = {
   memberId?: string | null;
   /** Water customer, required on customer-ledger accounts (AR–Water, Customers' Deposits/Advances). */
   customerId?: string | null;
+  /** Store supplier, required on supplier-ledger accounts (AP–Trade; Phase 12). */
+  supplierId?: string | null;
   memo?: string | null;
 };
 
@@ -68,11 +71,16 @@ async function validateLines(tx: Tx, lines: LineInput[], opts: { allowInactive?:
   const rows = await tx.select().from(accounts).where(inArray(accounts.id, ids));
   const byId = new Map(rows.map((a) => [a.id, a]));
   const flags = await tx
-    .select({ accountId: accountMappings.accountId, requiresMember: accountMappings.requiresMember, requiresCustomer: accountMappings.requiresCustomer })
+    .select({ accountId: accountMappings.accountId, requiresMember: accountMappings.requiresMember, requiresCustomer: accountMappings.requiresCustomer, requiresSupplier: accountMappings.requiresSupplier })
     .from(accountMappings)
     .where(inArray(accountMappings.accountId, ids));
   const subsidiary = new Set(flags.filter((m) => m.requiresMember).map((m) => m.accountId));
   const customerAccounts = new Set(flags.filter((m) => m.requiresCustomer).map((m) => m.accountId));
+  const supplierAccounts = new Set(flags.filter((m) => m.requiresSupplier).map((m) => m.accountId));
+  const supplierIds = [...new Set(lines.map((l) => l.supplierId).filter((s): s is string => !!s))];
+  const knownSuppliers = new Set(
+    supplierIds.length ? (await tx.select({ id: suppliers.id }).from(suppliers).where(inArray(suppliers.id, supplierIds))).map((s) => s.id) : [],
+  );
   const customerIds = [...new Set(lines.map((l) => l.customerId).filter((c): c is string => !!c))];
   const knownCustomers = new Set(
     customerIds.length ? (await tx.select({ id: waterCustomers.id }).from(waterCustomers).where(inArray(waterCustomers.id, customerIds))).map((c) => c.id) : [],
@@ -94,6 +102,10 @@ async function validateLines(tx: Tx, lines: LineInput[], opts: { allowInactive?:
     if (customerAccounts.has(a.id) && !l.customerId) {
       throw new LedgerError(`Line ${i + 1}: account ${label(a)} is a customer subsidiary ledger; choose the water customer`);
     }
+    if (l.supplierId && !knownSuppliers.has(l.supplierId)) throw new LedgerError(`Line ${i + 1}: unknown supplier`);
+    if (supplierAccounts.has(a.id) && !l.supplierId) {
+      throw new LedgerError(`Line ${i + 1}: account ${label(a)} is a supplier subsidiary ledger; choose the supplier`);
+    }
   });
   return dr;
 }
@@ -112,6 +124,7 @@ async function insertLines(tx: Tx, jeId: string, lines: LineInput[], actorId: st
       accountId: l.accountId,
       memberId: l.memberId ?? null,
       customerId: l.customerId ?? null,
+      supplierId: l.supplierId ?? null,
       debit: l.debit ?? 0n,
       credit: l.credit ?? 0n,
       memo: l.memo ?? null,
@@ -184,7 +197,7 @@ export async function reverseJournal(tx: Tx, jeId: string, date: BusinessDate, r
       particulars: `Reversal of ${orig.jeNo}: ${reason.trim()}`,
       reference: orig.jeNo,
       source: { module: orig.sourceModule, id: orig.sourceId },
-      lines: lines.map((l) => ({ accountId: l.accountId, debit: l.credit, credit: l.debit, memberId: l.memberId, customerId: l.customerId, memo: l.memo })),
+      lines: lines.map((l) => ({ accountId: l.accountId, debit: l.credit, credit: l.debit, memberId: l.memberId, customerId: l.customerId, supplierId: l.supplierId, memo: l.memo })),
     },
     actorId,
     { reversalOfId: orig.id, allowInactive: true },
@@ -258,7 +271,7 @@ export async function approveJv(tx: Tx, jeId: string, approverId: string): Promi
   const lines = await tx.select().from(journalLines).where(eq(journalLines.jeId, jeId)).orderBy(asc(journalLines.lineNo));
   const total = await validateLines(
     tx,
-    lines.map((l) => ({ accountId: l.accountId, debit: l.debit, credit: l.credit, memberId: l.memberId, customerId: l.customerId })),
+    lines.map((l) => ({ accountId: l.accountId, debit: l.debit, credit: l.credit, memberId: l.memberId, customerId: l.customerId, supplierId: l.supplierId })),
   );
   await assertPeriodOpen(tx, je.entryDate);
   const jeNo = await nextNumber(je.book, tx, je.entryDate);
@@ -411,6 +424,13 @@ export async function subsidiaryLedger(mappingKey: string, memberId: string, fro
 export async function customerLedger(mappingKey: string, customerId: string, from: BusinessDate, to: BusinessDate, db: Db | Tx = getDb()) {
   const account = await accountOrThrow(await accountIdFor(mappingKey, db), db);
   const ledger = await ledgerFor([eq(journalLines.accountId, account.id), eq(journalLines.customerId, customerId)], account.normalBalance, from, to, db);
+  return { account, mappingKey, ...ledger };
+}
+
+/** Subsidiary ledger of one store supplier on the account mapped to `mappingKey` (AP–Trade). */
+export async function supplierLedger(mappingKey: string, supplierId: string, from: BusinessDate, to: BusinessDate, db: Db | Tx = getDb()) {
+  const account = await accountOrThrow(await accountIdFor(mappingKey, db), db);
+  const ledger = await ledgerFor([eq(journalLines.accountId, account.id), eq(journalLines.supplierId, supplierId)], account.normalBalance, from, to, db);
   return { account, mappingKey, ...ledger };
 }
 

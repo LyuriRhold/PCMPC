@@ -28,7 +28,9 @@ code,name,type,normal_balance,parent_code,postable,sca_code,mapping_keys
 | `sca_code` | The CDA standard chart code, if different from `code` (optional) |
 | `mapping_keys` | The DOMAIN §6 posting keys this account receives, separated by `;` (e.g. `cash_on_hand`) |
 
-Every key in DOMAIN §6 must be mapped to exactly one postable account. The seed stops with
-a list of the missing keys if any are missing. Templated keys are expanded per loan product
+Every key in DOMAIN §6 must be mapped to exactly one postable account, and so must the keys the
+system added with a CONFIRM question: `recovery_income_loans` (recoveries of written-off loans,
+Q-11.4) and `inventory_gains` (stock count overages, Q-12.5). The seed stops with a list of the
+missing keys if any are missing. Templated keys are expanded per loan product
 (`loans_receivable_REG`, `loans_receivable_EMR`, `loans_receivable_PRD`). Depreciation keys
 (`accumulated_depreciation_{class}`) are added in Phase 14.

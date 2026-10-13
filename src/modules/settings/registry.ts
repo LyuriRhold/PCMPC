@@ -132,6 +132,7 @@ export const SETTINGS = {
   // Store
   "store.cost_method": def({ group: "Store", label: "Cost method", kind: "enum", schema: z.enum(["MOVING_AVERAGE"]), default: "MOVING_AVERAGE", confirm: false }),
   "store.allow_negative_stock": def({ group: "Store", label: "Allow negative stock", kind: "bool", schema: z.literal(false), default: false, confirm: false }),
+  "store.ap_aging_buckets": def({ group: "Store", label: "Supplier payables aging (days past due)", kind: "json", schema: z.array(z.object({ label: text.min(1), fromDays: int(0), toDays: int(0).nullable() })).min(1), default: [{ label: "Not yet due", fromDays: 0, toDays: 0 }, { label: "1–30", fromDays: 1, toDays: 30 }, { label: "31–60", fromDays: 31, toDays: 60 }, { label: "61–90", fromDays: 61, toDays: 90 }, { label: "Over 90", fromDays: 91, toDays: null }], confirm: true }),
   "store.member_credit_limit": def({ group: "Store", label: "Member credit limit", kind: "money", schema: money, default: "100000", confirm: true }),
 
   // Net surplus allocation (RA 9520 bounds)

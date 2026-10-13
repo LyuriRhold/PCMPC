@@ -232,6 +232,13 @@
       "when": 1791850315156,
       "tag": "0032_store_immutable",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791852015383,
+      "tag": "0033_stock_moves_zero_value",
+      "breakpoints": true
     }
   ]
 }

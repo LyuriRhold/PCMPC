@@ -1,14 +1,20 @@
 import { and, asc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
+import { assertNotSameUser } from "@/lib/auth-guard";
+import { businessToday } from "@/lib/dates";
 import { format, type Money } from "@/lib/money";
+import { next as nextNumber } from "@/lib/numbering";
 import { disbursementVouchers, dvLines } from "@/modules/cashiering/schema";
 import { accountMappings, journalEntries, journalLines } from "@/modules/ledger/schema";
+import { accountIdFor, postJournal } from "@/modules/ledger/service";
 import {
   productCategories,
   productPriceHistory,
   products,
   stockBalances,
+  stockCountLines,
+  stockCounts,
   stockMoves,
   suppliers,
   VAT_CLASSES,
@@ -16,7 +22,7 @@ import {
   type Product,
   type VatClass,
 } from "./schema";
-import { averageCost, EMPTY_STOCK, issueStock, receiveStock, StockError, type StockBalance } from "./stock";
+import { averageCost, costOf, EMPTY_STOCK, issueStock, receiveStock, StockError, type StockBalance } from "./stock";
 
 /**
  * The store's item master, suppliers and stock ledger (PHASE-12). Every stock movement is planned
@@ -258,7 +264,7 @@ export async function stockBalance(productId: string, db: Db | Tx = getDb()): Pr
   return b ? toBalance(b) : EMPTY_STOCK;
 }
 
-/** One planned movement: + receives `cost` (centavos); − issues at the moving average. */
+/** One planned movement: + receives `cost` (centavos; at the current average cost when not given); − issues at the moving average. */
 export type StockMoveInput = { productId: string; type: MoveType; qty: number; cost?: Money };
 export type PlannedMove = StockMoveInput & { totalCost: Money; unitCost: string; after: StockBalance; product: Pick<Product, "id" | "sku" | "name" | "isActive"> };
 
@@ -285,10 +291,10 @@ export async function planStockMoves(tx: Tx, moves: StockMoveInput[]): Promise<P
     let unitCost: string;
     let after: StockBalance;
     if (m.qty > 0) {
-      const cost = m.cost ?? 0n;
+      const cost = m.cost ?? costOf(m.qty, c.balance.avgCost);
       after = receiveStock(c.balance, m.qty, cost);
       totalCost = cost;
-      unitCost = averageCost(cost, m.qty);
+      unitCost = m.cost === undefined ? c.balance.avgCost : averageCost(cost, m.qty);
     } else {
       let out: ReturnType<typeof issueStock>;
       try {
@@ -307,7 +313,7 @@ export async function planStockMoves(tx: Tx, moves: StockMoveInput[]): Promise<P
 }
 
 /** Writes planned movements (after their entry exists) and the products' new balances. */
-export async function recordStockMoves(tx: Tx, plans: PlannedMove[], ctx: { date: string; refType: string; refId: string; jeId: string }, actorId: string | null) {
+export async function recordStockMoves(tx: Tx, plans: PlannedMove[], ctx: { date: string; refType: string; refId: string; jeId: string | null }, actorId: string | null) {
   if (plans.length === 0) return;
   await tx.insert(stockMoves).values(
     plans.map((p) => ({
@@ -331,4 +337,164 @@ export async function recordStockMoves(tx: Tx, plans: PlannedMove[], ctx: { date
   for (const [productId, b] of last) {
     await tx.update(stockBalances).set({ qty: b.qty, avgCost: b.avgCost, value: b.value, updatedAt: sql`now()` }).where(eq(stockBalances.productId, productId));
   }
+}
+
+// ── Stock counts (T12.5) ──
+
+async function lockCount(tx: Tx, countId: string) {
+  const [c] = await tx.select().from(stockCounts).where(eq(stockCounts.id, countId)).for("update");
+  if (!c) throw new StoreError("Stock count not found");
+  return c;
+}
+
+/** The store clerk starts a count sheet: the chosen products, else the active products of a category, else all active products. */
+export async function createCount(tx: Tx, input: { productIds: string[]; categoryId?: string | null; remarks: string | null }, clerkId: string) {
+  const ids = [...new Set(input.productIds)];
+  const chosen = ids.length
+    ? await tx.select({ id: products.id, isActive: products.isActive }).from(products).where(inArray(products.id, ids))
+    : await tx
+        .select({ id: products.id, isActive: products.isActive })
+        .from(products)
+        .where(and(eq(products.isActive, true), input.categoryId ? eq(products.categoryId, input.categoryId) : undefined));
+  if (ids.length && chosen.length !== ids.length) throw new StoreError("Product not found");
+  if (chosen.length === 0) throw new StoreError("There are no products to count");
+  const today = businessToday();
+  const countNo = await nextNumber("SC", tx, today);
+  const [c] = await tx.insert(stockCounts).values({ countNo, countDate: today, remarks: clean(input.remarks) || null, preparedBy: clerkId, createdBy: clerkId }).returning();
+  if (!c) throw new Error("stock count insert returned no row");
+  await tx.insert(stockCountLines).values(chosen.map((p) => ({ countId: c.id, productId: p.id, createdBy: clerkId })));
+  await audit(tx, { action: "store.count_create", entity: "stock_count", entityId: c.id, after: { countNo, products: chosen.length }, userId: clerkId });
+  return { id: c.id, countNo };
+}
+
+/** Counted quantities on a DRAFT sheet (null clears a line). */
+export async function enterCounts(tx: Tx, input: { countId: string; lines: Array<{ productId: string; countedQty: number | null }> }, clerkId: string) {
+  const c = await lockCount(tx, input.countId);
+  if (c.status !== "DRAFT") throw new StoreError(`${c.countNo} is ${c.status}; counts are entered on a draft`);
+  const lines = await tx.select().from(stockCountLines).where(eq(stockCountLines.countId, c.id));
+  const byProduct = new Map(lines.map((l) => [l.productId, l]));
+  for (const l of input.lines) {
+    const line = byProduct.get(l.productId);
+    if (!line) throw new StoreError(`That product isn't on ${c.countNo}`);
+    if (l.countedQty !== null && (!Number.isSafeInteger(l.countedQty) || l.countedQty < 0)) throw new StoreError("A counted quantity is a whole number, 0 or more");
+    await tx.update(stockCountLines).set({ countedQty: l.countedQty }).where(eq(stockCountLines.id, line.id));
+  }
+  await audit(tx, { action: "store.count_enter", entity: "stock_count", entityId: c.id, after: { countNo: c.countNo, lines: input.lines.length }, userId: clerkId });
+}
+
+/**
+ * Submits a counted sheet for approval: the system quantities are taken now (the clerk counts
+ * blind) and each line's variance is counted − system. Nothing is posted yet.
+ */
+export async function submitCount(tx: Tx, input: { countId: string }, clerkId: string) {
+  const c = await lockCount(tx, input.countId);
+  if (c.status !== "DRAFT") throw new StoreError(`${c.countNo} is already ${c.status}`);
+  const lines = await tx.select().from(stockCountLines).where(eq(stockCountLines.countId, c.id));
+  const missing = lines.filter((l) => l.countedQty === null).length;
+  if (missing) throw new StoreError(`Count every product first (${missing} not counted)`);
+  const balances = await tx.select().from(stockBalances).where(inArray(stockBalances.productId, lines.map((l) => l.productId)));
+  const qtyOf = new Map(balances.map((b) => [b.productId, b.qty]));
+  for (const l of lines) {
+    const systemQty = qtyOf.get(l.productId) ?? 0;
+    await tx.update(stockCountLines).set({ systemQty, variance: (l.countedQty ?? 0) - systemQty }).where(eq(stockCountLines.id, l.id));
+  }
+  await tx.update(stockCounts).set({ status: "SUBMITTED", submittedAt: sql`now()` }).where(eq(stockCounts.id, c.id));
+  await audit(tx, { action: "store.count_submit", entity: "stock_count", entityId: c.id, after: { countNo: c.countNo, variances: lines.filter((l) => (l.countedQty ?? 0) !== (qtyOf.get(l.productId) ?? 0)).length }, userId: clerkId });
+}
+
+/** What a variance is worth now: a shortage at the moving average (or the remaining value when it empties the stock), an overage at the average cost. */
+function varianceValueOf(balance: StockBalance, variance: number): Money {
+  if (variance === 0) return 0n;
+  if (variance > 0) return costOf(variance, balance.avgCost);
+  return -issueStock(balance, Math.min(-variance, balance.qty)).cogs;
+}
+
+/**
+ * The manager (not the preparer) approves a submitted count: each variance is posted as a stock
+ * adjustment, shortages Dr Inventory Losses / Cr Merchandise Inventory and overages Dr Merchandise
+ * Inventory / Cr Inventory Overage (CONFIRM Q-12.5), in one entry.
+ */
+export async function approveCount(tx: Tx, input: { countId: string }, managerId: string) {
+  const c = await lockCount(tx, input.countId);
+  if (c.status !== "SUBMITTED") throw new StoreError(c.status === "DRAFT" ? `${c.countNo} isn't submitted yet` : `${c.countNo} is already ${c.status}`);
+  assertNotSameUser(c.preparedBy, managerId);
+  const lines = (await tx.select().from(stockCountLines).where(eq(stockCountLines.countId, c.id))).filter((l) => (l.variance ?? 0) !== 0);
+  // Shortages go out at the moving average; overages come in at it (no cost given).
+  const priced = await planStockMoves(
+    tx,
+    lines.map((l) => ({ productId: l.productId, type: "ADJUST" as const, qty: l.variance ?? 0 })),
+  );
+  const shortage = priced.filter((p) => p.qty < 0).reduce((s, p) => s - p.totalCost, 0n);
+  const overage = priced.filter((p) => p.qty > 0).reduce((s, p) => s + p.totalCost, 0n);
+  const today = businessToday();
+  let jeId: string | null = null;
+  if (shortage > 0n || overage > 0n) {
+    const inv = await accountIdFor("merchandise_inventory", tx);
+    const je = await postJournal(
+      tx,
+      {
+        date: today,
+        book: "GJ",
+        particulars: `Stock count ${c.countNo}: ${shortage > 0n ? `shortages ${format(shortage)}` : ""}${shortage > 0n && overage > 0n ? ", " : ""}${overage > 0n ? `overages ${format(overage)}` : ""}`,
+        reference: c.countNo,
+        source: { module: "store", id: c.id },
+        lines: [
+          ...(shortage > 0n
+            ? [
+                { accountId: await accountIdFor("inventory_losses", tx), debit: shortage, memo: c.countNo },
+                { accountId: inv, credit: shortage, memo: c.countNo },
+              ]
+            : []),
+          ...(overage > 0n
+            ? [
+                { accountId: inv, debit: overage, memo: c.countNo },
+                { accountId: await accountIdFor("inventory_gains", tx), credit: overage, memo: c.countNo },
+              ]
+            : []),
+        ],
+      },
+      managerId,
+    );
+    jeId = je.id;
+  }
+  await recordStockMoves(tx, priced, { date: today, refType: "COUNT", refId: c.id, jeId }, managerId);
+  for (const p of priced) {
+    const line = lines.find((l) => l.productId === p.productId);
+    if (line) await tx.update(stockCountLines).set({ varianceValue: p.totalCost }).where(eq(stockCountLines.id, line.id));
+  }
+  await tx.update(stockCounts).set({ status: "APPROVED", approvedBy: managerId, approvedAt: sql`now()`, jeId }).where(eq(stockCounts.id, c.id));
+  await audit(tx, { action: "store.count_approve", entity: "stock_count", entityId: c.id, after: { countNo: c.countNo, shortage: format(shortage), overage: format(overage) }, userId: managerId });
+  return { jeId, shortage, overage };
+}
+
+export async function listCounts(db: Db | Tx = getDb()) {
+  return db.select().from(stockCounts).orderBy(sql`${stockCounts.countDate} DESC`, sql`${stockCounts.countNo} DESC`).limit(200);
+}
+
+/**
+ * A count sheet. Variance values are the posted ones once approved; before that, what each
+ * variance would be worth now.
+ */
+export async function getCount(countId: string, db: Db | Tx = getDb()) {
+  const [c] = await db.select().from(stockCounts).where(eq(stockCounts.id, countId));
+  if (!c) return null;
+  const rows = await db
+    .select({ line: stockCountLines, product: { sku: products.sku, name: products.name, unit: products.unit }, balance: stockBalances })
+    .from(stockCountLines)
+    .innerJoin(products, eq(products.id, stockCountLines.productId))
+    .innerJoin(stockBalances, eq(stockBalances.productId, stockCountLines.productId))
+    .where(eq(stockCountLines.countId, countId))
+    .orderBy(asc(products.name));
+  return {
+    count: c,
+    lines: rows.map(({ line, product, balance }) => ({
+      id: line.id,
+      productId: line.productId,
+      ...product,
+      systemQty: line.systemQty,
+      countedQty: line.countedQty,
+      variance: line.variance,
+      varianceValue: line.varianceValue ?? (line.variance === null ? null : varianceValueOf(toBalance(balance), line.variance)),
+    })),
+  };
 }

@@ -10,7 +10,7 @@ import { CashieringError } from "@/modules/cashiering/builtins";
 import { LedgerError } from "@/modules/ledger/service";
 import { approvePo, cancelPo, createPo, paySupplier, receive } from "./purchasing";
 import { RR_PAYMENTS, VAT_CLASSES } from "./schema";
-import { changePrice, createCategory, createProduct, createSupplier, StockError, StoreError, updateCategory, updateProduct, updateSupplier } from "./service";
+import { approveCount, changePrice, createCategory, createCount, createProduct, createSupplier, enterCounts, StockError, StoreError, submitCount, updateCategory, updateProduct, updateSupplier } from "./service";
 
 const EXPECTED = [StoreError, StockError, LedgerError, CashieringError];
 
@@ -194,6 +194,58 @@ export async function paySupplierAction(input: z.input<typeof paySchema>): Promi
   try {
     const data = paySchema.parse(input);
     return ok(await withTx((tx) => paySupplier(tx, { ...data, amount: pesos(data.amount) }, actor.id)));
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+// ── Stock counts ──
+
+const countSchema = z.object({ productIds: z.array(id).max(5000), categoryId: id.nullable().optional(), remarks: optional(300) });
+/** Store clerk: a count sheet (all active products when none are chosen). */
+export async function createCountAction(input: z.input<typeof countSchema>): Promise<ActionResult<{ id: string; countNo: string }>> {
+  const actor = await requirePermission("store.adjust");
+  try {
+    const data = countSchema.parse(input);
+    return ok(await withTx((tx) => createCount(tx, data, actor.id)));
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const enterSchema = z.object({ countId: id, lines: z.array(z.object({ productId: id, countedQty: z.number().int().nullable() })).max(5000) });
+/** Store clerk: the counted quantities on a draft sheet. */
+export async function enterCountAction(input: z.input<typeof enterSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("store.adjust");
+  try {
+    const data = enterSchema.parse(input);
+    await withTx((tx) => enterCounts(tx, data, actor.id));
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const countIdSchema = z.object({ countId: id });
+/** Store clerk: submits the counted sheet for the manager's approval. */
+export async function submitCountAction(input: z.input<typeof countIdSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("store.adjust");
+  try {
+    const data = countIdSchema.parse(input);
+    await withTx((tx) => submitCount(tx, data, actor.id));
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+/** Manager (not the preparer): approves a count; its variances are posted. */
+export async function approveCountAction(input: z.input<typeof countIdSchema>): Promise<ActionResult<{ jeId: string | null }>> {
+  const actor = await requirePermission("store.approve_adjust");
+  try {
+    const data = countIdSchema.parse(input);
+    const r = await withTx((tx) => approveCount(tx, data, actor.id));
+    return ok({ jeId: r.jeId });
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

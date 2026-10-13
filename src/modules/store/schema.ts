@@ -220,13 +220,13 @@ export const stockMoves = pgTable(
     valueAfter: money("value_after").notNull(),
     refType: text("ref_type").notNull(),
     refId: uuid("ref_id").notNull(),
-    jeId: uuid("je_id")
-      .notNull()
-      .references(() => journalEntries.id),
+    /** The entry the move was posted with (none only for a move of no value, e.g. a free item counted). */
+    jeId: uuid("je_id").references(() => journalEntries.id),
     ...createdColumns(),
   },
   (t) => [
     check("stock_moves_type_chk", inList("type", MOVE_TYPES)),
+    check("stock_moves_je_chk", sql`${t.jeId} IS NOT NULL OR ${t.totalCost} = 0`),
     check("stock_moves_amounts_chk", sql`${t.qty} <> 0 AND ((${t.qty} > 0 AND ${t.totalCost} >= 0) OR (${t.qty} < 0 AND ${t.totalCost} <= 0)) AND ${t.qtyAfter} >= 0 AND ${t.valueAfter} >= 0`),
     index("stock_moves_product_idx").on(t.productId, t.moveDate),
     index("stock_moves_ref_idx").on(t.refType, t.refId),

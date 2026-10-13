@@ -10,22 +10,26 @@ import { cashOuts, disbursementVouchers } from "@/modules/cashiering/schema";
 import { journalEntries, journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal, supplierLedger, trialBalance } from "@/modules/ledger/service";
 import {
+  approveCountAction,
   approvePoAction,
   cancelPoAction,
   changePriceAction,
   createCategoryAction,
+  createCountAction,
   createPoAction,
   createProductAction,
   createSupplierAction,
+  enterCountAction,
   paySupplierAction,
   receiveAction,
+  submitCountAction,
   updateCategoryAction,
   updateProductAction,
   updateSupplierAction,
 } from "@/modules/store/actions";
 import { approvePo, getPo, getRr } from "@/modules/store/purchasing";
 import { productPriceHistory, products, purchaseOrders, receivingReports, stockMoves, suppliers } from "@/modules/store/schema";
-import { getProduct, listProducts, pendingSupplierPayments, stockBalance, supplierBalance } from "@/modules/store/service";
+import { approveCount, getCount, getProduct, listProducts, pendingSupplierPayments, stockBalance, supplierBalance } from "@/modules/store/service";
 import { makeUser } from "../helpers/phase01";
 import { acct, P } from "../helpers/phase03";
 import { openSessionAs } from "../helpers/phase04";
@@ -281,5 +285,118 @@ describe("T12.4 purchase orders, receiving, payables and supplier payments", () 
     await expect(pool.query("UPDATE po_lines SET qty = 5 WHERE po_id = $1", [po.id])).rejects.toThrow(/only the quantity received grows/);
     const [row] = await getDb().select().from(purchaseOrders).where(eq(purchaseOrders.id, po.id));
     expect(row?.status).toBe("DRAFT");
+  });
+});
+
+describe("T12.5 stock counts", () => {
+  async function counted(lines: Array<[string, number | null]>, opts: { submit?: boolean } = {}) {
+    const { clerk } = storePeople();
+    const c = await runAs(clerk, () => createCountAction({ productIds: lines.map(([p]) => p), remarks: null }));
+    if (!c.ok) throw new Error(c.error);
+    const e = await runAs(clerk, () => enterCountAction({ countId: c.data.id, lines: lines.map(([productId, countedQty]) => ({ productId, countedQty })) }));
+    if (!e.ok) throw new Error(e.error);
+    if (opts.submit !== false) {
+      const s = await runAs(clerk, () => submitCountAction({ countId: c.data.id }));
+      if (!s.ok) throw new Error(s.error);
+    }
+    return c.data;
+  }
+
+  it("a sheet of all active products; every product counted before submission; the system quantities are taken on submission", async () => {
+    const { clerk } = storePeople();
+    const s1 = await supplier();
+    const [p1, p2, p3] = [await product({ sku: "C1", name: "C1 item" }), await product({ sku: "C2", name: "C2 item" }), await product({ sku: "C3", name: "C3 item" })];
+    await runAs(manager, () => updateProductAction({ id: p3, sku: "C3", barcode: null, name: "Old item", unit: "pc", categoryId: null, reorderLevel: 0, vatClass: "VAT_EXEMPT", isActive: false }));
+    await receive(s1, [[p1, 10, "4.00"]]);
+    const all = await runAs(clerk, () => createCountAction({ productIds: [], remarks: "Month-end" }));
+    if (!all.ok) throw new Error(all.error);
+    expect(all.data.countNo).toBe("SC-2026-00001");
+    expect((await getCount(all.data.id))!.lines.map((l) => l.sku).sort()).toEqual(["C1", "C2"]);
+    expect((await runAs(clerk, () => enterCountAction({ countId: all.data.id, lines: [{ productId: p1, countedQty: 9 }] }))).ok).toBe(true);
+    expect(await runAs(clerk, () => enterCountAction({ countId: all.data.id, lines: [{ productId: p3, countedQty: 1 }] }))).toMatchObject({ ok: false, error: expect.stringMatching(/isn't on SC-2026-00001/) });
+    expect(await runAs(clerk, () => enterCountAction({ countId: all.data.id, lines: [{ productId: p2, countedQty: -1 }] }))).toMatchObject({ ok: false, error: expect.stringMatching(/whole number, 0 or more/) });
+    expect(await runAs(clerk, () => submitCountAction({ countId: all.data.id }))).toMatchObject({ ok: false, error: "Count every product first (1 not counted)" });
+    // Stock moves between the count and its submission are in the system quantity.
+    await receive(s1, [[p1, 1, "4.00"]]);
+    expect((await runAs(clerk, () => enterCountAction({ countId: all.data.id, lines: [{ productId: p2, countedQty: 0 }] }))).ok).toBe(true);
+    expect((await runAs(clerk, () => submitCountAction({ countId: all.data.id }))).ok).toBe(true);
+    const sheet = (await getCount(all.data.id))!;
+    expect(sheet.count.status).toBe("SUBMITTED");
+    expect(sheet.lines.map((l) => [l.sku, l.systemQty, l.countedQty, l.variance, l.varianceValue])).toEqual([
+      ["C1", 11, 9, -2, -P(8)],
+      ["C2", 0, 0, 0, 0n],
+    ]);
+    expect(await runAs(clerk, () => enterCountAction({ countId: all.data.id, lines: [{ productId: p1, countedQty: 11 }] }))).toMatchObject({ ok: false, error: expect.stringMatching(/SUBMITTED; counts are entered on a draft/) });
+  });
+
+  it("approval (not by the preparer) posts shortages and overages in one entry, at the moving average", async () => {
+    const { clerk } = storePeople();
+    const s1 = await supplier();
+    const [p1, p2] = [await product({ sku: "A1", name: "A1 item" }), await product({ sku: "A2", name: "A2 item" })];
+    await receive(s1, [[p1, 3, "10.00"]]);
+    await receive(s1, [[p2, 3, "1.00"]]);
+    await receive(s1, [[p2, 4, "1.01"]]);
+    // p1: 3 → 0 (all gone: the remaining ₱30.00); p2: 7 @ 1.0057 (₱7.04) → 9 (+2 at the average: ₱2.01; ₱9.05 @ 1.0056).
+    const c = await counted([
+      [p1, 0],
+      [p2, 9],
+    ]);
+    await expect(withTx((tx) => approveCount(tx, { countId: c.id }, clerk))).rejects.toThrow(/preparer cannot approve/);
+    const r = await runAs(manager, () => approveCountAction({ countId: c.id }));
+    if (!r.ok) throw new Error(r.error);
+    const [losses, inv, gains] = [await accountIdFor("inventory_losses"), await accountIdFor("merchandise_inventory"), await accountIdFor("inventory_gains")];
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, r.data.jeId!));
+    expect(lines.map((l) => [l.accountId, l.debit, l.credit])).toEqual([
+      [losses, P(30), 0n],
+      [inv, 0n, P(30)],
+      [inv, P(2, 1), 0n],
+      [gains, 0n, P(2, 1)],
+    ]);
+    expect(await stockBalance(p1)).toEqual({ qty: 0, avgCost: "10.0000", value: 0n });
+    expect(await stockBalance(p2)).toEqual({ qty: 9, avgCost: "1.0056", value: P(9, 5) });
+    const sheet = (await getCount(c.id))!;
+    expect(sheet.count).toMatchObject({ status: "APPROVED", approvedBy: manager, jeId: r.data.jeId });
+    expect(sheet.lines.map((l) => [l.sku, l.varianceValue])).toEqual([
+      ["A1", -P(30)],
+      ["A2", P(2, 1)],
+    ]);
+    const moves = await getDb().select().from(stockMoves).where(eq(stockMoves.refId, c.id));
+    expect(moves.map((m) => [m.type, m.qty, m.totalCost, m.qtyAfter, m.valueAfter]).sort()).toEqual(
+      [
+        ["ADJUST", -3, -P(30), 0, 0n],
+        ["ADJUST", 2, P(2, 1), 9, P(9, 5)],
+      ].sort(),
+    );
+    expect(await runAs(manager, () => approveCountAction({ countId: c.id }))).toMatchObject({ ok: false, error: expect.stringMatching(/already APPROVED/) });
+    expect((await trialBalance("2026-12-31")).balanced).toBe(true);
+
+    const pool = getPool();
+    await expect(pool.query("UPDATE stock_counts SET remarks = 'x' WHERE id = $1", [c.id])).rejects.toThrow(/approved stock count can't change/);
+    await expect(pool.query("UPDATE stock_count_lines SET counted_qty = 5 WHERE count_id = $1", [c.id])).rejects.toThrow(/approved stock count can't change/);
+  });
+
+  it("a count with no variance, or only variances of no value, is approved without an entry", async () => {
+    const s1 = await supplier();
+    const [p1, p2] = [await product({ sku: "Z1" }), await product({ sku: "Z2" })];
+    await receive(s1, [[p1, 5, "2.00"]]);
+    // p2 was never received (average 0): an overage of 2 has no value.
+    const c = await counted([
+      [p1, 5],
+      [p2, 2],
+    ]);
+    const r = await runAs(manager, () => approveCountAction({ countId: c.id }));
+    expect(r).toEqual({ ok: true, data: { jeId: null } });
+    expect(await stockBalance(p2)).toEqual({ qty: 2, avgCost: "0.0000", value: 0n });
+    const [move] = await getDb().select().from(stockMoves).where(eq(stockMoves.refId, c.id));
+    expect(move).toMatchObject({ qty: 2, totalCost: 0n, jeId: null });
+  });
+
+  it("only the store clerk counts; a draft isn't approved", async () => {
+    const s1 = await supplier();
+    const p1 = await product();
+    await receive(s1, [[p1, 1, "2.00"]]);
+    await expect(runAs(manager, () => createCountAction({ productIds: [p1], remarks: null }))).rejects.toBeInstanceOf(ForbiddenError);
+    const c = await counted([[p1, 1]], { submit: false });
+    expect(await runAs(manager, () => approveCountAction({ countId: c.id }))).toMatchObject({ ok: false, error: "SC-2026-00001 isn't submitted yet" });
   });
 });

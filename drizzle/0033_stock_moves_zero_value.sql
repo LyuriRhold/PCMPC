@@ -1,0 +1,2 @@
+ALTER TABLE "stock_moves" ALTER COLUMN "je_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "stock_moves" ADD CONSTRAINT "stock_moves_je_chk" CHECK ("stock_moves"."je_id" IS NOT NULL OR "stock_moves"."total_cost" = 0);

@@ -4,14 +4,15 @@ import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { assertNotSameUser } from "@/lib/auth-guard";
 import { businessToday } from "@/lib/dates";
-import { format, type Money } from "@/lib/money";
+import { divide, format, type Money } from "@/lib/money";
 import { next as nextNumber } from "@/lib/numbering";
 import { accountMappings, journalEntries, journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal, type LineInput } from "@/modules/ledger/service";
 import { members } from "@/modules/members/schema";
 import { getSetting } from "@/modules/settings/service";
-import { memberChargeLimits, posShifts, products, saleLines, saleReturnLines, saleReturns, sales, type PosShift, type SalePayment } from "./schema";
+import { memberChargeLimits, posShifts, products, saleLines, saleReturnLines, saleReturns, sales, type PosShift, type RefundMode, type SalePayment } from "./schema";
 import { planStockMoves, recordStockMoves, StoreError } from "./service";
+import { costOf } from "./stock";
 
 /**
  * The point of sale (PHASE-13): cashier shifts, cash and member-charge sales, voids, returns and the
@@ -285,4 +286,85 @@ export async function storePatronage(memberId: string, year: number, db: Db | Tx
     .innerJoin(sales, eq(sales.id, saleReturns.saleId))
     .where(and(eq(sales.memberId, memberId), gte(saleReturns.returnDate, from), lte(saleReturns.returnDate, to)));
   return BigInt(bought?.s ?? "0") - BigInt(back?.s ?? "0");
+}
+
+// ── Returns (T13.3) ──
+
+/**
+ * Goods returned from a completed sale (not more than was sold less earlier returns): restocked at
+ * the sale's unit cost (the last units of a line take what is left of its COGS, so nothing drifts),
+ * refunded in cash from the cashier's open drawer, or, for a charge sale, taken off the member's
+ * account (up to what they owe). One entry: Dr Sales Returns / Cr Cash or AR–Members; Dr Merchandise
+ * Inventory / Cr COGS.
+ */
+export async function returnSale(tx: Tx, input: { saleId: string; lines: Array<{ saleLineId: string; qty: number }>; refundMode: RefundMode; reason: string }, cashierId: string) {
+  const reason = input.reason.trim();
+  if (!reason) throw new StoreError("Enter why the goods are returned");
+  const [sale] = await tx.select().from(sales).where(eq(sales.id, input.saleId)).for("update");
+  if (!sale) throw new StoreError("Sale not found");
+  if (sale.status !== "COMPLETED") throw new StoreError(`${sale.saleNo} was voided; nothing to return`);
+  if (input.lines.length === 0) throw new StoreError("Choose what is returned");
+  if (input.refundMode === "AR" && (sale.payment !== "CHARGE" || !sale.memberId)) throw new StoreError("Only a charge sale is refunded to the member's account");
+  const shift = input.refundMode === "CASH" ? await requireOpenShift(tx, cashierId) : await currentShift(cashierId, tx);
+  const detail = (await getSale(sale.id, tx))!;
+  const byId = new Map(detail.lines.map((l) => [l.id, l]));
+  const wanted = new Map<string, number>();
+  for (const l of input.lines) {
+    if (!byId.has(l.saleLineId)) throw new StoreError(`That item isn't on ${sale.saleNo}`);
+    if (!Number.isSafeInteger(l.qty) || l.qty <= 0) throw new StoreError("A returned quantity is a whole number more than zero");
+    wanted.set(l.saleLineId, (wanted.get(l.saleLineId) ?? 0) + l.qty);
+  }
+  const lines = [...wanted].map(([saleLineId, qty]) => {
+    const l = byId.get(saleLineId)!;
+    const left = l.qty - l.returnedQty;
+    if (qty > left) throw new StoreError(`${l.sku} ${l.name}: only ${left} of ${l.qty} can still be returned`);
+    const amount = BigInt(qty) * l.unitPrice - (l.discount === 0n ? 0n : divide(l.discount * BigInt(qty), BigInt(l.qty)));
+    const cost = qty === left ? l.cogs - l.returnedCost : costOf(qty, l.unitCost);
+    return { line: l, qty, amount, cost: cost > 0n ? cost : 0n };
+  });
+  const total = lines.reduce((s, l) => s + l.amount, 0n);
+  const cost = lines.reduce((s, l) => s + l.cost, 0n);
+  if (total <= 0n) throw new StoreError("Nothing to refund");
+  if (input.refundMode === "AR" && sale.memberId) {
+    const owed = await memberAr(sale.memberId, tx);
+    if (total > owed) throw new StoreError(`The member owes ${format(owed > 0n ? owed : 0n)}; refund the rest in cash`);
+  }
+
+  const plans = await planStockMoves(
+    tx,
+    lines.map((l) => ({ productId: l.line.productId, type: "RETURN" as const, qty: l.qty, cost: l.cost })),
+  );
+  const today = businessToday();
+  const returnId = randomUUID();
+  const returnNo = await nextNumber("SR", tx, today);
+  const je = await postJournal(
+    tx,
+    {
+      date: today,
+      book: "SJ",
+      particulars: `${returnNo} · return on ${sale.saleNo} · ${input.refundMode === "CASH" ? "cash refund" : "credited to the member's account"}: ${reason}`,
+      reference: returnNo,
+      source: { module: "store", id: returnId },
+      lines: [
+        { accountId: await accountIdFor("sales_returns", tx), debit: total, memo: returnNo },
+        input.refundMode === "AR"
+          ? { accountId: await accountIdFor("accounts_receivable_members", tx), credit: total, memberId: sale.memberId, memo: returnNo }
+          : { accountId: await accountIdFor("cash_on_hand", tx), credit: total, memo: returnNo },
+        ...(cost > 0n
+          ? [
+              { accountId: await accountIdFor("merchandise_inventory", tx), debit: cost, memo: returnNo },
+              { accountId: await accountIdFor("cost_of_sales", tx), credit: cost, memo: returnNo },
+            ]
+          : []),
+      ],
+    },
+    cashierId,
+  );
+  await tx.insert(saleReturns).values({ id: returnId, returnNo, saleId: sale.id, shiftId: shift?.id ?? null, returnDate: today, refundMode: input.refundMode, total, cost, reason, cashierId, jeId: je.id, createdBy: cashierId });
+  await tx.insert(saleReturnLines).values(
+    lines.map((l) => ({ returnId, saleLineId: l.line.id, productId: l.line.productId, qty: l.qty, unitPrice: l.line.unitPrice, amount: l.amount, unitCost: l.line.unitCost, cost: l.cost, createdBy: cashierId })),
+  );
+  await recordStockMoves(tx, plans, { date: today, refType: "RETURN", refId: returnId, jeId: je.id }, cashierId);
+  await audit(tx, { action: "store.sale_return", entity: "sale", entityId: sale.id, after: { returnNo, total: format(total), cost: format(cost), refundMode: input.refundMode, reason }, userId: cashierId });
+  return { id: returnId, returnNo, jeId: je.id, total };
 }

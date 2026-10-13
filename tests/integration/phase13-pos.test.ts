@@ -9,7 +9,7 @@ import { changeMemberStatusAction } from "@/modules/members/actions";
 import { journalEntries, journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, subsidiaryLedger, trialBalance } from "@/modules/ledger/service";
 import { updateProductAction } from "@/modules/store/actions";
-import { findMembersAction, findProductAction, openShiftAction, voidSaleAction } from "@/modules/store/pos-actions";
+import { findMembersAction, findProductAction, openShiftAction, returnSaleAction, voidSaleAction } from "@/modules/store/pos-actions";
 import { getSale } from "@/modules/store/pos";
 import { posShifts, sales, stockMoves } from "@/modules/store/schema";
 import { stockBalance } from "@/modules/store/service";
@@ -132,5 +132,67 @@ describe("T13.2 sales", () => {
     const m = await member("Dela Cruz");
     expect(await runAs(clerk, () => findMembersAction({ q: m.memberNo }))).toMatchObject({ ok: true, data: [{ id: m.id, memberNo: m.memberNo }] });
     expect(await runAs(clerk, () => findMembersAction({ q: "dela cruz" }))).toMatchObject({ ok: true, data: [{ id: m.id }] });
+  });
+});
+
+describe("T13.3 returns", () => {
+  const giveBack = (saleId: string, lines: Array<{ saleLineId: string; qty: number }>, refundMode: "CASH" | "AR" = "CASH") =>
+    runAs(storePeople().clerk, () => returnSaleAction({ saleId, lines, refundMode, reason: "Returned" }));
+
+  it("not more than was sold less earlier returns; the last units take what is left of the line's COGS", async () => {
+    const { s1 } = posFixture();
+    const p2 = await product({ sku: "P2", name: "Corned beef", price: "12.00" });
+    await receive(s1, [[p2, 3, "10.00"]]);
+    await receive(s1, [[p2, 4, "10.01"]]);
+    await openShift();
+    const s = await sell({ lines: [[p2, 7]], tendered: "84.00" });
+    if (!s.ok) throw new Error(s.error);
+    const line = (await getSale(s.data.id))!.lines[0]!;
+    expect([line.unitCost, line.cogs]).toEqual(["10.0057", P(70, 4)]);
+    expect(await giveBack(s.data.id, [{ saleLineId: line.id, qty: 8 }])).toEqual({ ok: false, error: "P2 Corned beef: only 7 of 7 can still be returned" });
+    const first = await giveBack(s.data.id, [{ saleLineId: line.id, qty: 3 }]);
+    if (!first.ok) throw new Error(first.error);
+    expect(first.data.returnNo).toBe("SR-2026-000001");
+    expect(await giveBack(s.data.id, [{ saleLineId: line.id, qty: 5 }])).toEqual({ ok: false, error: "P2 Corned beef: only 4 of 7 can still be returned" });
+    const rest = await giveBack(s.data.id, [{ saleLineId: line.id, qty: 4 }]);
+    if (!rest.ok) throw new Error(rest.error);
+    const after = (await getSale(s.data.id))!;
+    // 3 × 10.0057 = ₱30.02; the last 4 take the rest of ₱70.04: ₱40.02. Nothing drifts.
+    expect(after.returns.map((r) => [r.total, r.cost])).toEqual([
+      [P(36), P(30, 2)],
+      [P(48), P(40, 2)],
+    ]);
+    expect(await stockBalance(p2)).toMatchObject({ qty: 7, value: P(70, 4) });
+    expect((await trialBalance("2026-12-31")).balanced).toBe(true);
+  });
+
+  it("a charge sale can be credited back to the member's account; a cash sale can't", async () => {
+    const { p1 } = posFixture();
+    const m = await member();
+    await openShift();
+    const cash = await sell({ lines: [[p1, 1]], tendered: "70.00" });
+    const charge = await sell({ lines: [[p1, 3]], payment: "CHARGE", memberId: m.id });
+    if (!cash.ok || !charge.ok) throw new Error("sales failed");
+    const cashLine = (await getSale(cash.data.id))!.lines[0]!;
+    const chargeLine = (await getSale(charge.data.id))!.lines[0]!;
+    expect(await giveBack(cash.data.id, [{ saleLineId: cashLine.id, qty: 1 }], "AR")).toEqual({ ok: false, error: "Only a charge sale is refunded to the member's account" });
+    expect(await giveBack(cash.data.id, [{ saleLineId: chargeLine.id, qty: 1 }])).toEqual({ ok: false, error: expect.stringMatching(/isn't on S-2026-000001/) });
+    const r = await giveBack(charge.data.id, [{ saleLineId: chargeLine.id, qty: 2 }], "AR");
+    if (!r.ok) throw new Error(r.error);
+    const ar = await accountIdFor("accounts_receivable_members");
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, r.data.jeId));
+    expect(lines.filter((l) => l.accountId === ar).map((l) => [l.credit, l.memberId])).toEqual([[P(140), m.id]]);
+    expect((await subsidiaryLedger("accounts_receivable_members", m.id, "2026-01-01", "2026-12-31")).closing).toBe(P(70));
+    expect((await giveBack(charge.data.id, [{ saleLineId: chargeLine.id, qty: 1 }], "AR")).ok).toBe(true);
+    expect((await subsidiaryLedger("accounts_receivable_members", m.id, "2026-01-01", "2026-12-31")).closing).toBe(0n);
+  });
+
+  it("a voided sale has nothing to return", async () => {
+    const { p1 } = posFixture();
+    await openShift();
+    const v = await runAs(storePeople().clerk, () => voidSaleAction({ memberId: null, lines: [{ productId: p1, qty: 1 }], reason: "Customer left", supervisor: supervisor() }));
+    if (!v.ok) throw new Error(v.error);
+    const line = (await getSale(v.data.id))!.lines[0]!;
+    expect(await giveBack(v.data.id, [{ saleLineId: line.id, qty: 1 }])).toEqual({ ok: false, error: "S-2026-000001 was voided; nothing to return" });
   });
 });

@@ -179,7 +179,7 @@
 ### Phase 13 — Store: POS, Charge-to-Member & Store Patronage
 - [x] T13.1 Schema + migrations
 - [x] T13.2 Sale service (cash/charge) with stock + GL in one transaction
-- [ ] T13.3 Returns and voids
+- [x] T13.3 Returns and voids
 - [ ] T13.4 Shifts + Z-reading + cash count
 - [ ] T13.5 Member charge accounts, statement of account, `STORE_AR_PAYMENT` receipt item in cashiering
 - [ ] T13.6 POS UI (keyboard/barcode-first) and the slip print

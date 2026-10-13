@@ -12,8 +12,8 @@ import { AuthError, verifySupervisor } from "@/modules/auth/service";
 import { CashieringError } from "@/modules/cashiering/builtins";
 import { LedgerError } from "@/modules/ledger/service";
 import { members } from "@/modules/members/schema";
-import { completeSale, openShift, voidSale } from "./pos";
-import { products, SALE_PAYMENTS, stockBalances } from "./schema";
+import { completeSale, openShift, returnSale, voidSale } from "./pos";
+import { products, REFUND_MODES, SALE_PAYMENTS, stockBalances } from "./schema";
 import { StockError, StoreError } from "./service";
 
 const EXPECTED = [StoreError, StockError, LedgerError, CashieringError, AuthError];
@@ -117,6 +117,19 @@ export async function findMembersAction(input: z.input<typeof memberSchema>): Pr
       .orderBy(members.lastName, members.firstName)
       .limit(10);
     return ok(rows.filter((r) => r.memberNo).map((r) => ({ id: r.id, memberNo: r.memberNo as string, name: `${r.lastName}, ${r.firstName}` })));
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const returnSchema = z.object({ saleId: id, lines: z.array(z.object({ saleLineId: id, qty: z.number().int() })).min(1).max(200), refundMode: z.enum(REFUND_MODES), reason: z.string().trim().max(300) });
+/** Cashier: goods returned from a completed sale; a cash refund comes out of the cashier's drawer. */
+export async function returnSaleAction(input: z.input<typeof returnSchema>): Promise<ActionResult<{ id: string; returnNo: string; jeId: string }>> {
+  const actor = await requirePermission("store.pos");
+  try {
+    const data = returnSchema.parse(input);
+    const r = await withTx((tx) => returnSale(tx, data, actor.id));
+    return ok({ id: r.id, returnNo: r.returnNo, jeId: r.jeId });
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

@@ -329,3 +329,28 @@ export async function signIn(input: { username: string; password: string }, head
     throw e;
   }
 }
+
+/**
+ * A supervisor's credential typed at a counter (e.g. a POS void): the username and password of an
+ * active, unlocked user whose role holds `permission`. A wrong password counts toward that user's
+ * lockout, as a failed sign-in does; a right one signs nobody in.
+ */
+export async function verifySupervisor(input: { username: string; password: string }, permission: string): Promise<{ id: string; username: string }> {
+  try {
+    await beforeSignIn(input.username);
+  } catch (e) {
+    if (e instanceof SignInBlockedError) throw new AuthError(`Supervisor: ${e.message}`);
+    throw e;
+  }
+  const db = getDb();
+  const [u] = await db.select().from(users).where(eq(users.username, normalize(input.username)));
+  const [account] = u ? await db.select({ password: authAccounts.password }).from(authAccounts).where(and(eq(authAccounts.userId, u.id), eq(authAccounts.providerId, "credential"))) : [];
+  const ok = !!u && !!account?.password && !!input.password && (await (await getAuth().$context).password.verify({ hash: account.password, password: input.password }));
+  if (!ok || !u) {
+    await afterSignInAttempt(input.username, false);
+    throw new AuthError("Invalid supervisor username or password");
+  }
+  if (!(await permissionsOfRole(u.roleCode, db)).has(permission)) throw new AuthError(`${u.username} can't approve this (${permission} is required)`);
+  await audit(db, { action: "auth.supervisor_check", entity: "user", entityId: u.id, after: { permission }, userId: u.id });
+  return { id: u.id, username: u.username };
+}

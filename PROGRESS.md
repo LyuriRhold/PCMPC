@@ -167,7 +167,7 @@
 - [x] Exit checks passed
 
 ### Phase 12 — Store: Inventory & Purchasing
-- [ ] T12.1 Schema + migrations
+- [x] T12.1 Schema + migrations
 - [ ] T12.2 Stock engine (moving average, issue costing) + property tests
 - [ ] T12.3 Products, categories, suppliers, price history services + UI
 - [ ] T12.4 PO → RR flow with GL; AP subledger; supplier payment via DV

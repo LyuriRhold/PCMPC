@@ -218,6 +218,20 @@
       "when": 1791796179188,
       "tag": "0030_loan_servicing_review",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791850293370,
+      "tag": "0031_store",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791850315156,
+      "tag": "0032_store_immutable",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import { createdColumns, tstz } from "@/db/columns";
 import { users } from "@/modules/auth/schema";
 import { accounts, journalEntries } from "@/modules/ledger/schema";
 import { members } from "@/modules/members/schema";
+import { suppliers } from "@/modules/store/schema";
 import { waterCustomers } from "@/modules/water/schema";
 
 export const SESSION_STATUSES = ["OPEN", "CLOSED", "VERIFIED"] as const;
@@ -176,6 +177,8 @@ export const dvLines = pgTable(
     memberId: uuid("member_id").references(() => members.id),
     /** Water customer, for customer sub-ledger accounts (e.g. a deposit refund). */
     customerId: uuid("customer_id").references(() => waterCustomers.id),
+    /** Store supplier, for the AP–Trade sub-ledger (a supplier payment, Phase 12). */
+    supplierId: uuid("supplier_id").references(() => suppliers.id),
     amount: money("amount").notNull(),
     memo: text("memo"),
     ...createdColumns(),

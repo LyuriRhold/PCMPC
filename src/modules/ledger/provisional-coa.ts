@@ -30,6 +30,9 @@ export const MEMBER_SUBSIDIARY_KEYS = [
 /** Keys whose lines form a water-customer subsidiary ledger (DOMAIN §6 "customer-tagged"). */
 export const CUSTOMER_SUBSIDIARY_KEYS = ["ar_water", "customers_deposits", "customers_advances"] as const;
 
+/** Keys whose lines form a store-supplier subsidiary ledger (AP–Trade, DOMAIN §6 "supplier-tagged"; Phase 12). */
+export const SUPPLIER_SUBSIDIARY_KEYS = ["accounts_payable_trade"] as const;
+
 /**
  * Every DOMAIN §6 mapping key the system posts to. Templated keys are expanded for the sample loan
  * products (REG, EMR, PRD; DOMAIN §2). `accumulated_depreciation_{class}` keys are added in
@@ -66,6 +69,7 @@ export const REQUIRED_MAPPING_KEYS = [
   "service_fee_income",
   "fines_penalties_income",
   "recovery_income_loans",
+  "inventory_gains",
   "notarial_fee_income",
   "water_revenue_members",
   "water_revenue_nonmembers",
@@ -171,6 +175,7 @@ export const PROVISIONAL_COA: CoaRow[] = [
   p("44120", "Certification Fee Income", "REVENUE", "CR", "44000", ["certification_fee_income"]),
   p("44130", "Rental Income", "REVENUE", "CR", "44000", ["rental_income"]),
   p("44140", "Recovery of Loans Written Off", "REVENUE", "CR", "44000", ["recovery_income_loans"]),
+  p("44150", "Inventory Overage", "REVENUE", "CR", "44000", ["inventory_gains"]),
 
   h("5", "EXPENSES", "EXPENSE", "DR", null),
   h("51000", "Cost of Sales", "EXPENSE", "DR", "5"),

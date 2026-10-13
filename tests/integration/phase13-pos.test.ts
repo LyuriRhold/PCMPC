@@ -10,9 +10,10 @@ import { duesFor } from "@/modules/cashiering/registry";
 import { changeMemberStatusAction } from "@/modules/members/actions";
 import { journalEntries, journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, subsidiaryLedger, trialBalance } from "@/modules/ledger/service";
-import { updateProductAction } from "@/modules/store/actions";
+import { createCategoryAction, updateProductAction } from "@/modules/store/actions";
 import { closeShiftAction, findMembersAction, findProductAction, openShiftAction, returnSaleAction, setChargeLimitAction, verifyShiftAction, voidSaleAction } from "@/modules/store/pos-actions";
 import { chargeAvailable, getSale, memberCharges, shiftReading } from "@/modules/store/pos";
+import { salesReport, slowMovers, topItems } from "@/modules/store/sales-reports";
 import { posShifts, sales, stockMoves } from "@/modules/store/schema";
 import { stockBalance } from "@/modules/store/service";
 import { makeUser } from "../helpers/phase01";
@@ -317,5 +318,56 @@ describe("T13.5 member charge accounts and STORE_AR_PAYMENT", () => {
     expect((await runAs(storePeople().manager, () => cancelReceiptAction({ receiptId: r.data.id, reason: "Wrong member" }))).ok).toBe(true);
     expect(await ar(m.id)).toBe(P(350));
     expect((await trialBalance("2026-12-31")).balanced).toBe(true);
+  });
+});
+
+describe("T13.7 store reports", () => {
+  it("sales and gross margin by day, category and product; top items; slow movers", async () => {
+    const { p1, s1 } = posFixture();
+    const { clerk, manager } = storePeople();
+    const canned = await runAs(manager, () => createCategoryAction({ name: "Canned goods" }));
+    const grains = await runAs(manager, () => createCategoryAction({ name: "Grains" }));
+    if (!canned.ok || !grains.ok) throw new Error("categories");
+    await runAs(manager, () => updateProductAction({ id: p1, sku: "P1", barcode: null, name: "Sardines 155 g", unit: "pc", categoryId: canned.data.id, reorderLevel: 5, vatClass: "VAT_EXEMPT", isActive: true }));
+    const p2 = await product({ sku: "P2", name: "Rice 5 kg", price: "450.00" });
+    await runAs(manager, () => updateProductAction({ id: p2, sku: "P2", barcode: null, name: "Rice 5 kg", unit: "sack", categoryId: grains.data.id, reorderLevel: 0, vatClass: "VAT_EXEMPT", isActive: true }));
+    const p3 = await product({ sku: "P3", name: "Vinegar" });
+    await receive(s1, [[p2, 2, "400.00"]]);
+    await receive(s1, [[p3, 5, "20.00"]]);
+
+    // Oct 7: 5 × P1 (₱350.00, cost ₱275.00) and 1 × P2 (₱450.00, cost ₱400.00).
+    const day1 = await openShift();
+    const first = await sell({ lines: [[p1, 5], [p2, 1]], tendered: "800.00" });
+    if (!first.ok) throw new Error(first.error);
+    await runAs(clerk, () => closeShiftAction({ shiftId: day1, countedCash: "1,800.00" }));
+    // Oct 8: 2 × P1 (₱140.00, cost ₱110.00) and 1 × P1 of the Oct 7 sale returned (₱70.00, cost ₱55.00).
+    setClock(() => new Date("2026-10-08T01:00:00Z"));
+    await openShift();
+    expect((await sell({ lines: [[p1, 2]], tendered: "140.00" })).ok).toBe(true);
+    const line = (await getSale(first.data.id))!.lines.find((l) => l.productId === p1)!;
+    expect((await runAs(clerk, () => returnSaleAction({ saleId: first.data.id, lines: [{ saleLineId: line.id, qty: 1 }], refundMode: "CASH", reason: "Dented" }))).ok).toBe(true);
+
+    const r = await salesReport("2026-10-07", "2026-10-08");
+    expect(r.salesCount).toBe(2);
+    expect(r.total).toEqual({ qty: 7, sales: P(940), returns: P(70), net: P(870), cogs: P(730), margin: P(140), marginPct: "16.09" });
+    expect(r.byDay.map((d) => [d.day, d.qty, d.net, d.cogs, d.margin, d.marginPct])).toEqual([
+      ["2026-10-07", 6, P(800), P(675), P(125), "15.63"],
+      ["2026-10-08", 1, P(70), P(55), P(15), "21.43"],
+    ]);
+    expect(r.byCategory.map((c) => [c.category, c.net, c.margin])).toEqual([
+      ["Canned goods", P(420), P(90)],
+      ["Grains", P(450), P(50)],
+    ]);
+    expect(r.byProduct.map((p) => [p.product.sku, p.qty, p.net, p.marginPct])).toEqual([
+      ["P2", 1, P(450), "11.11"],
+      ["P1", 6, P(420), "21.43"],
+    ]);
+    expect((await topItems("2026-10-07", "2026-10-08", 1)).map((p) => p.product.sku)).toEqual(["P2"]);
+    expect((await salesReport("2026-10-08", "2026-10-08")).total).toMatchObject({ sales: P(140), returns: P(70), net: P(70) });
+    expect((await slowMovers("2026-10-07", "2026-10-08")).map((s) => [s.product.sku, s.soldQty, s.onHand, s.lastSold])).toEqual([
+      ["P3", 0, 5, null],
+      ["P2", 1, 1, "2026-10-07"],
+      ["P1", 6, 9, "2026-10-08"],
+    ]);
   });
 });

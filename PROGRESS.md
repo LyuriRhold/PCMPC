@@ -183,7 +183,7 @@
 - [x] T13.4 Shifts + Z-reading + cash count
 - [x] T13.5 Member charge accounts, statement of account, `STORE_AR_PAYMENT` receipt item in cashiering
 - [x] T13.6 POS UI (keyboard/barcode-first) and the slip print
-- [ ] T13.7 Store reports (sales, margin, top items, slow movers)
+- [x] T13.7 Store reports (sales, margin, top items, slow movers)
 - [x] Acceptance tests written first (tests/acceptance/phase-13.test.ts)
 - [ ] Exit checks passed
 

@@ -5,18 +5,36 @@ import "@/modules/plugins";
 import { getDb, getPool, withTx } from "@/db/client";
 import { ForbiddenError, runAs } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
-import { postJournal, supplierLedger } from "@/modules/ledger/service";
-import { changePriceAction, createCategoryAction, createProductAction, createSupplierAction, updateCategoryAction, updateProductAction, updateSupplierAction } from "@/modules/store/actions";
-import { productPriceHistory, products, suppliers } from "@/modules/store/schema";
-import { getProduct, listProducts, stockBalance } from "@/modules/store/service";
+import { approveDvAction, createDvAction, releaseDvAction } from "@/modules/cashiering/actions";
+import { cashOuts, disbursementVouchers } from "@/modules/cashiering/schema";
+import { journalEntries, journalLines } from "@/modules/ledger/schema";
+import { accountIdFor, postJournal, supplierLedger, trialBalance } from "@/modules/ledger/service";
+import {
+  approvePoAction,
+  cancelPoAction,
+  changePriceAction,
+  createCategoryAction,
+  createPoAction,
+  createProductAction,
+  createSupplierAction,
+  paySupplierAction,
+  receiveAction,
+  updateCategoryAction,
+  updateProductAction,
+  updateSupplierAction,
+} from "@/modules/store/actions";
+import { approvePo, getPo, getRr } from "@/modules/store/purchasing";
+import { productPriceHistory, products, purchaseOrders, receivingReports, stockMoves, suppliers } from "@/modules/store/schema";
+import { getProduct, listProducts, pendingSupplierPayments, stockBalance, supplierBalance } from "@/modules/store/service";
 import { makeUser } from "../helpers/phase01";
 import { acct, P } from "../helpers/phase03";
-import { setupCashiering } from "../helpers/phase04";
+import { openSessionAs } from "../helpers/phase04";
+import { product, receive, setupStore, storePeople, supplier } from "../helpers/phase12";
 
 let manager = "";
 
 beforeEach(async () => {
-  manager = (await setupCashiering()).manager.id;
+  manager = (await setupStore()).manager;
 });
 afterEach(() => setClock(null));
 
@@ -105,5 +123,163 @@ describe("T12.3 products, categories, prices and suppliers", () => {
     expect((await runAs(clerk, () => updateSupplierAction({ id: s.data.id, name: "Acme Trading", contact: null, tin: null, termsDays: 15, isActive: false }))).ok).toBe(true);
     const [row] = await getDb().select().from(suppliers).where(eq(suppliers.id, s.data.id));
     expect(row).toMatchObject({ termsDays: 15, isActive: false, contact: null });
+  });
+});
+
+describe("T12.4 purchase orders, receiving, payables and supplier payments", () => {
+  async function draftPo(s: string, lines: Array<[string, number, string]>) {
+    const { clerk } = storePeople();
+    const po = await runAs(clerk, () => createPoAction({ supplierId: s, remarks: null, lines: lines.map(([productId, qty, unitCost]) => ({ productId, qty, unitCost })) }));
+    if (!po.ok) throw new Error(po.error);
+    return po.data;
+  }
+
+  it("the clerk prepares a PO, the manager (not the preparer) approves it; deliveries are received against it in parts", async () => {
+    const { clerk } = storePeople();
+    const s1 = await supplier("S1 Trading", 30);
+    const s2 = await supplier("S2 Supply", 0);
+    const [p1, p2] = [await product({ sku: "P1" }), await product({ sku: "P2" })];
+    const po = await draftPo(s1, [
+      [p1, 10, "50.00"],
+      [p2, 4, "10.01"],
+    ]);
+    expect(po.poNo).toBe("PO-2026-00001");
+    const lines = (await getPo(po.id))!.lines;
+    const recv = (qtys: [number, number], supplierId = s1) =>
+      runAs(clerk, () =>
+        receiveAction({
+          supplierId,
+          poId: po.id,
+          invoiceNo: "SI-1",
+          payment: "ON_ACCOUNT",
+          lines: lines.map((l, i) => ({ productId: l.product.id, poLineId: l.line.id, qty: qtys[i]!, unitCost: i === 0 ? "50.00" : "10.01" })).filter((l) => l.qty > 0),
+        }),
+      );
+    expect(await recv([5, 0])).toMatchObject({ ok: false, error: expect.stringMatching(/isn.t approved yet/) });
+    await expect(runAs(clerk, () => approvePoAction({ poId: po.id }))).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(withTx((tx) => approvePo(tx, { poId: po.id }, clerk))).rejects.toThrow(/preparer cannot approve/);
+    expect((await runAs(manager, () => approvePoAction({ poId: po.id }))).ok).toBe(true);
+    expect(await recv([5, 0], s2)).toMatchObject({ ok: false, error: expect.stringMatching(/for another supplier/) });
+
+    const first = await recv([6, 0]);
+    if (!first.ok) throw new Error(first.error);
+    expect((await getPo(po.id))!.po.status).toBe("PARTIAL");
+    expect(await recv([5, 4])).toMatchObject({ ok: false, error: expect.stringMatching(/only 4 still to come on PO-2026-00001/) });
+    const second = await recv([4, 4]);
+    if (!second.ok) throw new Error(second.error);
+    const after = (await getPo(po.id))!;
+    expect(after.po.status).toBe("RECEIVED");
+    expect(after.lines.map((l) => [l.line.qtyReceived, l.remaining])).toEqual([
+      [10, 0],
+      [4, 0],
+    ]);
+    expect(await recv([1, 0])).toMatchObject({ ok: false, error: expect.stringMatching(/is RECEIVED/) });
+    expect(await runAs(manager, () => cancelPoAction({ poId: po.id, reason: "x" }))).toMatchObject({ ok: false, error: "PO-2026-00001 is RECEIVED" });
+
+    expect(await stockBalance(p1)).toEqual({ qty: 10, avgCost: "50.0000", value: P(500) });
+    expect(await stockBalance(p2)).toEqual({ qty: 4, avgCost: "10.0100", value: P(40, 4) });
+    // AP S1 = both deliveries; each is due 30 days after it was received.
+    expect(await supplierBalance(s1)).toBe(P(540, 4));
+    expect((await getRr(second.data.id))!.rr).toMatchObject({ rrNo: "RR-2026-00002", total: P(240, 4), dueDate: "2026-11-06", payment: "ON_ACCOUNT" });
+    const [je] = await getDb().select().from(journalEntries).where(eq(journalEntries.id, second.data.jeId));
+    expect(je).toMatchObject({ book: "PJ", sourceModule: "store", reference: "SI-1" });
+  });
+
+  it("a PO is cancelled by the manager with a reason", async () => {
+    const s1 = await supplier();
+    const p1 = await product();
+    const po = await draftPo(s1, [[p1, 10, "5.00"]]);
+    await expect(runAs(storePeople().clerk, () => cancelPoAction({ poId: po.id, reason: "x" }))).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await runAs(manager, () => cancelPoAction({ poId: po.id, reason: " " }))).toMatchObject({ ok: false, error: "Enter why the purchase order is cancelled" });
+    expect((await runAs(manager, () => cancelPoAction({ poId: po.id, reason: "Supplier out of stock" }))).ok).toBe(true);
+    expect((await getPo(po.id))!.po).toMatchObject({ status: "CANCELLED", cancelReason: "Supplier out of stock" });
+  });
+
+  it("receiving without a PO: whole quantities, a total above zero; nothing is posted on an error", async () => {
+    const { clerk } = storePeople();
+    const s1 = await supplier();
+    const p1 = await product();
+    const bad = (lines: Array<{ qty: number; unitCost: string }>) =>
+      runAs(clerk, () => receiveAction({ supplierId: s1, poId: null, invoiceNo: null, payment: "ON_ACCOUNT", lines: lines.map((l) => ({ productId: p1, poLineId: null, ...l })) }));
+    expect(await bad([{ qty: 0, unitCost: "1.00" }])).toMatchObject({ ok: false, error: expect.stringMatching(/whole number more than zero/) });
+    expect(await bad([{ qty: 2, unitCost: "0.00" }])).toMatchObject({ ok: false, error: "The delivery's total must be more than zero" });
+    expect(await bad([{ qty: 2, unitCost: "x" }])).toMatchObject({ ok: false, error: expect.stringMatching(/unit cost on line 1 in pesos/) });
+    expect(await getDb().select().from(receivingReports)).toHaveLength(0);
+    expect(await getDb().select().from(stockMoves)).toHaveLength(0);
+  });
+
+  it("cash on delivery: the payable is settled by a DV the manager approves and a teller pays from the drawer", async () => {
+    const { clerk, teller } = storePeople();
+    const s1 = await supplier();
+    const p1 = await product();
+    const rr = await receive(s1, [[p1, 3, "10.00"]], "CASH");
+    expect(rr.dvNo).toBe("DV-2026-00001");
+    const { dv } = (await getRr(rr.id))!;
+    expect(dv).toMatchObject({ status: "DRAFT" });
+    expect(await supplierBalance(s1)).toBe(P(30));
+    expect(await pendingSupplierPayments(s1)).toBe(P(30));
+    await expect(runAs(clerk, () => approveDvAction({ dvId: dv!.id }))).rejects.toBeInstanceOf(ForbiddenError);
+    expect((await runAs(manager, () => approveDvAction({ dvId: dv!.id }))).ok).toBe(true);
+    await openSessionAs(teller, "1,000.00");
+    const rel = await runAs(teller, () => releaseDvAction({ dvId: dv!.id }));
+    if (!rel.ok) throw new Error(rel.error);
+    expect(await supplierBalance(s1)).toBe(0n);
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, rel.data.jeId));
+    const [ap, cash] = [await accountIdFor("accounts_payable_trade"), await accountIdFor("cash_on_hand")];
+    expect(lines.map((l) => [l.accountId, l.debit, l.credit, l.supplierId])).toEqual([
+      [ap, P(30), 0n, s1],
+      [cash, 0n, P(30), null],
+    ]);
+    expect((await getDb().select().from(cashOuts).where(eq(cashOuts.refId, dv!.id))).map((c) => c.amount)).toEqual([P(30)]);
+  });
+
+  it("supplier payments are prepared by the bookkeeper, up to what is owed less payments already prepared", async () => {
+    const { book, teller, clerk } = storePeople();
+    const s1 = await supplier();
+    const p1 = await product();
+    await receive(s1, [[p1, 20, "55.00"]]);
+    await expect(runAs(clerk, () => paySupplierAction({ supplierId: s1, amount: "100.00", mode: "CHECK", checkNo: "1001", particulars: null }))).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await runAs(book, () => paySupplierAction({ supplierId: s1, amount: "1,100.01", mode: "CHECK", checkNo: "1001", particulars: null }))).toMatchObject({
+      ok: false,
+      error: "S1 Trading is owed ₱1,100.00 (after payments already prepared)",
+    });
+    const pay = await runAs(book, () => paySupplierAction({ supplierId: s1, amount: "600.00", mode: "CHECK", checkNo: "1001", particulars: "Invoice SI-1" }));
+    if (!pay.ok) throw new Error(pay.error);
+    expect(await runAs(book, () => paySupplierAction({ supplierId: s1, amount: "500.01", mode: "CHECK", checkNo: "1002", particulars: null }))).toMatchObject({ ok: false, error: expect.stringMatching(/owed ₱500\.00/) });
+    expect((await runAs(manager, () => approveDvAction({ dvId: pay.data.dvId }))).ok).toBe(true);
+    const rel = await runAs(teller, () => releaseDvAction({ dvId: pay.data.dvId }));
+    if (!rel.ok) throw new Error(rel.error);
+    expect(await supplierBalance(s1)).toBe(P(500));
+    const [dv] = await getDb().select().from(disbursementVouchers).where(eq(disbursementVouchers.id, pay.data.dvId));
+    expect(dv).toMatchObject({ status: "RELEASED", payee: "S1 Trading", mode: "CHECK" });
+    // The test clock is frozen, so both entries post at the same instant: compare without order.
+    const ledger = await supplierLedger("accounts_payable_trade", s1, "2026-01-01", "2026-12-31");
+    expect(ledger.lines.map((l) => [l.debit, l.credit])).toEqual(expect.arrayContaining([[0n, P(1100)], [P(600), 0n]]));
+    expect(ledger.lines).toHaveLength(2);
+    expect(ledger.closing).toBe(P(500));
+    expect((await trialBalance("2026-12-31")).balanced).toBe(true);
+  });
+
+  it("a manual DV can't debit AP–Trade without the supplier", async () => {
+    const r = await runAs(storePeople().book, () =>
+      createDvAction({ date: "2026-10-07", payee: "Someone", particulars: "x", mode: "CHECK", checkNo: "9", lines: [{ accountId: "", mappingKey: "accounts_payable_trade", amount: "10.00", memberNo: "", memo: "" }] }),
+    );
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/paid from Store › Payables/) });
+  });
+
+  it("receiving reports, their lines and stock moves are never changed; a PO's status moves forward only", async () => {
+    const s1 = await supplier();
+    const p1 = await product();
+    const rr = await receive(s1, [[p1, 2, "5.00"]]);
+    const po = await draftPo(s1, [[p1, 1, "5.00"]]);
+    const pool = getPool();
+    await expect(pool.query("UPDATE receiving_reports SET total = 1 WHERE id = $1", [rr.id])).rejects.toThrow(/immutable/);
+    await expect(pool.query("DELETE FROM rr_lines WHERE rr_id = $1", [rr.id])).rejects.toThrow(/immutable/);
+    await expect(pool.query("UPDATE stock_moves SET qty = 1 WHERE ref_id = $1", [rr.id])).rejects.toThrow(/immutable/);
+    await expect(pool.query("UPDATE purchase_orders SET status = 'RECEIVED' WHERE id = $1", [po.id])).rejects.toThrow(/can.t go from DRAFT to RECEIVED/);
+    await expect(pool.query("UPDATE purchase_orders SET total = 1 WHERE id = $1", [po.id])).rejects.toThrow(/only the status, approval and cancellation change/);
+    await expect(pool.query("UPDATE po_lines SET qty = 5 WHERE po_id = $1", [po.id])).rejects.toThrow(/only the quantity received grows/);
+    const [row] = await getDb().select().from(purchaseOrders).where(eq(purchaseOrders.id, po.id));
+    expect(row?.status).toBe("DRAFT");
   });
 });

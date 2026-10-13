@@ -170,7 +170,7 @@
 - [x] T12.1 Schema + migrations
 - [x] T12.2 Stock engine (moving average, issue costing) + property tests
 - [x] T12.3 Products, categories, suppliers, price history services + UI
-- [ ] T12.4 PO → RR flow with GL; AP subledger; supplier payment via DV
+- [x] T12.4 PO → RR flow with GL; AP subledger; supplier payment via DV
 - [ ] T12.5 Stock count + approval + adjustment posting
 - [ ] T12.6 Reports: stock card per product, valuation, reorder list, AP aging per supplier
 - [x] Acceptance tests written first (tests/acceptance/phase-12.test.ts)

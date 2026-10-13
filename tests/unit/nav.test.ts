@@ -42,7 +42,7 @@ describe("module registry (sidebar, dashboard, coming-soon pages)", () => {
     const none = visibleHrefs(new Set());
     expect(none).toContain("/store/pos");
     expect(none).not.toContain("/store/inventory");
-    expect(visibleHrefs(new Set(["store.read"]))).toContain("/store/inventory");
+    expect(visibleHrefs(new Set(["store.read"]))).toEqual(expect.arrayContaining(["/store/inventory", "/store/purchasing"]));
     expect(none).not.toContain("/loans/servicing");
     expect(none).not.toContain("/loans/applications");
     expect(none).toContain("/loans/calculator");

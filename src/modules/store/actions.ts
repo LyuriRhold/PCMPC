@@ -8,7 +8,8 @@ import { requirePermission } from "@/lib/auth-guard";
 import { parse as parseMoney } from "@/lib/money";
 import { CashieringError } from "@/modules/cashiering/builtins";
 import { LedgerError } from "@/modules/ledger/service";
-import { VAT_CLASSES } from "./schema";
+import { approvePo, cancelPo, createPo, paySupplier, receive } from "./purchasing";
+import { RR_PAYMENTS, VAT_CLASSES } from "./schema";
 import { changePrice, createCategory, createProduct, createSupplier, StockError, StoreError, updateCategory, updateProduct, updateSupplier } from "./service";
 
 const EXPECTED = [StoreError, StockError, LedgerError, CashieringError];
@@ -122,6 +123,77 @@ export async function updateSupplierAction(input: z.input<typeof supplierUpdateS
     const data = supplierUpdateSchema.parse(input);
     await withTx((tx) => updateSupplier(tx, data, actor.id));
     return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+// ── Purchase orders, receiving and supplier payments ──
+
+const lineCost = z.object({ productId: id, qty: z.number().int(), unitCost: text(20) });
+const poSchema = z.object({ supplierId: id, remarks: optional(300), lines: z.array(lineCost).min(1).max(100) });
+/** Store clerk: a purchase order (DRAFT, for the manager's approval). */
+export async function createPoAction(input: z.input<typeof poSchema>): Promise<ActionResult<{ id: string; poNo: string }>> {
+  const actor = await requirePermission("store.receive");
+  try {
+    const data = poSchema.parse(input);
+    return ok(await withTx((tx) => createPo(tx, { ...data, lines: data.lines.map((l, i) => ({ ...l, unitCost: pesos(l.unitCost, `unit cost on line ${i + 1}`) })) }, actor.id)));
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const poIdSchema = z.object({ poId: id });
+/** Manager (not the preparer): approves a purchase order. */
+export async function approvePoAction(input: z.input<typeof poIdSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("store.po_approve");
+  try {
+    const data = poIdSchema.parse(input);
+    await withTx((tx) => approvePo(tx, data, actor.id));
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const cancelPoSchema = z.object({ poId: id, reason: text(300) });
+/** Manager: cancels a purchase order not yet fully received. */
+export async function cancelPoAction(input: z.input<typeof cancelPoSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("store.po_approve");
+  try {
+    const data = cancelPoSchema.parse(input);
+    await withTx((tx) => cancelPo(tx, data, actor.id));
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const rrSchema = z.object({
+  supplierId: id,
+  poId: id.nullable(),
+  invoiceNo: optional(60),
+  payment: z.enum(RR_PAYMENTS),
+  lines: z.array(lineCost.extend({ poLineId: id.nullable() })).min(1).max(100),
+});
+/** Store clerk: receives a delivery into stock (posted at once). */
+export async function receiveAction(input: z.input<typeof rrSchema>): Promise<ActionResult<{ id: string; rrNo: string; jeId: string; dvNo: string | null }>> {
+  const actor = await requirePermission("store.receive");
+  try {
+    const data = rrSchema.parse(input);
+    return ok(await withTx((tx) => receive(tx, { ...data, lines: data.lines.map((l, i) => ({ ...l, unitCost: pesos(l.unitCost, `unit cost on line ${i + 1}`) })) }, actor.id)));
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const paySchema = z.object({ supplierId: id, amount: text(20), mode: z.enum(["CASH", "CHECK"]), checkNo: optional(40), particulars: optional(200) });
+/** Bookkeeper: prepares a supplier payment voucher (approved by the manager, released by a teller). */
+export async function paySupplierAction(input: z.input<typeof paySchema>): Promise<ActionResult<{ dvId: string; dvNo: string }>> {
+  const actor = await requirePermission("cash.dv_prepare");
+  try {
+    const data = paySchema.parse(input);
+    return ok(await withTx((tx) => paySupplier(tx, { ...data, amount: pesos(data.amount) }, actor.id)));
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

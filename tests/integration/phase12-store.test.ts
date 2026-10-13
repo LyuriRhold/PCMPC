@@ -28,6 +28,7 @@ import {
   updateSupplierAction,
 } from "@/modules/store/actions";
 import { approvePo, getPo, getRr } from "@/modules/store/purchasing";
+import { apAging, inventoryValuation, reorderList, stockCard } from "@/modules/store/reports";
 import { productPriceHistory, products, purchaseOrders, receivingReports, stockMoves, suppliers } from "@/modules/store/schema";
 import { approveCount, getCount, getProduct, listProducts, pendingSupplierPayments, stockBalance, supplierBalance } from "@/modules/store/service";
 import { makeUser } from "../helpers/phase01";
@@ -398,5 +399,83 @@ describe("T12.5 stock counts", () => {
     await expect(runAs(manager, () => createCountAction({ productIds: [p1], remarks: null }))).rejects.toBeInstanceOf(ForbiddenError);
     const c = await counted([[p1, 1]], { submit: false });
     expect(await runAs(manager, () => approveCountAction({ countId: c.id }))).toMatchObject({ ok: false, error: "SC-2026-00001 isn't submitted yet" });
+  });
+});
+
+describe("T12.6 reports: stock card, valuation, reorder list, payables aging", () => {
+  const at = (date: string) => setClock(() => new Date(`${date}T01:00:00Z`));
+
+  /** S1 (30 days): 10 @ ₱50.00 on Oct 1, 10 @ ₱60.00 on Oct 5; a count of 18 approved on Oct 7. */
+  async function history() {
+    const { clerk } = storePeople();
+    const s1 = await supplier("S1 Trading", 30);
+    const p1 = await product({ sku: "P1", name: "Rice 5 kg", reorderLevel: 20 });
+    at("2026-10-01");
+    const rr1 = await receive(s1, [[p1, 10, "50.00"]]);
+    at("2026-10-05");
+    const rr2 = await receive(s1, [[p1, 10, "60.00"]]);
+    at("2026-10-07");
+    const c = await runAs(clerk, () => createCountAction({ productIds: [p1], remarks: null }));
+    if (!c.ok) throw new Error(c.error);
+    await runAs(clerk, () => enterCountAction({ countId: c.data.id, lines: [{ productId: p1, countedQty: 18 }] }));
+    await runAs(clerk, () => submitCountAction({ countId: c.data.id }));
+    const a = await runAs(manager, () => approveCountAction({ countId: c.data.id }));
+    if (!a.ok) throw new Error(a.error);
+    return { s1, p1, rr1, rr2, countNo: c.data.countNo };
+  }
+
+  it("the stock card: the balance before the range, each movement with its document and the balance after it", async () => {
+    const { p1, rr2, countNo } = await history();
+    const card = await stockCard(p1, "2026-10-05", "2026-10-07");
+    expect(card.opening).toEqual({ qty: 10, avgCost: "50.0000", value: P(500) });
+    expect(card.moves.map((m) => [m.moveDate, m.type, m.document, m.qty, m.unitCost, m.totalCost, m.qtyAfter, m.avgCostAfter, m.valueAfter])).toEqual([
+      ["2026-10-05", "RECEIVE", rr2.rrNo, 10, "60.0000", P(600), 20, "55.0000", P(1100)],
+      ["2026-10-07", "ADJUST", countNo, -2, "55.0000", -P(110), 18, "55.0000", P(990)],
+    ]);
+    expect(card.closing).toEqual({ qty: 18, avgCost: "55.0000", value: P(990) });
+    expect((await stockCard(p1, "2026-11-01", "2026-11-30")).closing).toEqual({ qty: 18, avgCost: "55.0000", value: P(990) });
+  });
+
+  it("valuation as of a date agrees with the GL on that date", async () => {
+    const { p1 } = await history();
+    const oct4 = await inventoryValuation("2026-10-04");
+    expect(oct4.rows.map((r) => [r.product.id, r.qty, r.avgCost, r.value])).toEqual([[p1, 10, "50.0000", P(500)]]);
+    expect([oct4.total, oct4.glBalance, oct4.difference]).toEqual([P(500), P(500), 0n]);
+    const now = await inventoryValuation("2026-10-07");
+    expect([now.total, now.glBalance, now.difference]).toEqual([P(990), P(990), 0n]);
+    expect((await inventoryValuation("2026-09-30")).rows).toEqual([]);
+  });
+
+  it("the reorder list: active products at or below their reorder level, with what is on order", async () => {
+    const { s1, p1 } = await history();
+    const p2 = await product({ sku: "P2", name: "Sugar 1 kg", reorderLevel: 5 });
+    const p3 = await product({ sku: "P3", name: "Salt", reorderLevel: 5 });
+    await receive(s1, [[p2, 6, "50.00"]]);
+    await runAs(manager, () => updateProductAction({ id: p3, sku: "P3", barcode: null, name: "Salt", unit: "pc", categoryId: null, reorderLevel: 5, vatClass: "VAT_EXEMPT", isActive: false }));
+    const po = await runAs(storePeople().clerk, () => createPoAction({ supplierId: s1, remarks: null, lines: [{ productId: p1, qty: 5, unitCost: "50.00" }] }));
+    if (!po.ok) throw new Error(po.error);
+    expect((await reorderList()).map((r) => [r.product.sku, r.qty, r.onOrder])).toEqual([["P1", 18, 0]]);
+    expect((await runAs(manager, () => approvePoAction({ poId: po.data.id }))).ok).toBe(true);
+    expect((await reorderList()).map((r) => [r.product.sku, r.qty, r.onOrder])).toEqual([["P1", 18, 5]]);
+  });
+
+  it("payables aging: payments settle the oldest delivery; the rest by days past due", async () => {
+    const { s1 } = await history();
+    const { book, teller } = storePeople();
+    const pay = await runAs(book, () => paySupplierAction({ supplierId: s1, amount: "300.00", mode: "CHECK", checkNo: "77", particulars: null }));
+    if (!pay.ok) throw new Error(pay.error);
+    // Not paid until the voucher is released.
+    expect((await apAging("2026-10-07")).rows[0]).toMatchObject({ balance: P(1100), buckets: { "Not yet due": P(1100) } });
+    await runAs(manager, () => approveDvAction({ dvId: pay.data.dvId }));
+    expect((await runAs(teller, () => releaseDvAction({ dvId: pay.data.dvId }))).ok).toBe(true);
+    // RR 1 (₱500, due Oct 31) has ₱200 left, 2 days late on Nov 2; RR 2 (₱600, due Nov 4) isn't due yet.
+    const nov2 = await apAging("2026-11-02");
+    expect(nov2.buckets).toEqual(["Not yet due", "1–30", "31–60", "61–90", "Over 90"]);
+    expect(nov2.rows).toEqual([{ supplierId: s1, name: "S1 Trading", balance: P(800), buckets: { "Not yet due": P(600), "1–30": P(200), "31–60": 0n, "61–90": 0n, "Over 90": 0n }, oldestDue: "2026-10-31" }]);
+    expect(nov2.total).toBe(P(800));
+    // Feb 1: RR 1 is 93 days late, RR 2 is 89.
+    const feb = await apAging("2027-02-01");
+    expect(feb.rows[0]?.buckets).toMatchObject({ "61–90": P(600), "Over 90": P(200) });
+    expect((await apAging("2026-09-30")).rows).toEqual([]);
   });
 });

@@ -20,7 +20,7 @@
 | 09 | [Savings & Time Deposits](docs/phases/PHASE-09-savings.md) | ✅ | phase-09-savings · tag `phase-09` | rldejoya (reviewer agent: interest opening balance + follow-ups fixed) · 2026-10-12 |
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ✅ | phase-10-loan-applications · tag `phase-10` | rldejoya (reviewer agent: small-loan error + tiny-loan rows fixed; follow-ups) · 2026-10-12 |
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ✅ | phase-11-loan-servicing · tag `phase-11` | rldejoya (reviewer agent: stuck pending release + historical aging fixed; follow-ups) · 2026-10-12 |
-| 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | 🔨 | phase-12-store-inventory | |
+| 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | 🟡 awaiting review | phase-12-store-inventory | |
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ⬜ | | |
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ⬜ | | |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ⬜ | | |
@@ -174,7 +174,7 @@
 - [x] T12.5 Stock count + approval + adjustment posting
 - [x] T12.6 Reports: stock card per product, valuation, reorder list, AP aging per supplier
 - [x] Acceptance tests written first (tests/acceptance/phase-12.test.ts)
-- [ ] Exit checks passed
+- [x] Exit checks passed
 
 ### Phase 13 — Store: POS, Charge-to-Member & Store Patronage
 - [ ] T13.1 Schema + migrations
@@ -327,6 +327,14 @@
 - [ ] Q-11.6 (phase 11) Offsets on termination. | default used: when a terminating member's share capital is paid out, it first pays their open loans (as a payment, incl. scheduled interest); savings can pay a loan through "Pay from savings" (keeping the maintaining balance) | answer:
 - [ ] Q-11.7 (phase 11) Days past due and PAST_DUE. | default used: days past due count from the oldest installment not fully paid (a penalty still unpaid keeps it unpaid); a loan is PAST_DUE from the day after a due date passes unpaid (grace days only delay penalties) | answer:
 - [ ] Q-11.8 (phase 11) The golden ₱10,000 Regular Loan on ₱2,500 paid-up (PHASE-11 A11.1–A11.12) vs. the seeded REG limit of 3× paid-up (DOMAIN): 3 × ₱2,500 = ₱7,500 < ₱10,000, so that loan can't be originated under the seeded configuration. | default used: the seeded REG stays at 3× (DOMAIN); the Phase 11 test fixture sets REG to 4× before applying, so the golden values are tested unchanged. Which is right for PCMPC: 3× or 4× (or a minimum paid-up for REG)? | answer:
+- [ ] Q-12.1 (phase 12) Stock quantities. | default used: whole units of each product's unit (pc, pack, sack, kg); goods sold by weight are set up per whole kilo or as packs. Does the store sell loose goods in fractions (e.g. ½ kg)? | answer:
+- [ ] Q-12.2 (phase 12) Who keeps what in the store. | default used: the manager keeps products and prices (store.price) and approves purchase orders (new store.po_approve) and counts; the store clerk keeps suppliers, prepares POs, receives deliveries and counts; the bookkeeper prepares supplier payment vouchers, the manager approves them and a teller releases them. Everyone with read access to the books (and the store clerk) can see the store pages (new store.read) | answer:
+- [ ] Q-12.3 (phase 12) VAT class of products. | default used: every product is VAT-exempt (a cooperative's sales to members); the class is kept per product for the BIR set-up but isn't used in the postings yet | answer:
+- [ ] Q-12.4 (phase 12) Deliveries paid in cash. | default used: the receiving report posts Dr Merchandise Inventory / Cr AP–Trade (the supplier) like any delivery, and creates a cash payment voucher for it; the manager approves the voucher and a teller pays it from the drawer (Dr AP–Trade / Cr Cash on Hand), so the cash leaves through the counter (PLAN §5 rule 9). The spec says the RR credits Cash directly | answer:
+- [ ] Q-12.5 (phase 12) Stock count overages. | default used: an overage comes in at the product's average cost, Dr Merchandise Inventory / Cr a new account 44150 Inventory Overage (Other Income); a shortage goes out at the average cost, Dr Inventory Losses (DOMAIN §6). Should overages instead reduce Inventory Losses? | answer:
+- [ ] Q-12.6 (phase 12) Purchasing rules. | default used: deliveries may be received without a PO (small purchases); a PO is received in parts, never more than is still to come; the invoice cost may differ from the PO cost; the manager cancels a PO (what was received stays). Each delivery is due on its receiving date plus the supplier's terms; payments settle the oldest deliveries first | answer:
+- [ ] Q-12.7 (phase 12) Counting. | default used: the clerk counts blind (the system quantity is shown only after submission, and taken at submission); the approved adjustment is the variance as counted, even if stock moved before approval; a count covers all active products or one category. Stock count numbers are SC-{YYYY}-{00000} | answer:
+- [ ] Q-12.8 (phase 12) Supplier payables aging groups. | default used: Not yet due, 1–30, 31–60, 61–90, Over 90 days past due (setting store.ap_aging_buckets) | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -345,6 +353,7 @@
 - 2026-10-09 · phase 06 · Meters are read by hand on the printed route sheets and encoded in the office; the reading app (/read) stays available but is optional, so the real-phone offline exit check is waived · PCMPC answer
 - 2026-10-09 · phases 08+ · Only members may file loans or hold share capital (equity); non-members are water customers only · PCMPC answer, for the share-capital and loan phases
 - 2026-10-10 · settings · Coop settings rewritten for non-technical staff: plain labels and help per setting (src/modules/settings/presentation.ts), proper fields (pesos, %, Yes/No, readable choices, small forms and lists) instead of keys/codes/JSON, "To confirm" instead of CONFIRM, read-only settings explain where to change them (e.g. water rates on Tariffs & fees), plain error messages; water fee settings now update the fee the teller collects; "Last changed" shows only after a person changes a setting · requested by Rhold: used by non-IT staff
+- 2026-10-13 · phase 12 · The supplier sub-ledger is `journal_lines.supplier_id` (with `dv_lines.supplier_id` and `account_mappings.requires_supplier`), like the member and water-customer tags, not a separate `ap_ledger` table: AP–Trade lines must carry the supplier, so the supplier balances always tie to the GL and need no second ledger to reconcile · spec asks to decide and record it
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)
@@ -362,6 +371,8 @@
 - Approval or limits for large savings withdrawals (Q-09.6)
 - Corrections for savings postings (a wrong interest run, a manual adjustment); today a GL reversal of a savings entry from the Journal screen would leave the passbook unchanged, so savings entries should be reversed only through the savings module
   - Since the Phase 11 review the Journal screen refuses to reverse module entries (only manual JVs), so the gap is now "no correction path" instead of "drift".
+- Purchase returns to a supplier (debit memo) and corrections of a posted receiving report (Phase 12: an RR is immutable; a wrong one can't be reversed yet)
+- Supplier and customer tags in the manual JV and DV forms (Phase 17 opening balances will need supplier balances)
 - Corrections for loan payments made without a receipt (pay from savings, share-capital offsets on termination): a reversal in the loans module that also reverses the savings or share posting (Phase 11 review)
 - Penalty on the payment day: a payment made before the day's job runs collects penalties only up to the last run; compute the penalty to the payment date live (Phase 11 review)
 - Lock order between the loans daily job (locks every open loan) and receipts with several loan payments; run the job before the counter opens or lock loans in id order everywhere (Phase 11 review)
@@ -1293,3 +1304,46 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - `npm run build` green.
   - E2E on a production build green: phase-11 (A11.13), phase-10, phase-03 and settings.
   - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (migration 0030; the new setting is seeded).
+
+### Phase 12 summary
+**Built**
+- **Schema (T12.1):** categories, products (SKU, barcode, unit, selling price, reorder level, VAT class, active), price history, suppliers (terms), purchase orders and lines, receiving reports and lines, the stock ledger (`stock_moves` with the balance after each move; one `stock_balances` row per product), stock counts and lines.
+  - Triggers keep moves, receiving reports, their lines and price history immutable; PO and count statuses move forward only; products, suppliers and categories are deactivated, never deleted.
+  - **AP sub-ledger:** `journal_lines.supplier_id` (see Decisions). AP–Trade requires the supplier on every line, including DV lines (`dv_lines.supplier_id`); a manual DV can't debit AP–Trade without one.
+  - New permissions `store.read` and `store.po_approve`; new account 44150 Inventory Overage (CONFIRM); number series SC (stock counts).
+- **Stock engine (T12.2, pure):** the moving average stored at 4 decimals (HALF-UP) with the value in centavos as the source of truth; COGS = qty × average rounded to the centavo, except the issue that empties the stock takes the remaining value; never below zero ("Insufficient stock (15)"). Property tests over 300 random runs: the value never goes negative and Σ moves = the balance.
+- **Item master (T12.3):** the manager keeps categories, products and prices (every price change kept in the history); the store clerk keeps suppliers. Stock planning locks the products' balances in product order (no deadlocks) and applies the moves in order.
+- **Purchasing (T12.4):** the clerk prepares a PO, the manager (not the preparer) approves or cancels it; deliveries are received against it in parts (never more than is still to come), or without a PO.
+  - A receiving report posts at once: stock in at cost and one Purchases Journal entry, Dr Merchandise Inventory / Cr AP–Trade tagged with the supplier; the delivery is due on its receiving date plus the supplier's terms.
+  - Cash on delivery also creates a supplier payment voucher for the teller (CONFIRM Q-12.4).
+  - Supplier payments: the bookkeeper prepares a DV (up to what is owed less vouchers already prepared), the manager approves, a teller releases it: Dr AP–Trade (the supplier) / Cr Cash on Hand or Cash in Bank.
+- **Counts (T12.5):** the clerk counts blind (all active products or a category); the system quantities are taken on submission; nothing is posted until the manager (not the preparer) approves. Approval posts one entry: shortages Dr Inventory Losses / Cr Merchandise Inventory at the moving average, overages Dr Merchandise Inventory / Cr Inventory Overage at the average cost. A variance of no value needs no entry.
+- **Reports (T12.6):** the stock card (opening, each move with its RR or count, closing), inventory valuation as of a date with the GL Merchandise Inventory balance beside it (they agree), the reorder list (with what is on order) and supplier payables aging (oldest deliveries settled first; groups in `store.ap_aging_buckets`).
+- **Screens:** Products & inventory (list, product page with the stock card and price history, new product, categories, stock counts, valuation, reorder list) and Purchasing (purchase orders, receiving, suppliers with their ledger, payables with the pay-supplier form). Both are live in the navigation.
+
+**Decisions** (see Questions Q-12.1–Q-12.8 and the Decisions log)
+- The supplier sub-ledger is a tag on the journal lines (no separate AP ledger to reconcile).
+- Whole-unit quantities; VAT-exempt by default; blind counts; receiving without a PO allowed; payables due on receipt + terms, paid oldest first.
+
+**Deviations from spec (with reason)**
+- **Cash deliveries are paid by a DV, not credited to Cash by the RR:** the receiving report credits AP–Trade and creates a cash payment voucher that a teller releases from the drawer. PLAN §5 rule 9 (every cash-out goes through the counter); the store clerk holds no drawer. The net GL effect is the same (Dr Inventory / Cr Cash once the voucher is released).
+- **New permissions:** `store.read` (store pages) and `store.po_approve` (PO approval); the catalog had none for either.
+- **New account and settings:** 44150 Inventory Overage (count overages; DOMAIN §6 has only shortages), `store.ap_aging_buckets`, number series SC.
+- **Extra columns:** `receiving_reports.due_date` and `dv_id`, `stock_moves` keeps the balance after each move (`qty_after`, `avg_cost_after`, `value_after`) and `stock_counts.je_id`; `stock_count_lines.variance_value` holds the posted value. `stock_moves.je_id` may be empty only for a move of no value (migration 0033).
+- **Navigation tests:** the "coming soon" example moved to Phase 13 (`/store/pos`).
+
+**Follow-ups**
+- Answer Q-12.1–Q-12.8.
+- Backlog: purchase returns and corrections of a posted receiving report; supplier tags in the manual JV and DV forms (needed for Phase 17 opening balances).
+- Phase 13 sells through `planStockMoves` / `recordStockMoves` (SALE out at the moving average, RETURN in at the original unit cost).
+
+**Exit checks / counts:**
+- `npm run gate` is green: 587 tests (48 files), scan clean. Phase 12 adds:
+  - 8 acceptance tests (A12.1–A12.7; A12.1 both on the engine and through receiving reports);
+  - 20 integration tests (data rules, item master, purchasing and payments, counts, reports);
+  - 4 unit tests (the stock engine, including the property test).
+- `npm run build` is green (the 17 store routes).
+- `npm run e2e -- phase-12` is green: A12.8 (product → PO → approval → receiving → the stock card shows 10 @ ₱1,200.0000, ₱12,000.00).
+- The full E2E against a production build is green: 21 of 21 (phases 00–12).
+- The valuation total equals the GL Merchandise Inventory balance (A12.7 and on past dates), and the trial balance balances after receiving, supplier payments and counts (integration tests).
+- Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (9 seed steps); the sample trial balance balances.

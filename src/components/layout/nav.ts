@@ -402,7 +402,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/store/pos", label: "Point of sale", icon: ShoppingCart, status: "soon", phase: "13", summary: "Cash and charge-to-member sales, returns and Z-reading." },
       { href: "/store/inventory", label: "Products & inventory", icon: Package, status: "live", permission: "store.read", phase: "12", summary: "Products, prices, moving-average cost and stock counts." },
       { href: "/store/purchasing", label: "Purchasing", icon: Truck, status: "live", permission: "store.read", phase: "12", summary: "Purchase orders, receiving and supplier payables." },
-      { href: "/store/charges", label: "Member charges", icon: Coins, status: "soon", phase: "13", summary: "Member charge accounts and statements." },
+      { href: "/store/charges", label: "Member charges", icon: Coins, status: "live", permission: "store.read", phase: "13", summary: "Member charge accounts and statements." },
     ],
   },
   {

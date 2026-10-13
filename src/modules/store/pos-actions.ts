@@ -12,7 +12,7 @@ import { AuthError, verifySupervisor } from "@/modules/auth/service";
 import { CashieringError } from "@/modules/cashiering/builtins";
 import { LedgerError } from "@/modules/ledger/service";
 import { members } from "@/modules/members/schema";
-import { closeShift, completeSale, openShift, returnSale, verifyShift, voidSale } from "./pos";
+import { closeShift, completeSale, openShift, returnSale, setChargeLimit, verifyShift, voidSale } from "./pos";
 import { products, REFUND_MODES, SALE_PAYMENTS, stockBalances } from "./schema";
 import { StockError, StoreError } from "./service";
 
@@ -155,6 +155,19 @@ export async function verifyShiftAction(input: z.input<typeof shiftIdSchema>): P
   try {
     const data = shiftIdSchema.parse(input);
     return ok(await withTx((tx) => verifyShift(tx, data, actor.id)));
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const limitSchema = z.object({ memberId: id, limit: z.string().trim().max(20) });
+/** Manager: a member's own store credit limit. */
+export async function setChargeLimitAction(input: z.input<typeof limitSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("store.supervise");
+  try {
+    const data = limitSchema.parse(input);
+    await withTx((tx) => setChargeLimit(tx, { memberId: data.memberId, limit: pesos(data.limit, "credit limit") }, actor.id));
+    return ok(null);
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

@@ -5,16 +5,19 @@ import { getDb, getPool } from "@/db/client";
 import { ForbiddenError, runAs } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
 import { users } from "@/modules/auth/schema";
+import { cancelReceiptAction, issueReceiptAction } from "@/modules/cashiering/actions";
+import { duesFor } from "@/modules/cashiering/registry";
 import { changeMemberStatusAction } from "@/modules/members/actions";
 import { journalEntries, journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, subsidiaryLedger, trialBalance } from "@/modules/ledger/service";
 import { updateProductAction } from "@/modules/store/actions";
-import { closeShiftAction, findMembersAction, findProductAction, openShiftAction, returnSaleAction, verifyShiftAction, voidSaleAction } from "@/modules/store/pos-actions";
-import { getSale, shiftReading } from "@/modules/store/pos";
+import { closeShiftAction, findMembersAction, findProductAction, openShiftAction, returnSaleAction, setChargeLimitAction, verifyShiftAction, voidSaleAction } from "@/modules/store/pos-actions";
+import { chargeAvailable, getSale, memberCharges, shiftReading } from "@/modules/store/pos";
 import { posShifts, sales, stockMoves } from "@/modules/store/schema";
 import { stockBalance } from "@/modules/store/service";
 import { makeUser } from "../helpers/phase01";
 import { P } from "../helpers/phase03";
+import { openSessionAs } from "../helpers/phase04";
 import { product, receive } from "../helpers/phase12";
 import { member, openShift, posFixture, sell, setupPos, storePeople, supervisor } from "../helpers/phase13";
 
@@ -262,6 +265,57 @@ describe("T13.4 shifts, Z-reading and the cash count", () => {
     const next = await openShift("1,000.00");
     expect(await runAs(clerk, () => closeShiftAction({ shiftId: next, countedCash: "1,000.00" }))).toEqual({ ok: true, data: { expectedCash: "₱1,000.00", variance: "₱0.00" } });
     expect(await runAs(manager, () => verifyShiftAction({ shiftId: next }))).toEqual({ ok: true, data: { varianceJeId: null } });
+    expect((await trialBalance("2026-12-31")).balanced).toBe(true);
+  });
+});
+
+describe("T13.5 member charge accounts and STORE_AR_PAYMENT", () => {
+  const pay = (memberId: string, amount: string, items?: Array<{ refId: string; amount: string }>) =>
+    runAs(storePeople().teller, () =>
+      issueReceiptAction({
+        payor: { type: "MEMBER", id: memberId, name: "" },
+        mode: "CASH",
+        checkNo: null,
+        birReceiptNo: `BIR-${Math.random().toString(36).slice(2, 8)}`,
+        items: (items ?? [{ refId: memberId, amount }]).map((i) => ({ type: "STORE_AR_PAYMENT", refId: i.refId, amount: i.amount, description: null })),
+      }),
+    );
+  const ar = async (memberId: string) => (await subsidiaryLedger("accounts_receivable_members", memberId, "2026-01-01", "2026-12-31")).closing;
+
+  it("the manager sets a member's own credit limit; the list shows what each member owes and can still charge", async () => {
+    const { p1 } = posFixture();
+    const m = await member();
+    await openShift();
+    await expect(runAs(storePeople().clerk, () => setChargeLimitAction({ memberId: m.id, limit: "2,000.00" }))).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await chargeAvailable(m.id)).toMatchObject({ limit: P(1000), own: false, balance: 0n, available: P(1000) });
+    expect((await runAs(storePeople().manager, () => setChargeLimitAction({ memberId: m.id, limit: "1,500.00" }))).ok).toBe(true);
+    // ₱1,050.00 (15 × P1) fits ₱1,500.00, not the default ₱1,000.00.
+    expect((await sell({ lines: [[p1, 15]], payment: "CHARGE", memberId: m.id })).ok).toBe(true);
+    expect(await memberCharges()).toEqual([expect.objectContaining({ balance: P(1050), limit: P(1500), own: true, available: P(450) })]);
+    expect((await runAs(storePeople().manager, () => setChargeLimitAction({ memberId: m.id, limit: "500.00" }))).ok).toBe(true);
+    expect(await chargeAvailable(m.id)).toMatchObject({ limit: P(500), balance: P(1050), available: 0n });
+  });
+
+  it("STORE_AR_PAYMENT: owed shown as due; not more than owed; one per member per receipt; cancelling the receipt puts the charge back", async () => {
+    const { p1 } = posFixture();
+    const m = await member();
+    const other = await member("Other");
+    await openShift();
+    expect((await sell({ lines: [[p1, 5]], payment: "CHARGE", memberId: m.id })).ok).toBe(true);
+    await openSessionAs(storePeople().teller);
+    expect(await duesFor(getDb(), { type: "MEMBER", id: m.id, name: "" })).toEqual(expect.arrayContaining([expect.objectContaining({ type: "STORE_AR_PAYMENT", amount: P(350), payable: true })]));
+    expect(await pay(m.id, "350.01")).toEqual({ ok: false, error: "The member owes the store ₱350.00" });
+    expect(await pay(m.id, "", [{ refId: other.id, amount: "10.00" }])).toEqual({ ok: false, error: "That is another member's store account" });
+    expect(await pay(m.id, "", [{ refId: m.id, amount: "100.00" }, { refId: m.id, amount: "100.00" }])).toEqual({ ok: false, error: "Put one store charges payment per member on a receipt" });
+    const r = await pay(m.id, "200.00");
+    if (!r.ok) throw new Error(r.error);
+    expect(await ar(m.id)).toBe(P(150));
+    // A charge returned to the account can't be more than what is now owed.
+    const sale = (await getDb().select().from(sales).where(eq(sales.memberId, m.id)))[0]!;
+    const line = (await getSale(sale.id))!.lines[0]!;
+    expect(await runAs(storePeople().clerk, () => returnSaleAction({ saleId: sale.id, lines: [{ saleLineId: line.id, qty: 3 }], refundMode: "AR", reason: "x" }))).toEqual({ ok: false, error: "The member owes ₱150.00; refund the rest in cash" });
+    expect((await runAs(storePeople().manager, () => cancelReceiptAction({ receiptId: r.data.id, reason: "Wrong member" }))).ok).toBe(true);
+    expect(await ar(m.id)).toBe(P(350));
     expect((await trialBalance("2026-12-31")).balanced).toBe(true);
   });
 });

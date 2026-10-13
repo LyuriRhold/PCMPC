@@ -502,3 +502,41 @@ export async function listShifts(filter: { status?: "OPEN" | "CLOSED" | "VERIFIE
     .orderBy(desc(posShifts.businessDate), desc(posShifts.createdAt))
     .limit(100);
 }
+
+// ── Member charge accounts (T13.5) ──
+
+/** The manager sets a member's own store credit limit (the default is store.member_credit_limit). */
+export async function setChargeLimit(tx: Tx, input: { memberId: string; limit: Money }, managerId: string) {
+  if (input.limit < 0n) throw new StoreError("The credit limit can't be negative");
+  const [m] = await tx.select().from(members).where(eq(members.id, input.memberId));
+  if (!m || !m.memberNo) throw new StoreError("Member not found");
+  const before = await chargeLimit(m.id, tx);
+  await tx
+    .insert(memberChargeLimits)
+    .values({ memberId: m.id, limitAmount: input.limit, setBy: managerId, createdBy: managerId })
+    .onConflictDoUpdate({ target: memberChargeLimits.memberId, set: { limitAmount: input.limit, setBy: managerId, updatedAt: sql`now()` } });
+  await audit(tx, { action: "store.charge_limit", entity: "member", entityId: m.id, before: { limit: format(before.limit), own: before.own }, after: { limit: format(input.limit) }, userId: managerId });
+}
+
+/** Members with a store account: what each owes, their limit and what they can still charge. */
+export async function memberCharges(db: Db | Tx = getDb()) {
+  const owing = await db
+    .select({ memberId: journalLines.memberId, balance: sql<string>`sum(${journalLines.debit} - ${journalLines.credit})::text` })
+    .from(journalLines)
+    .innerJoin(journalEntries, eq(journalEntries.id, journalLines.jeId))
+    .innerJoin(accountMappings, and(eq(accountMappings.accountId, journalLines.accountId), eq(accountMappings.key, "accounts_receivable_members")))
+    .where(and(inArray(journalEntries.status, ["POSTED", "REVERSED"]), sql`${journalLines.memberId} IS NOT NULL`))
+    .groupBy(journalLines.memberId);
+  const own = await db.select().from(memberChargeLimits);
+  const ids = [...new Set([...owing.map((o) => o.memberId as string), ...own.map((o) => o.memberId)])];
+  if (ids.length === 0) return [];
+  const rows = await db.select().from(members).where(inArray(members.id, ids)).orderBy(asc(members.lastName), asc(members.firstName));
+  const defaultLimit = BigInt(await getSetting("store.member_credit_limit", db));
+  const balanceOf = new Map(owing.map((o) => [o.memberId as string, BigInt(o.balance)]));
+  const limitOf = new Map(own.map((o) => [o.memberId, o.limitAmount]));
+  return rows.map((m) => {
+    const balance = balanceOf.get(m.id) ?? 0n;
+    const limit = limitOf.get(m.id) ?? defaultLimit;
+    return { member: m, balance, limit, own: limitOf.has(m.id), available: limit - balance > 0n ? limit - balance : 0n };
+  });
+}

@@ -9,3 +9,4 @@ import "@/modules/share/teller";
 import "@/modules/savings/teller";
 import "@/modules/savings/jobs";
 import "@/modules/loans/servicing-teller";
+import "@/modules/store/teller";

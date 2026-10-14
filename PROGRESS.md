@@ -350,6 +350,11 @@
 - [ ] Q-14.5 (phase 14) Year-end close. | default used: every other month closed first; one closing entry dated the year's last day (revenues and expenses into Undivided Net Surplus); the last month and the year are then closed and the next year opened; balances carry forward (no separate opening entry); a closed year's months can't be reopened. The next year opens with the first entry dated in it (so January is posted before the old year is closed); a year's close needs the year before closed | answer:
 - [ ] Q-14.6 (phase 14) Cash flow classification. | default used: loans, receivables, inventories, deposits and payables are operating; property and equipment at cost is investing (accumulated depreciation is the operating add-back); share capital, statutory funds and undivided net surplus are financing | answer:
 - [ ] Q-14.7 (phase 14) Bank reconciliation. | default used: the bookkeeper enters the statement's ending balance, ticks the book entries the bank cleared and lists the bank-only items (charges, interest); it saves only when it balances and isn't changed afterwards; the bank-only items are then posted by a JV, ticked as cleared on the next month's reconciliation. Months are reconciled in order, from the month the bank account was set up | answer:
+- [ ] Q-15.1 (phase 15) The allocation percentages. | default used: the settings (reserve 10%, ETF 10% with half to the CETF, CDF 3%, optional 7%; of what remains, ISC 70% and PR 30%); an allocation may use other percentages approved by the GA, within the law (reserve ≥ 10%, ETF ≤ 10%, CDF ≥ 3%, optional ≤ 7%, PR ≥ 30% of what remains, ISC + PR = 100%). Please send the by-laws' allocation article and the last GA resolution on the net surplus | answer:
+- [ ] Q-15.2 (phase 15) Who shares ISC and PR, and on what. | default used: active and inactive members when the allocation is drafted (applicants, terminated and deceased members don't); ISC by the year's ASM (month-end paid-up ÷ 12); PR by patronage = loan interest paid in the year (not penalties) + net store purchases (purchases less returns in the year); water bills paid count only if enabled (what receipts applied to bills, not penalties or advances). ASM and store purchases are taken by calendar year, which matches a January fiscal year | answer:
+- [ ] Q-15.3 (phase 15) How ISC and PR are paid out. | default used: 100% to the member's savings unless the member chooses another split of savings, share capital and cash (setting surplus.default_payout); share capital subscribes whole shares as needed and, like CBU, isn't held to the 10% holding cap; cash goes out by a disbursement voucher (the manager approves, a teller releases). Withholding tax 0% (when set: on ISC and PR each, HALF-UP, before arrears) | answer:
+- [ ] Q-15.4 (phase 15) Arrears offset. | default used: on (setting); the past-due amounts of the member's open loans on the distribution date (installments due before it, with penalties accrued), oldest loan first, are paid first as a loan payment (penalty → interest → principal); if they are more than the member's ISC and PR, all of it goes to the arrears | answer:
+- [ ] Q-15.5 (phase 15) Posting dates and the CETF. | default used: the allocation entry is dated the day it is posted after the GA (in the new year), not the year-end; each member's payout entry is dated the distribution day; the CETF is remitted to the federation/union named on the DV (cash or check), tracked per year. Which federation/union receives PCMPC's CETF? | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -372,6 +377,8 @@
 - 2026-10-14 · phase 14 · The year-end close posts one closing entry (source `ledger.close`, CLOSE-YYYY) into Undivided Net Surplus; the statements leave it out of operations and cash flows, and the new year opens from the carried balances (no opening entry) · one entry the auditor can trace; balances stay cumulative in the GL
 - 2026-10-14 · phase 14 · The trial balance lists only accounts with a non-zero balance · after the year-end close, revenue and expense rows would all be zero (A14.6)
 - 2026-10-14 · phase 14 · Financial-statement lines and segments are data (`fs_lines`, `fs_line_accounts`, `account_segments`) edited from Financial statements › Account mapping, and every postable account must be mapped before the statements run · config over code; a new account can't silently drop off the FS
+- 2026-10-14 · phase 15 · The bookkeeper prepares, posts and distributes the allocation; the manager approves it (new permissions surplus.prepare / surplus.approve); posting needs the GA resolution no. · separation of duties per the spec, on the roles that already do the books
+- 2026-10-14 · phase 15 · Every split of the allocation (funds, ETF local/CETF, ISC/PR pools, each member's share) uses money.allocate, so the parts always add up; each payout is drawn from ISC payable first, then PR payable · DOMAIN §3 (pool splits); a fixed, auditable order
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)
@@ -398,7 +405,10 @@
 - Store discounts / member prices if PCMPC adopts them (Q-13.2)
 - Fixed-asset disposal (sale or retirement: the gain or loss and taking the asset off the register) (Phase 14)
 - Statement lines in a hierarchy (current / non-current subtotals) and allocating shared expenses to the segments (Q-14.1, Q-14.2)
+- A printable ISC/PR notice per member, and taking members' payout choices in bulk (e.g. from the GA forms) (Phase 15)
+- ASM and store patronage over a fiscal year that doesn't start in January (Q-15.2)
 - Importing the bank statement (CSV) instead of ticking entries by hand (Phase 14)
+- The monthly allowance (provision) entry per aging bucket (`loan.allowance_rates`): the Phase 11 follow-up expected it at the period close, but the Phase 14 spec doesn't include it
 - A pre-closing trial balance (or an option to list zero rows) for the auditor; locking the statement mapping of closed years (Phase 14 review)
 - Bank accounts limited to cash-in-bank accounts (not cash on hand) once PCMPC's bank accounts are in the chart (Phase 14 review)
 - A manager force-close for a POS shift a cashier left open; a blind cash count (the shift page shows the expected cash before the count, as the Phase 4 teller screen does) (Phase 13 review)

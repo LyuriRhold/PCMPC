@@ -117,7 +117,7 @@ export async function distributeAllocationAction(input: z.input<typeof idSchema>
 }
 
 const remitSchema = idSchema.extend({ amount: z.string().trim().max(24), payee: z.string().trim().max(200), mode: z.enum(["CASH", "CHECK"]), checkNo: z.string().trim().max(40).nullable() });
-/** Bookkeeper: a DV remitting a posted year's CETF to the federation/union (approved and released as any DV). */
+/** Bookkeeper: a DV remitting a posted year's CETF to the federation/union (approved and released like every other DV). */
 export async function remitCetfAction(input: z.input<typeof remitSchema>): Promise<ActionResult<{ dvId: string; dvNo: string }>> {
   const actor = await requirePermission("surplus.prepare");
   try {

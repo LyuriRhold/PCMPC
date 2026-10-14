@@ -202,7 +202,7 @@
 - [x] T15.2 Allocation engine (pure) + validation
 - [x] T15.3 Per-member ISC/PR computation using `averageShareMonth`, loan interest paid, `storePatronage`
 - [x] T15.4 Workflow: draft → approve → post (GL) → distribute (savings/share/cash/offset)
-- [ ] T15.5 CETF payable report + remittance via DV
+- [x] T15.5 CETF payable report + remittance via DV
 - [ ] T15.6 UI + reports (allocation summary, per-member list for GA, Excel export)
 - [x] Acceptance tests written first (tests/acceptance/phase-15.test.ts)
 - [ ] Exit checks passed

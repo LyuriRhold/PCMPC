@@ -5,6 +5,7 @@ import { z } from "zod";
 import { withTx } from "@/db/client";
 import { failFrom, ok, type ActionResult } from "@/lib/action-result";
 import { requirePermission } from "@/lib/auth-guard";
+import { parse as parseMoney } from "@/lib/money";
 import { percentToFraction } from "@/lib/rates";
 import { CashieringError } from "@/modules/cashiering/builtins";
 import { LedgerError } from "@/modules/ledger/service";
@@ -12,7 +13,7 @@ import { LoanError } from "@/modules/loans/service";
 import { SavingsError } from "@/modules/savings/service";
 import { ShareError } from "@/modules/share/service";
 import { SurplusError, type SurplusPercents } from "./engine";
-import { approveAllocation, distributeAllocation, draftAllocation, postAllocation, setElection } from "./service";
+import { approveAllocation, distributeAllocation, draftAllocation, postAllocation, remitCetf, setElection } from "./service";
 
 const EXPECTED = [SurplusError, LedgerError, LoanError, SavingsError, ShareError, CashieringError];
 
@@ -110,6 +111,25 @@ export async function distributeAllocationAction(input: z.input<typeof idSchema>
   try {
     const data = idSchema.parse(input);
     return ok(await withTx((tx) => distributeAllocation(tx, data, actor.id)));
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const remitSchema = idSchema.extend({ amount: z.string().trim().max(24), payee: z.string().trim().max(200), mode: z.enum(["CASH", "CHECK"]), checkNo: z.string().trim().max(40).nullable() });
+/** Bookkeeper: a DV remitting a posted year's CETF to the federation/union (approved and released as any DV). */
+export async function remitCetfAction(input: z.input<typeof remitSchema>): Promise<ActionResult<{ dvId: string; dvNo: string }>> {
+  const actor = await requirePermission("surplus.prepare");
+  try {
+    const data = remitSchema.parse(input);
+    let amount: bigint;
+    try {
+      amount = parseMoney(data.amount);
+    } catch {
+      throw new SurplusError("Enter the amount in pesos, e.g. 1,000.00");
+    }
+    if (amount > 1_000_000_000_000n) throw new SurplusError("The amount is too large");
+    return ok(await withTx((tx) => remitCetf(tx, { allocationId: data.allocationId, amount, payee: data.payee, mode: data.mode, checkNo: data.checkNo || null }, actor.id)));
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

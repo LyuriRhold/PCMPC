@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { businessToday, type BusinessDate } from "@/lib/dates";
 import { allocate, format, mulRate, type Money } from "@/lib/money";
 import { yearEndCloses } from "@/modules/accounting/schema";
+import { disbursementVouchers, type DvMode } from "@/modules/cashiering/schema";
 import { createDv } from "@/modules/cashiering/service";
 import { fiscalYears } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal, type LineInput } from "@/modules/ledger/service";
@@ -16,7 +17,7 @@ import { averageShareMonth, capitalizeIscPr, cbuLines } from "@/modules/share/se
 import { storePatronage } from "@/modules/store/pos";
 import { waterBillsPaid } from "@/modules/water/reports";
 import { patronageOf, sharePool, splitSurplus, SurplusError, type SurplusPercents, type SurplusSplit } from "./engine";
-import { surplusAllocations, surplusMemberLines, type AllocationStatus, type PrBasis, type SurplusAllocation, type SurplusMemberLine } from "./schema";
+import { cetfRemittances, surplusAllocations, surplusMemberLines, type AllocationStatus, type PrBasis, type SurplusAllocation, type SurplusMemberLine } from "./schema";
 
 /**
  * Net surplus allocation (PHASE-15): who shares the year's ISC and PR, and how much (T15.3); the
@@ -367,6 +368,59 @@ export async function distributeAllocation(tx: Tx, input: { allocationId: string
   await tx.update(surplusAllocations).set({ status: "DISTRIBUTED", distributedBy: actorId, distributedAt: sql`now()` }).where(eq(surplusAllocations.id, a.id));
   await audit(tx, { action: "surplus.distribute", entity: "surplus_allocation", entityId: a.id, after: { year: a.fiscalYear, members: paid }, userId: actorId });
   return { members: paid };
+}
+
+// ── CETF (T15.5): the half of the ETF owed to the federation/union, remitted by disbursement voucher ──
+
+export type CetfRow = { allocationId: string; fiscalYear: number; cetf: Money; remitted: Money; pending: Money; toRemit: Money };
+
+/** Remittances of an allocation's CETF by their DV's status: released (remitted) or not yet (pending); cancelled ones don't count. */
+async function cetfOf(db: Db | Tx, allocationId: string) {
+  const rows = await db
+    .select({ amount: cetfRemittances.amount, status: disbursementVouchers.status })
+    .from(cetfRemittances)
+    .innerJoin(disbursementVouchers, eq(disbursementVouchers.id, cetfRemittances.dvId))
+    .where(eq(cetfRemittances.allocationId, allocationId));
+  const sumOf = (pred: (s: string) => boolean) => rows.filter((r) => pred(r.status)).reduce((s, r) => s + r.amount, 0n);
+  return { remitted: sumOf((s) => s === "RELEASED"), pending: sumOf((s) => s === "DRAFT" || s === "APPROVED") };
+}
+
+/** The CETF payable report: each posted year's CETF, what was remitted, what is on a DV not yet released, and what is left. */
+export async function cetfReport(db: Db | Tx = getDb()): Promise<CetfRow[]> {
+  const posted = await db.select().from(surplusAllocations).where(inArray(surplusAllocations.status, ["POSTED", "DISTRIBUTED"])).orderBy(desc(surplusAllocations.fiscalYear));
+  const out: CetfRow[] = [];
+  for (const a of posted) {
+    const { remitted, pending } = await cetfOf(db, a.id);
+    out.push({ allocationId: a.id, fiscalYear: a.fiscalYear, cetf: a.cetf, remitted, pending, toRemit: a.cetf - remitted - pending });
+  }
+  return out;
+}
+
+/** Prepares the remittance of a posted year's CETF to the federation/union: a DV (Dr CETF payable), approved by the manager and released as usual. */
+export async function remitCetf(tx: Tx, input: { allocationId: string; amount: Money; payee: string; mode: DvMode; checkNo: string | null }, actorId: string) {
+  const payee = input.payee.trim();
+  if (!payee) throw new SurplusError("Enter the federation or union the CETF is remitted to");
+  const a = await lockAllocation(tx, input.allocationId);
+  if (a.status === "DRAFT" || a.status === "APPROVED") throw new SurplusError(`Post fiscal year ${a.fiscalYear}'s allocation first`);
+  if (input.amount <= 0n) throw new SurplusError("The amount must be more than zero");
+  const { remitted, pending } = await cetfOf(tx, a.id);
+  const left = a.cetf - remitted - pending;
+  if (input.amount > left) throw new SurplusError(`Only ${format(left)} of fiscal year ${a.fiscalYear}'s CETF is left to remit`);
+  const dv = await createDv(
+    tx,
+    {
+      date: businessToday(),
+      payee,
+      particulars: `CETF of fiscal year ${a.fiscalYear} remitted to ${payee}`,
+      mode: input.mode,
+      checkNo: input.checkNo,
+      lines: [{ accountId: await accountIdFor("cetf_payable", tx), memberId: null, amount: input.amount, memo: `CETF ${a.fiscalYear}` }],
+    },
+    actorId,
+  );
+  await tx.insert(cetfRemittances).values({ allocationId: a.id, dvId: dv.id, amount: input.amount, createdBy: actorId });
+  await audit(tx, { action: "surplus.cetf_remit", entity: "surplus_allocation", entityId: a.id, after: { year: a.fiscalYear, amount: format(input.amount), payee, dvNo: dv.dvNo }, userId: actorId });
+  return { dvId: dv.id, dvNo: dv.dvNo };
 }
 
 // ── Queries ──

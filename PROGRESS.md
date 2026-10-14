@@ -22,7 +22,7 @@
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ✅ | phase-11-loan-servicing · tag `phase-11` | rldejoya (reviewer agent: stuck pending release + historical aging fixed; follow-ups) · 2026-10-12 |
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ✅ | phase-12-store-inventory · tag `phase-12` | rldejoya (reviewer agent: stock-move order fixed; follow-ups) · 2026-10-13 |
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | 🟡 reviewed (reviewer agent: charge-sale refunds fixed); awaiting merge | phase-13-store-pos | |
-| 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ⬜ | | |
+| 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | 🔨 | phase-14-fs-close (on phase-13-store-pos) | |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ⬜ | | |
 | 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ⬜ | | |
 | 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | ⬜ | | |
@@ -194,7 +194,7 @@
 - [ ] T14.4 Bank reconciliation
 - [ ] T14.5 Month close checklist + lock/reopen; year-end close + new FY opening
 - [ ] T14.6 UI + Excel (exceljs) and PDF exports
-- [ ] Acceptance tests written first (tests/acceptance/phase-14.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-14.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 15 — Net Surplus Allocation, Interest on Share Capital & Patronage Refund

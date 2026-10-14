@@ -41,7 +41,7 @@ describe("T14.1 schema and the statement-line seed", () => {
       expect(m!.statement, a.code).toBe(["ASSET", "LIABILITY", "EQUITY"].includes(a.type) ? "SFC" : "SOO");
     }
     const byCode = (code: string) => lineOf.get(postable.find((a) => a.code === code)!.id)?.code;
-    expect([byCode("11110"), byCode("11270"), byCode("11290"), byCode("12135"), byCode("21220"), byCode("43120"), byCode("44140"), byCode("53140")]).toEqual([
+    expect([byCode("11110"), byCode("11270"), byCode("11290"), byCode("12135"), byCode("21220"), byCode("43120"), byCode("44140"), byCode("53210")]).toEqual([
       "CASH",
       "SHARE_CAPITAL",
       "LOANS",
@@ -54,7 +54,7 @@ describe("T14.1 schema and the statement-line seed", () => {
     const segs = await getDb().select({ code: accounts.code, segment: accountSegments.segmentCode }).from(accountSegments).innerJoin(accounts, eq(accounts.id, accountSegments.accountId));
     const seg = new Map(segs.map((s) => [s.code, s.segment]));
     expect(["41110", "52110", "44140", "42110", "43110", "51110", "53120"].map((c) => seg.get(c))).toEqual(["CREDIT", "CREDIT", "CREDIT", "WATER", "CONSUMER", "CONSUMER", "CONSUMER"]);
-    expect(seg.get("53140")).toBeUndefined();
+    expect(seg.get("53210")).toBeUndefined();
     expect((await getDb().select().from(assetClasses)).map((c) => c.code).sort()).toEqual(["BUILDING", "FURNITURE", "OFFICE_EQUIPMENT", "TRANSPORTATION", "WATER_SYSTEM"]);
   });
 

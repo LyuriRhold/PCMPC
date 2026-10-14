@@ -78,5 +78,5 @@ code,name,type,normal_balance,parent_code,postable,sca_code,mapping_keys
 53110,Depreciation Expense,EXPENSE,DR,53000,true,,depreciation_expense
 53120,Inventory Losses,EXPENSE,DR,53000,true,,inventory_losses
 53130,Cash Short / Over,EXPENSE,DR,53000,true,,cash_short_over
-53140,Salaries and Wages,EXPENSE,DR,53000,true,,salaries_wages
-53150,Utilities,EXPENSE,DR,53000,true,,utilities_expense
+53210,Salaries and Wages,EXPENSE,DR,53000,true,,salaries_wages
+53220,Utilities,EXPENSE,DR,53000,true,,utilities_expense

@@ -213,6 +213,6 @@ export const PROVISIONAL_COA: CoaRow[] = [
   p("53110", "Depreciation Expense", "EXPENSE", "DR", "53000", ["depreciation_expense"]),
   p("53120", "Inventory Losses", "EXPENSE", "DR", "53000", ["inventory_losses"]),
   p("53130", "Cash Short / Over", "EXPENSE", "DR", "53000", ["cash_short_over"]),
-  p("53140", "Salaries and Wages", "EXPENSE", "DR", "53000", ["salaries_wages"]),
-  p("53150", "Utilities", "EXPENSE", "DR", "53000", ["utilities_expense"]),
+  p("53210", "Salaries and Wages", "EXPENSE", "DR", "53000", ["salaries_wages"]),
+  p("53220", "Utilities", "EXPENSE", "DR", "53000", ["utilities_expense"]),
 ];

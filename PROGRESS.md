@@ -199,7 +199,7 @@
 
 ### Phase 15 — Net Surplus Allocation, Interest on Share Capital & Patronage Refund
 - [x] T15.1 Schema + migrations
-- [ ] T15.2 Allocation engine (pure) + validation
+- [x] T15.2 Allocation engine (pure) + validation
 - [ ] T15.3 Per-member ISC/PR computation using `averageShareMonth`, loan interest paid, `storePatronage`
 - [ ] T15.4 Workflow: draft → approve → post (GL) → distribute (savings/share/cash/offset)
 - [ ] T15.5 CETF payable report + remittance via DV

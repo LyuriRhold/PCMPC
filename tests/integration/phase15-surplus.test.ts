@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import ExcelJS from "exceljs";
 import { afterEach, describe, expect, it } from "vitest";
 import "@/modules/plugins";
 import { getDb, getPool, withTx } from "@/db/client";
@@ -13,6 +14,7 @@ import { accountBalance as savingsBalance } from "@/modules/savings/service";
 import { shareTransactions } from "@/modules/share/schema";
 import { ROLE_PERMISSIONS } from "@/modules/auth/permissions";
 import { getSetting, updateSetting } from "@/modules/settings/service";
+import { surplusWorkbook } from "@/modules/surplus/export";
 import { approveAllocationAction, distributeAllocationAction, draftAllocationAction, postAllocationAction, remitCetfAction, setElectionAction } from "@/modules/surplus/actions";
 import { allocationLines, approveAllocation, cetfReport, getAllocation, memberEntitlements, memberShares } from "@/modules/surplus/service";
 import { waterBillsPaid } from "@/modules/water/reports";
@@ -268,5 +270,39 @@ describe("T15.5 the CETF payable and its remittance", () => {
     expect(-(await accountBalance(await accountIdFor("cetf_payable"), "2027-03-01")).net).toBe(P(400));
     const [dvLine] = await getDb().select().from(dvLines).where(eq(dvLines.dvId, first.data.dvId));
     expect(dvLine).toMatchObject({ accountId: await accountIdFor("cetf_payable"), amount: P(600), memberId: null });
+  });
+});
+
+describe("T15.6 the workbook for the General Assembly", () => {
+  it("the allocation summary and the per-member list with totals", async () => {
+    const f = await surplusFixture(P(20000));
+    on("2027-03-01");
+    const id = await postedAllocation(2026);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await surplusWorkbook(id, "PCMPC")) as unknown as ArrayBuffer);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Summary", "Members"]);
+    const summary = wb.getWorksheet("Summary")!;
+    const rows = (ws: ExcelJS.Worksheet) => {
+      const out: unknown[][] = [];
+      ws.eachRow((r) => out.push((r.values as unknown[]).slice(1)));
+      return out;
+    };
+    expect(rows(summary).slice(1, 3)).toEqual([["Allocation of net surplus, fiscal year 2026"], ["Posted · GA resolution GA-2027-07"]]);
+    expect(rows(summary).slice(4)).toEqual([
+      ["Net surplus", "", 20000],
+      ["Reserve fund", "10.00%", 2000],
+      ["Education and training fund (local)", "10.00% ÷ 2", 1000],
+      ["CETF (to the federation/union)", "10.00% ÷ 2", 1000],
+      ["Community development fund", "3.00%", 600],
+      ["Optional fund", "7.00%", 1400],
+      ["Remaining for ISC and patronage refund", "", 14000],
+      ["Interest on share capital", "70.00% · 10.00% of ASM", 9800],
+      ["Patronage refund", "30.00% · 10.00% of patronage", 4200],
+    ]);
+    const members = rows(wb.getWorksheet("Members")!);
+    const memberNo = (await allocationLines(id)).find((l) => l.memberId === f.a)!.memberNo;
+    expect(members.find((r) => r[0] === memberNo)?.slice(2)).toEqual([12000, 1200, 0, 10000, 0, 10000, 1000, 2200, 0, 0, 2200, 0, 0, 0]);
+    expect(members.at(-1)?.slice(0, 2)).toEqual(["Total", "3 members"]);
+    expect(members.at(-1)?.slice(3, 4)).toEqual([9800]);
   });
 });

@@ -188,7 +188,7 @@
 - [x] Exit checks passed
 
 ### Phase 14 — Financial Statements, Period Close & Fixed Assets
-- [ ] T14.1 Schema + migrations + FS line seed (PFRF-for-Coops layout; mark it CONFIRM)
+- [x] T14.1 Schema + migrations + FS line seed (PFRF-for-Coops layout; mark it CONFIRM)
 - [ ] T14.2 FS engine (all 4 statements + comparatives) + mapping completeness check
 - [ ] T14.3 Fixed assets + depreciation run
 - [ ] T14.4 Bank reconciliation

@@ -267,6 +267,20 @@
       "when": 1791936866920,
       "tag": "0037_sale_return_split",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791938775785,
+      "tag": "0038_accounting",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1791938827593,
+      "tag": "0039_accounting_immutable",
+      "breakpoints": true
     }
   ]
 }

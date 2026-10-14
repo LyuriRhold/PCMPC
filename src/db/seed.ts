@@ -1,5 +1,6 @@
 import type { Tx } from "./client";
 import { seedAdmin, seedRoles } from "@/modules/auth/service";
+import { seedFs } from "@/modules/accounting/seed";
 import { seedCoa } from "@/modules/ledger/coa";
 import { seedCurrentFiscalYear } from "@/modules/ledger/periods";
 import { seedWater } from "@/modules/water/seed";
@@ -23,6 +24,7 @@ export const SEED_STEPS: SeedStep[] = [
   { name: "number series (DOMAIN §5)", run: seedNumberSeries },
   { name: "chart of accounts + account mappings (DOMAIN §6)", run: seedCoa },
   { name: "fiscal year and periods", run: seedCurrentFiscalYear },
+  { name: "financial statement lines, segments and asset classes (PFRF for Cooperatives, CONFIRM)", run: seedFs },
   { name: "water zones/routes, sample tariff versions and fees (CONFIRM)", run: seedWater },
   { name: "deposit products: Regular Savings, Time Deposit (CONFIRM)", run: seedDepositProducts },
   { name: "loan products REG, EMR, PRD and their deductions (DOMAIN samples, CONFIRM)", run: seedLoanProducts },

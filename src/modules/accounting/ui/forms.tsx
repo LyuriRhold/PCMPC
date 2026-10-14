@@ -15,8 +15,10 @@ import {
   registerAssetAction,
   reopenMonthAction,
   runDepreciationAction,
+  runMissedJobsAction,
   saveReconAction,
   setSegmentAction,
+  voidAssetAction,
   yearEndCloseAction,
 } from "../actions";
 
@@ -98,6 +100,31 @@ export function CloseMonthButton({ year, month, label }: { year: number; month: 
   );
 }
 
+/** Bookkeeper: runs the daily jobs the month missed, so its checklist can pass. */
+export function RunMissedJobsButton({ year, month, label }: { year: number; month: number; label: string }) {
+  const { pending, error, done, run } = useAction();
+  return (
+    <div className="flex flex-col gap-1">
+      <div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={pending}
+          onClick={() => {
+            if (!window.confirm(`Run the daily jobs ${label} missed? Each runs for its own date, oldest first.`)) return;
+            run(() => runMissedJobsAction({ year, month }), { success: "The missed daily jobs ran." });
+          }}
+        >
+          Run the missed daily jobs
+        </Button>
+      </div>
+      <Err error={error} />
+      <Done done={done} />
+    </div>
+  );
+}
+
 /** Administrator: reopens a closed month with a reason. */
 export function ReopenMonthForm({ year, month }: { year: number; month: number }) {
   const { pending, error, run } = useAction();
@@ -154,6 +181,8 @@ export function AssetForm({ classes }: { classes: Array<{ code: string; name: st
               cost: String(fd.get("cost") ?? ""),
               salvage: String(fd.get("salvage") ?? "0"),
               lifeMonths: Number(String(fd.get("lifeMonths") ?? "").replace(/\D/g, "") || "0"),
+              openingAccumulated: String(fd.get("openingAccumulated") ?? "0"),
+              depreciatedThrough: String(fd.get("depreciatedThrough") ?? ""),
             }),
           { success: "Asset added." },
         )
@@ -193,7 +222,16 @@ export function AssetForm({ classes }: { classes: Array<{ code: string; name: st
         <Label htmlFor="lifeMonths">Useful life (months)</Label>
         <Input id="lifeMonths" name="lifeMonths" inputMode="numeric" key={cls} defaultValue={String(life)} />
       </div>
-      <div className="flex items-end sm:col-span-3">
+      <div className="flex flex-col gap-1.5 sm:col-span-2">
+        <Label htmlFor="openingAccumulated">Accumulated depreciation brought forward (₱)</Label>
+        <Input id="openingAccumulated" name="openingAccumulated" inputMode="decimal" defaultValue="0.00" />
+        <p className="text-xs text-muted-foreground">For an asset already depreciated in the books before; leave 0.00 for a new one.</p>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="depreciatedThrough">Brought forward through</Label>
+        <Input id="depreciatedThrough" name="depreciatedThrough" type="month" />
+      </div>
+      <div className="flex items-end">
         <Button type="submit" disabled={pending}>
           Add to the register
         </Button>
@@ -202,6 +240,26 @@ export function AssetForm({ classes }: { classes: Array<{ code: string; name: st
         <Err error={error} />
         <Done done={done} />
       </div>
+    </form>
+  );
+}
+
+/** Bookkeeper: voids a wrongly registered asset (before any depreciation is posted for it). */
+export function VoidAssetForm({ assetId, tag }: { assetId: string; tag: string }) {
+  const { pending, error, run } = useAction();
+  return (
+    <form
+      className="flex flex-wrap items-center gap-2"
+      action={(fd) => {
+        if (!window.confirm(`Void ${tag}? It leaves the register and its tag can be used again.`)) return;
+        run(() => voidAssetAction({ assetId, reason: String(fd.get("voidReason") ?? "") }));
+      }}
+    >
+      <Input name="voidReason" aria-label={`Why ${tag} is voided`} placeholder="Why it is voided" maxLength={300} className="h-8 w-48" />
+      <Button type="submit" size="sm" variant="outline" disabled={pending}>
+        Void
+      </Button>
+      <Err error={error} />
     </form>
   );
 }

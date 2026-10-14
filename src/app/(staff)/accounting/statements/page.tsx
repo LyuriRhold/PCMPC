@@ -36,6 +36,8 @@ import {
   type FinancialCondition,
   type Operations,
 } from "@/modules/accounting/statements";
+import { fiscalYearStart } from "@/modules/ledger/periods";
+import { getDb } from "@/db/client";
 
 export const metadata: Metadata = { title: "Financial statements · PCMPC MIS" };
 
@@ -109,7 +111,7 @@ async function StatementsContent({
   const from =
     sp.from && isBusinessDate(sp.from) && sp.from <= to
       ? sp.from
-      : `${to.slice(0, 4)}-01-01`;
+      : await fiscalYearStart(to, getDb());
   const tab: Tab = TABS.some((t) => t.id === sp.tab)
     ? (sp.tab as Tab)
     : "position";

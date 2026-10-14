@@ -6,11 +6,13 @@ import { PageLoading } from "@/components/page-loading";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { can } from "@/lib/auth-guard";
-import { businessToday, formatDate, monthEnd } from "@/lib/dates";
+import { businessToday, formatDate, formatDateTime, monthEnd } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPageAny } from "@/lib/page-guard";
+import { getDb } from "@/db/client";
 import { monthChecklist, yearPeriods } from "@/modules/accounting/close";
-import { CloseMonthButton, ReopenMonthForm, YearEndCloseButton } from "@/modules/accounting/ui/forms";
+import { CloseMonthButton, ReopenMonthForm, RunMissedJobsButton, YearEndCloseButton } from "@/modules/accounting/ui/forms";
+import { fiscalYearOf } from "@/modules/ledger/periods";
 
 export const metadata: Metadata = { title: "Period close · PCMPC MIS" };
 
@@ -22,7 +24,7 @@ async function CloseContent({ searchParams }: { searchParams: Promise<Record<str
   if (!access.ok) return <Forbidden permission={access.permission} />;
   const today = businessToday();
   const sp = z.object({ year: one }).parse(await searchParams);
-  const year = sp.year && /^\d{4}$/.test(sp.year) ? Number(sp.year) : Number(today.slice(0, 4));
+  const year = sp.year && /^\d{4}$/.test(sp.year) ? Number(sp.year) : await fiscalYearOf(today, getDb());
   const data = await yearPeriods(year);
   const user = access.user;
   if (!data) {
@@ -92,13 +94,14 @@ async function CloseContent({ searchParams }: { searchParams: Promise<Record<str
                     ))}
                   </ul>
                 ) : m.status === "CLOSED" ? (
-                  <p className="text-sm text-muted-foreground">Closed{m.closedAt ? ` on ${formatDate(m.closedAt.toISOString().slice(0, 10))}` : ""}.</p>
+                  <p className="text-sm text-muted-foreground">Closed{m.closedAt ? ` on ${formatDateTime(m.closedAt)}` : ""}.</p>
                 ) : (
                   <p className="text-sm text-muted-foreground">Not started.</p>
                 )}
                 {m.status === "OPEN" && end < today && items?.every((i) => i.ok) && can(user, "gl.close") && !(m.month === data.months.at(-1)?.month && m.year === data.months.at(-1)?.year) ? (
                   <CloseMonthButton year={m.year} month={m.month} label={label} />
                 ) : null}
+                {m.status === "OPEN" && items?.some((i) => i.key === "daily_jobs" && !i.ok) && can(user, "gl.close") ? <RunMissedJobsButton year={m.year} month={m.month} label={label} /> : null}
                 {m.status === "CLOSED" && data.fy.status === "OPEN" && can(user, "gl.reopen") ? <ReopenMonthForm year={m.year} month={m.month} /> : null}
               </CardContent>
             </Card>

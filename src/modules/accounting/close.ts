@@ -1,8 +1,8 @@
 import "@/modules/plugins";
 import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
-import { getDb, type Db, type Tx } from "@/db/client";
+import { getDb, withTx, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
-import { dailyJobs } from "@/lib/cron";
+import { dailyJobs, runDailyJobs } from "@/lib/cron";
 import { addDays, businessToday, formatDate, monthEnd, type BusinessDate } from "@/lib/dates";
 import { hasRun } from "@/lib/jobs";
 import { format, type Money } from "@/lib/money";
@@ -39,6 +39,26 @@ async function goLive(db: Db | Tx): Promise<BusinessDate | null> {
   return r?.d ?? null;
 }
 
+/** The dates of a month (from go-live, through `through`) on which each daily job hasn't run. */
+async function missedJobs(year: number, month: number, through: BusinessDate, db: Db | Tx): Promise<Map<string, BusinessDate[]>> {
+  const from = `${label(year, month)}-01`;
+  const end = monthEnd(from);
+  const to = through < end ? through : end;
+  const start = await goLive(db);
+  const missed = new Map<string, BusinessDate[]>();
+  if (!start || start > to) return missed;
+  const dates: BusinessDate[] = [];
+  for (let d = start > from ? start : from; d <= to; d = addDays(d, 1)) dates.push(d);
+  const names = dailyJobs().map((j) => j.name);
+  const runs = names.length ? await db.select({ job: jobRuns.job, key: jobRuns.key }).from(jobRuns).where(and(inArray(jobRuns.job, names), inArray(jobRuns.key, dates))) : [];
+  const done = new Set(runs.map((r) => `${r.job}:${r.key}`));
+  for (const job of names) {
+    const gaps = dates.filter((d) => !done.has(`${job}:${d}`));
+    if (gaps.length) missed.set(job, gaps);
+  }
+  return missed;
+}
+
 /** The month-close checklist; every item must pass. */
 export async function monthChecklist(year: number, month: number, db: Db | Tx = getDb()): Promise<CheckItem[]> {
   const period = label(year, month);
@@ -56,25 +76,12 @@ export async function monthChecklist(year: number, month: number, db: Db | Tx = 
 
   const billing = await db.select({ status: waterBillingPeriods.status, zone: waterZones.name }).from(waterBillingPeriods).innerJoin(waterZones, eq(waterZones.id, waterBillingPeriods.zoneId)).where(eq(waterBillingPeriods.period, period));
   const unbilled = billing.filter((b) => b.status !== "BILLED" && b.status !== "CLOSED");
-  items.push({ key: "water_billing", label: "Water billing posted for every zone", ok: unbilled.length === 0, detail: unbilled.length ? `Not posted: ${unbilled.map((b) => `${b.zone} (${b.status})`).join(", ")}` : billing.length ? `${billing.length} zone(s) billed` : "No water billing this month" });
+  items.push({ key: "water_billing", label: "Water billing of the month posted", ok: unbilled.length === 0, detail: unbilled.length ? `Not posted: ${unbilled.map((b) => `${b.zone} (${b.status})`).join(", ")}` : billing.length ? `${billing.length} zone(s) billed` : "No water billing this month" });
 
   const [drafts] = await db.select({ n: sql<number>`count(*)::int` }).from(journalEntries).where(and(eq(journalEntries.status, "DRAFT"), gte(journalEntries.entryDate, from), lte(journalEntries.entryDate, to)));
   items.push({ key: "draft_jvs", label: "No draft journal vouchers", ok: (drafts?.n ?? 0) === 0, detail: drafts?.n ? `${drafts.n} draft JV(s) dated this month` : "None" });
 
-  const start = await goLive(db);
-  const missing: string[] = [];
-  if (start && start <= to) {
-    const first = start > from ? start : from;
-    const dates: string[] = [];
-    for (let d = first; d <= to; d = addDays(d, 1)) dates.push(d);
-    const names = dailyJobs().map((j) => j.name);
-    const runs = names.length ? await db.select({ job: jobRuns.job, key: jobRuns.key }).from(jobRuns).where(and(inArray(jobRuns.job, names), inArray(jobRuns.key, dates))) : [];
-    const done = new Set(runs.map((r) => `${r.job}:${r.key}`));
-    for (const job of names) {
-      const gaps = dates.filter((d) => !done.has(`${job}:${d}`));
-      if (gaps.length) missing.push(`${job} on ${gaps.length} date(s) from ${formatDate(gaps[0]!)}`);
-    }
-  }
+  const missing = [...(await missedJobs(year, month, to, db))].map(([job, gaps]) => `${job} on ${gaps.length} date(s) from ${formatDate(gaps[0]!)}`);
   items.push({ key: "daily_jobs", label: "Daily jobs ran for every business date", ok: missing.length === 0, detail: missing.length ? `Missing: ${missing.join("; ")}` : "All ran" });
 
   const dep = await depreciationDone(period, db);
@@ -129,9 +136,12 @@ export async function closeMonth(tx: Tx, input: { year: number; month: number },
 export async function reopenMonth(tx: Tx, input: { year: number; month: number; reason: string }, adminId: string) {
   const reason = input.reason.trim();
   if (!reason) throw new AccountingError("Enter why the month is reopened");
+  const [row] = await tx.select({ fiscalYearId: periods.fiscalYearId }).from(periods).where(and(eq(periods.year, input.year), eq(periods.month, input.month)));
+  if (!row) throw new AccountingError(`Period ${label(input.year, input.month)} isn't set up`);
+  // The year first, then the month: the same order as the year-end close, so neither waits on the other forever.
+  const [fy] = await tx.select().from(fiscalYears).where(eq(fiscalYears.id, row.fiscalYearId)).for("update");
   const p = await lockPeriod(tx, input.year, input.month);
   if (p.status !== "CLOSED") throw new AccountingError(`${label(input.year, input.month)} is open`);
-  const [fy] = await tx.select().from(fiscalYears).where(eq(fiscalYears.id, p.fiscalYearId));
   if (fy?.status === "CLOSED") throw new AccountingError(`Fiscal year ${fy.year} is closed; its months can't be reopened`);
   await tx.update(periods).set({ status: "OPEN", closedBy: null, closedAt: null }).where(eq(periods.id, p.id));
   await audit(tx, { action: "gl.period_reopen", entity: "period", entityId: String(p.id), after: { period: label(input.year, input.month), reason }, userId: adminId });
@@ -146,7 +156,10 @@ export async function yearEndClose(tx: Tx, input: { year: number }, actorId: str
   const [fy] = await tx.select().from(fiscalYears).where(eq(fiscalYears.year, input.year)).for("update");
   if (!fy) throw new AccountingError(`Fiscal year ${input.year} isn't set up`);
   if (fy.status === "CLOSED") throw new AccountingError(`Fiscal year ${input.year} is already closed`);
-  const months = await tx.select().from(periods).where(eq(periods.fiscalYearId, fy.id)).orderBy(asc(periods.year), asc(periods.month));
+  // The closing entry sweeps balances since the books began, so every earlier year must be closed into UNS.
+  const [prior] = await tx.select().from(fiscalYears).where(eq(fiscalYears.year, input.year - 1));
+  if (prior && prior.status !== "CLOSED") throw new AccountingError(`Close fiscal year ${prior.year} first`);
+  const months = await tx.select().from(periods).where(eq(periods.fiscalYearId, fy.id)).orderBy(asc(periods.year), asc(periods.month)).for("update");
   const last = months.at(-1);
   if (!last) throw new AccountingError(`Fiscal year ${input.year} has no months`);
   const stillOpen = months.slice(0, -1).filter((m) => m.status !== "CLOSED");
@@ -191,6 +204,30 @@ export async function yearEndClose(tx: Tx, input: { year: number }, actorId: str
   await ensureFiscalYear(tx, input.year + 1);
   await audit(tx, { action: "gl.year_close", entity: "fiscal_year", entityId: String(fy.id), after: { year: input.year, netSurplus: format(netSurplus) }, userId: actorId });
   return { netSurplus, jeId };
+}
+
+/**
+ * Runs the daily jobs for the dates of a month some job missed (the cron didn't run, or a job
+ * failed), oldest first and only for past dates; stops at the first date where a job fails.
+ */
+export async function runMissedDailyJobs(input: { year: number; month: number }, actorId: string): Promise<{ dates: number }> {
+  const period = label(input.year, input.month);
+  const missed = await missedJobs(input.year, input.month, addDays(businessToday(), -1), getDb());
+  const dates = [...new Set([...missed.values()].flat())].sort();
+  if (!dates.length) throw new AccountingError(`No daily job is missing in ${period}`);
+  let ran = 0;
+  let failure: string | null = null;
+  for (const d of dates) {
+    const failed = (await runDailyJobs(d)).find((r) => r.status === "failed");
+    if (failed) {
+      failure = `${failed.job} failed on ${formatDate(d)}: ${failed.error ?? "unknown error"}`;
+      break;
+    }
+    ran++;
+  }
+  await withTx((tx) => audit(tx, { action: "jobs.catch_up", entity: "period", entityId: period, after: { period, dates: ran, failure }, userId: actorId }));
+  if (failure) throw new AccountingError(`Ran ${ran} date(s); ${failure}`);
+  return { dates: ran };
 }
 
 /** A fiscal year's months with their status and when they were closed. */

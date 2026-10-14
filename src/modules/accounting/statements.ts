@@ -284,6 +284,10 @@ export async function unmappedAccounts(db: Db | Tx = getDb()) {
 
 // ── Mapping (Financial statements › Account mapping) ──
 
+const SECTION_OF: Record<string, FsSection> = { ASSET: "ASSETS", LIABILITY: "LIABILITIES", EQUITY: "EQUITY", REVENUE: "REVENUE", EXPENSE: "EXPENSE" };
+const TYPE_WORD: Record<string, string> = { ASSET: "an asset", LIABILITY: "a liability", EQUITY: "an equity", REVENUE: "a revenue", EXPENSE: "an expense" };
+const SECTION_WORD: Record<FsSection, string> = { ASSETS: "Assets", LIABILITIES: "Liabilities", EQUITY: "Equity", REVENUE: "Revenues", EXPENSE: "Expenses" };
+
 /** Puts a postable account on a statement line of the right statement (moving it if it was elsewhere). */
 export async function mapAccount(tx: Tx, input: { accountId: string; fsLineId: string }, actorId: string) {
   const [a] = await tx.select().from(accounts).where(eq(accounts.id, input.accountId));
@@ -292,6 +296,10 @@ export async function mapAccount(tx: Tx, input: { accountId: string; fsLineId: s
   if (!line || line.computed) throw new FsError("Choose a statement line");
   const wants = ["ASSET", "LIABILITY", "EQUITY"].includes(a.type) ? "SFC" : "SOO";
   if (line.statement !== wants) throw new FsError(`${a.code} ${a.name} belongs on the ${wants === "SFC" ? "Statement of Financial Condition" : "Statement of Operations"}`);
+  // Each line takes its own kind of account; a receivable may also reduce an equity line (subscription receivable on share capital).
+  if (SECTION_OF[a.type] !== line.section && !(a.type === "ASSET" && line.section === "EQUITY")) {
+    throw new FsError(`${a.code} ${a.name} is ${TYPE_WORD[a.type] ?? "a different kind of"} account; put it on a line under ${SECTION_WORD[SECTION_OF[a.type] ?? line.section]}`);
+  }
   const [before] = await tx.select().from(fsLineAccounts).where(eq(fsLineAccounts.accountId, a.id));
   if (before) await tx.update(fsLineAccounts).set({ fsLineId: line.id }).where(eq(fsLineAccounts.id, before.id));
   else await tx.insert(fsLineAccounts).values({ fsLineId: line.id, accountId: a.id, createdBy: actorId });

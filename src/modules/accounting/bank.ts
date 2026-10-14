@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { businessToday, isBusinessDate, monthEnd, type BusinessDate } from "@/lib/dates";
@@ -29,7 +29,7 @@ export async function createBankAccount(tx: Tx, input: { name: string; bankName:
   if (line?.cashFlow !== "CASH") throw new AccountingError(`${gl.code} ${gl.name} isn't a cash account`);
   const [dup] = await tx.select({ id: bankAccounts.id }).from(bankAccounts).where(eq(bankAccounts.glAccountId, gl.id));
   if (dup) throw new AccountingError(`${gl.code} ${gl.name} already belongs to a bank account`);
-  const [b] = await tx.insert(bankAccounts).values({ name, bankName, accountNo, glAccountId: gl.id, createdBy: actorId }).returning();
+  const [b] = await tx.insert(bankAccounts).values({ name, bankName, accountNo, glAccountId: gl.id, openedOn: businessToday(), createdBy: actorId }).returning();
   if (!b) throw new Error("bank account insert returned no row");
   await audit(tx, { action: "bank.account_create", entity: "bank_account", entityId: b.id, after: { name, bankName, accountNo, gl: gl.code }, userId: actorId });
   return { id: b.id };
@@ -63,11 +63,19 @@ export async function reconData(bankAccountId: string, period: string, db: Db | 
 
 export type BankItem = { date: BusinessDate; description: string; amount: Money };
 
-/** Saves the month's reconciliation (once) when it balances; the cleared entries are matched to the statement. */
+/**
+ * Saves the month's reconciliation (once) when it balances; the cleared entries are matched to the
+ * statement. Months are reconciled in order, so a later statement never hides an earlier month's
+ * open entries.
+ */
 export async function saveRecon(tx: Tx, input: { bankAccountId: string; period: string; bankBalance: Money; clearedLineIds: string[]; bankItems: BankItem[] }, actorId: string) {
+  // One reconciliation of a bank account at a time (a double submit waits, then finds it saved).
+  await tx.select({ id: bankAccounts.id }).from(bankAccounts).where(eq(bankAccounts.id, input.bankAccountId)).for("update");
   const data = await reconData(input.bankAccountId, input.period, tx);
   if (data.end > businessToday()) throw new AccountingError(`${input.period} isn't over yet`);
   if (data.saved) throw new AccountingError(`${data.bank.name} is already reconciled for ${input.period}`);
+  const [later] = await tx.select({ period: bankRecons.period }).from(bankRecons).where(and(eq(bankRecons.bankAccountId, data.bank.id), gt(bankRecons.period, input.period))).limit(1);
+  if (later) throw new AccountingError(`${data.bank.name} is already reconciled for ${later.period}; reconcile the months in order`);
   const openById = new Map(data.open.map((l) => [l.id, l]));
   const cleared = [...new Set(input.clearedLineIds)];
   for (const id of cleared) if (!openById.has(id)) throw new AccountingError("A ticked entry isn't an open entry of this bank account");
@@ -114,9 +122,9 @@ export async function saveRecon(tx: Tx, input: { bankAccountId: string; period: 
   return { id: recon.id, depositsInTransit, outstandingChecks, adjustments };
 }
 
-/** Whether every active bank account is reconciled for the month: for the month-close checklist. */
+/** Whether every active bank account (set up by the month) is reconciled for it: for the month-close checklist. */
 export async function reconsDone(period: string, db: Db | Tx = getDb()): Promise<{ ok: boolean; detail: string }> {
-  const banks = await db.select().from(bankAccounts).where(eq(bankAccounts.isActive, true));
+  const banks = (await db.select().from(bankAccounts).where(eq(bankAccounts.isActive, true))).filter((b) => b.openedOn.slice(0, 7) <= period);
   if (banks.length === 0) return { ok: true, detail: "No bank accounts set up" };
   const done = await db.select({ id: bankRecons.bankAccountId }).from(bankRecons).where(eq(bankRecons.period, period));
   const missing = banks.filter((b) => !done.some((d) => d.id === b.id));

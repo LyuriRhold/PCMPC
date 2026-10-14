@@ -281,6 +281,20 @@
       "when": 1791938827593,
       "tag": "0039_accounting_immutable",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1791946791174,
+      "tag": "0040_fixed_asset_opening",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1791946981631,
+      "tag": "0041_bank_account_opened",
+      "breakpoints": true
     }
   ]
 }

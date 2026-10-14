@@ -8,7 +8,7 @@ import { next as nextNumber } from "@/lib/numbering";
 import { members } from "@/modules/members/schema";
 import { suppliers } from "@/modules/store/schema";
 import { waterCustomers } from "@/modules/water/schema";
-import { periodKey, periodOf } from "./periods";
+import { openNextFiscalYear, periodForPosting, periodKey } from "./periods";
 import { accountMappings, accounts, journalEntries, journalLines, type Account, type Book, type JournalEntry, type NormalBalance } from "./schema";
 
 /** A posting rule was broken; the message is safe to show. */
@@ -111,7 +111,8 @@ async function validateLines(tx: Tx, lines: LineInput[], opts: { allowInactive?:
 }
 
 async function assertPeriodOpen(tx: Tx, date: BusinessDate): Promise<void> {
-  const p = await periodOf(date, tx);
+  let p = await periodForPosting(date, tx);
+  if (!p && (await openNextFiscalYear(tx, date))) p = await periodForPosting(date, tx);
   if (!p) throw new LedgerError(`Period ${periodKey(date)} is not set up`);
   if (p.status !== "OPEN") throw new LedgerError(`Period ${periodKey(date)} is closed`);
 }

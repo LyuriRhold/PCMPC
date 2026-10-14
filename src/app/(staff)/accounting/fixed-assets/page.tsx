@@ -10,7 +10,7 @@ import { businessToday, formatDate } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPage } from "@/lib/page-guard";
 import { listAssetClasses, listAssets, listDepreciationRuns } from "@/modules/accounting/assets";
-import { AssetForm, DepreciationRunForm } from "@/modules/accounting/ui/forms";
+import { AssetForm, DepreciationRunForm, VoidAssetForm } from "@/modules/accounting/ui/forms";
 
 export const metadata: Metadata = { title: "Fixed assets · PCMPC MIS" };
 
@@ -18,14 +18,16 @@ async function AssetsContent() {
   const access = await guardPage("gl.read");
   if (!access.ok) return <Forbidden permission={access.permission} />;
   const [assets, classes, runs] = await Promise.all([listAssets(), listAssetClasses(), listDepreciationRuns()]);
-  const totals = assets.reduce((s, a) => ({ cost: s.cost + a.asset.cost, accumulated: s.accumulated + a.asset.accumulated, book: s.book + a.bookValue }), { cost: 0n, accumulated: 0n, book: 0n });
+  const canEdit = can(access.user, "gl.coa");
+  const totals = assets.filter((a) => a.asset.status !== "VOID").reduce((s, a) => ({ cost: s.cost + a.asset.cost, accumulated: s.accumulated + a.asset.accumulated, book: s.book + a.bookValue }), { cost: 0n, accumulated: 0n, book: 0n });
   return (
     <div className="flex flex-col gap-4">
       <div>
         <h1 className="text-2xl font-semibold">Fixed assets</h1>
         <p className="text-sm text-muted-foreground">
           The register of property and equipment. Buying an asset is posted by its voucher (to the class&apos;s property and equipment account); here it is depreciated straight-line each month, from the
-          month it was acquired, down to its salvage value.
+          month it was acquired, down to its salvage value. An asset already depreciated in the books before comes in with its accumulated depreciation and is depreciated from the month after. A wrongly
+          registered asset can be voided until its first depreciation is posted.
         </p>
       </div>
       {can(access.user, "gl.coa") ? (
@@ -49,12 +51,13 @@ async function AssetsContent() {
             <TableHead className="text-right">Life</TableHead>
             <TableHead className="text-right">Accumulated</TableHead>
             <TableHead className="text-right">Book value</TableHead>
+            {canEdit ? <TableHead /> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
           {assets.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={8} className="text-center text-sm text-muted-foreground">
+              <TableCell colSpan={canEdit ? 9 : 8} className="text-center text-sm text-muted-foreground">
                 No assets in the register yet.
               </TableCell>
             </TableRow>
@@ -69,13 +72,25 @@ async function AssetsContent() {
                     Fully depreciated
                   </Badge>
                 ) : null}
+                {a.status === "VOID" ? (
+                  <>
+                    <Badge variant="outline" className="ml-2">
+                      Voided
+                    </Badge>
+                    <span className="block text-xs text-muted-foreground">{a.voidReason}</span>
+                  </>
+                ) : null}
               </TableCell>
               <TableCell>{className}</TableCell>
-              <TableCell className="tabular-nums">{formatDate(a.acquisitionDate)}</TableCell>
+              <TableCell className="tabular-nums">
+                {formatDate(a.acquisitionDate)}
+                {a.openingAccumulated > 0n ? <span className="block text-xs text-muted-foreground">{format(a.openingAccumulated)} brought forward; depreciated from {a.depreciateFrom}</span> : null}
+              </TableCell>
               <TableCell className="text-right tabular-nums">{format(a.cost)}</TableCell>
               <TableCell className="text-right tabular-nums">{a.lifeMonths} mo</TableCell>
               <TableCell className="text-right tabular-nums">{format(a.accumulated)}</TableCell>
               <TableCell className="text-right tabular-nums">{format(bookValue)}</TableCell>
+              {canEdit ? <TableCell>{a.status !== "VOID" && a.accumulated === a.openingAccumulated ? <VoidAssetForm assetId={a.id} tag={a.tag} /> : null}</TableCell> : null}
             </TableRow>
           ))}
         </TableBody>
@@ -86,6 +101,7 @@ async function AssetsContent() {
             <TableCell />
             <TableCell className="text-right tabular-nums">{format(totals.accumulated)}</TableCell>
             <TableCell className="text-right tabular-nums">{format(totals.book)}</TableCell>
+            {canEdit ? <TableCell /> : null}
           </TableRow>
         </TableFooter>
       </Table>

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, check, date, index, integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, date, index, integer, jsonb, pgTable, text, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { createdColumns, tstz } from "@/db/columns";
 import { users } from "@/modules/auth/schema";
 import { accounts, journalEntries, journalLines } from "@/modules/ledger/schema";
@@ -100,7 +100,7 @@ export const assetClasses = pgTable(
   (t) => [check("asset_classes_life_chk", sql`${t.defaultLifeMonths} > 0`)],
 );
 
-export const ASSET_STATUSES = ["ACTIVE", "FULLY_DEPRECIATED"] as const;
+export const ASSET_STATUSES = ["ACTIVE", "FULLY_DEPRECIATED", "VOID"] as const;
 export type AssetStatus = (typeof ASSET_STATUSES)[number];
 
 /**
@@ -111,7 +111,7 @@ export const fixedAssets = pgTable(
   "fixed_assets",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    tag: text("tag").notNull().unique(),
+    tag: text("tag").notNull(),
     description: text("description").notNull(),
     classCode: text("class_code")
       .notNull()
@@ -120,15 +120,24 @@ export const fixedAssets = pgTable(
     cost: money("cost").notNull(),
     salvage: money("salvage").notNull(),
     lifeMonths: integer("life_months").notNull(),
-    /** Depreciation posted so far. */
+    /** Accumulated depreciation brought forward when the asset was registered (from the books before). */
+    openingAccumulated: money("opening_accumulated").notNull().default(sql`0`),
+    /** The first month (YYYY-MM) this system depreciates it: the acquisition month, or the month after the brought-forward amount. */
+    depreciateFrom: text("depreciate_from").notNull(),
+    /** Depreciation so far: the brought-forward amount plus what the runs posted. */
     accumulated: money("accumulated").notNull().default(sql`0`),
     status: text("status").$type<AssetStatus>().notNull().default("ACTIVE"),
+    /** Why a wrongly registered asset was voided (only before any depreciation was posted). */
+    voidReason: text("void_reason"),
     ...createdColumns(),
   },
   (t) => [
+    uniqueIndex("fixed_assets_tag_uq").on(t.tag).where(sql`${t.status} <> 'VOID'`),
     check("fixed_assets_status_chk", inList("status", ASSET_STATUSES)),
-    check("fixed_assets_amounts_chk", sql`${t.cost} > 0 AND ${t.salvage} >= 0 AND ${t.salvage} < ${t.cost} AND ${t.lifeMonths} > 0 AND ${t.accumulated} >= 0 AND ${t.accumulated} <= ${t.cost} - ${t.salvage}`),
-    check("fixed_assets_done_chk", sql`(${t.status} = 'FULLY_DEPRECIATED') = (${t.accumulated} = ${t.cost} - ${t.salvage})`),
+    check("fixed_assets_amounts_chk", sql`${t.cost} > 0 AND ${t.salvage} >= 0 AND ${t.salvage} < ${t.cost} AND ${t.lifeMonths} > 0 AND ${t.openingAccumulated} >= 0 AND ${t.accumulated} >= ${t.openingAccumulated} AND ${t.accumulated} <= ${t.cost} - ${t.salvage}`),
+    check("fixed_assets_done_chk", sql`${t.status} = 'VOID' OR (${t.status} = 'FULLY_DEPRECIATED') = (${t.accumulated} = ${t.cost} - ${t.salvage})`),
+    check("fixed_assets_void_chk", sql`(${t.status} = 'VOID') = (${t.voidReason} IS NOT NULL)`),
+    check("fixed_assets_from_chk", sql`${t.depreciateFrom} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
   ],
 );
 
@@ -180,6 +189,8 @@ export const bankAccounts = pgTable("bank_accounts", {
     .notNull()
     .unique()
     .references(() => accounts.id),
+  /** The business date it was set up: reconciliations are due from that month. */
+  openedOn: date("opened_on", { mode: "string" }).notNull(),
   isActive: boolean("is_active").notNull().default(true),
   ...createdColumns(),
 });

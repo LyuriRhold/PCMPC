@@ -22,7 +22,7 @@
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ✅ | phase-11-loan-servicing · tag `phase-11` | rldejoya (reviewer agent: stuck pending release + historical aging fixed; follow-ups) · 2026-10-12 |
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ✅ | phase-12-store-inventory · tag `phase-12` | rldejoya (reviewer agent: stock-move order fixed; follow-ups) · 2026-10-13 |
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ✅ | phase-13-store-pos · tag `phase-13` | rldejoya (reviewer agent: charge-sale refunds fixed; follow-ups) · 2026-10-14 |
-| 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | 🟡 awaiting review | phase-14-fs-close | |
+| 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | 🟡 reviewed (reviewer agent: next fiscal year and asset register fixed); awaiting merge | phase-14-fs-close | |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ⬜ | | |
 | 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ⬜ | | |
 | 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | ⬜ | | |
@@ -345,11 +345,11 @@
 - [ ] Q-13.8 (phase 13) Sale numbers and the slip. | default used: sales S-{YYYY}-{000000} (a voided sale keeps its number), returns SR-{YYYY}-{000000}; the POS slip says "Not an official receipt" until the store has a BIR-accredited POS or invoice (PLAN R1); a BIR invoice no. can be kept per sale but the POS screen doesn't ask for it yet | answer:
 - [ ] Q-14.1 (phase 14) The statement layout (PFRF for Cooperatives). | default used: Financial Condition lines: cash; loans receivable net of the allowance; accounts receivable; inventories; other assets; property and equipment at cost and accumulated depreciation; deposit liabilities; accounts payable – trade; accrued and other payables; paid-up share capital (subscribed less subscription receivable); statutory funds (one line); undivided net surplus; the year's net surplus (until the year-end close). Operations: sales net of returns; interest on loans; service fees, fines and other credit income; water service revenue; other income; cost of sales; interest expense on deposits; operating expenses. Please send the prior-year audited FS so the lines and captions can match | answer:
 - [ ] Q-14.2 (phase 14) Business segments. | default used: credit (loan interest, fees, fines, recoveries, interest on deposits), water service (all water revenue), consumer store (sales, returns, cost of sales, inventory losses and overage), general (everything else: salaries, utilities, depreciation, membership fees…). Shared expenses aren't allocated to the segments | answer:
-- [ ] Q-14.3 (phase 14) Depreciation. | default used: straight-line, a full month from the month acquired, HALF-UP with the last month taking the residue; an asset's purchase is posted by its DV or JV (the register doesn't post the cost); sample classes and lives: building 20 years, water system 15, office equipment 3, furniture 5, transportation 5 | answer:
-- [ ] Q-14.4 (phase 14) The month-close checklist. | default used: teller sessions and POS shifts verified (so cash short/over is posted; the spec says POS shifts CLOSED); water billing periods of the month posted; no draft JVs; the daily jobs ran for every date since the first posting; the depreciation run posted when assets need it; quarter-end savings interest for products with accounts; a saved bank reconciliation for every active bank account. A month is closed only after it ends; months may close in any order; only the administrator reopens, with a reason | answer:
-- [ ] Q-14.5 (phase 14) Year-end close. | default used: every other month closed first; one closing entry dated the year's last day (revenues and expenses into Undivided Net Surplus); the last month and the year are then closed and the next year opened; balances carry forward (no separate opening entry); a closed year's months can't be reopened | answer:
+- [ ] Q-14.3 (phase 14) Depreciation. | default used: straight-line, a full month from the month acquired, HALF-UP with the last month taking the residue; an asset's purchase is posted by its DV or JV (the register doesn't post the cost); sample classes and lives: building 20 years, water system 15, office equipment 3, furniture 5, transportation 5. An asset already depreciated in the books before comes in with its accumulated depreciation through a month and is depreciated from the month after (please send the fixed-asset list with each asset's accumulated depreciation); a wrongly registered asset is voided, with a reason, until its first depreciation is posted | answer:
+- [ ] Q-14.4 (phase 14) The month-close checklist. | default used: teller sessions and POS shifts verified (so cash short/over is posted; the spec says POS shifts CLOSED); water billing periods of the month posted; no draft JVs; the daily jobs ran for every date since the first posting; the depreciation run posted when assets need it; quarter-end savings interest for products with accounts; a saved bank reconciliation for every active bank account set up by then. A month is closed only after it ends; months may close in any order; only the administrator reopens, with a reason. Missed daily jobs are run from Period close (past dates, oldest first). The water item checks the zones billed in the month; should every zone with active connections be billed every month? | answer:
+- [ ] Q-14.5 (phase 14) Year-end close. | default used: every other month closed first; one closing entry dated the year's last day (revenues and expenses into Undivided Net Surplus); the last month and the year are then closed and the next year opened; balances carry forward (no separate opening entry); a closed year's months can't be reopened. The next year opens with the first entry dated in it (so January is posted before the old year is closed); a year's close needs the year before closed | answer:
 - [ ] Q-14.6 (phase 14) Cash flow classification. | default used: loans, receivables, inventories, deposits and payables are operating; property and equipment at cost is investing (accumulated depreciation is the operating add-back); share capital, statutory funds and undivided net surplus are financing | answer:
-- [ ] Q-14.7 (phase 14) Bank reconciliation. | default used: the bookkeeper enters the statement's ending balance, ticks the book entries the bank cleared and lists the bank-only items (charges, interest); it saves only when it balances and isn't changed afterwards; the bank-only items are then posted by a JV, ticked as cleared on the next month's reconciliation | answer:
+- [ ] Q-14.7 (phase 14) Bank reconciliation. | default used: the bookkeeper enters the statement's ending balance, ticks the book entries the bank cleared and lists the bank-only items (charges, interest); it saves only when it balances and isn't changed afterwards; the bank-only items are then posted by a JV, ticked as cleared on the next month's reconciliation. Months are reconciled in order, from the month the bank account was set up | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -399,6 +399,8 @@
 - Fixed-asset disposal (sale or retirement: the gain or loss and taking the asset off the register) (Phase 14)
 - Statement lines in a hierarchy (current / non-current subtotals) and allocating shared expenses to the segments (Q-14.1, Q-14.2)
 - Importing the bank statement (CSV) instead of ticking entries by hand (Phase 14)
+- A pre-closing trial balance (or an option to list zero rows) for the auditor; locking the statement mapping of closed years (Phase 14 review)
+- Bank accounts limited to cash-in-bank accounts (not cash on hand) once PCMPC's bank accounts are in the chart (Phase 14 review)
 - A manager force-close for a POS shift a cashier left open; a blind cash count (the shift page shows the expected cash before the count, as the Phase 4 teller screen does) (Phase 13 review)
 - Corrections for loan payments made without a receipt (pay from savings, share-capital offsets on termination): a reversal in the loans module that also reverses the savings or share posting (Phase 11 review)
 - Penalty on the payment day: a payment made before the day's job runs collects penalties only up to the last run; compute the penalty to the payment date live (Phase 11 review)
@@ -1540,7 +1542,8 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 **Deviations from spec (with reason)**
 - **`fs_lines`:** the spec lists `parent` and `sign`. Here each line has a `section` (its amount is taken on the section's side, so contra accounts such as the allowance, accumulated depreciation, subscription receivable and sales returns reduce it), a `cash_flow` class, and `computed` for the year's net surplus. Hierarchy and subtotals are in the backlog.
 - **The checklist requires POS shifts VERIFIED** (the spec says CLOSED), so their cash short/over is posted before the month locks; teller sessions are treated the same way.
-- **Extra tables:** `asset_classes` (classes and default lives, CONFIRM), `asset_depreciation` (per asset per month) and `year_end_closes`.
+- **Extra tables and columns:** `asset_classes` (classes and default lives, CONFIRM), `asset_depreciation` (per asset per month) and `year_end_closes`; fixed assets carry the depreciation brought forward, the month depreciation starts and a void reason; bank accounts carry the date they were set up.
+- **The next fiscal year opens with the first entry dated in it** (the spec opens it at the year-end close), so January is posted while the old year is being closed. The year-end close still opens it if nothing was posted yet.
 - **The trial balance now lists only accounts with a balance,** so revenues and expenses disappear after the year-end close (A14.6). A3.6 already treated a missing row as zero.
 - **COA:** new provisional accounts and keys. `accumulated_depreciation_{class}` keys are required for the sample classes (DOMAIN §6 templated key); `property_equipment_{class}`, `salaries_wages` and `utilities_expense` are optional.
 - **Navigation:** a new Bank reconciliation item. The "coming soon" example moved to Phase 15.
@@ -1559,4 +1562,62 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - `npm run e2e -- phase-14` is green: the bookkeeper sees a balanced Financial Condition, the net surplus on Operations, downloads the Excel workbook and opens Period close with its checklist.
 - The full E2E against a production build is green: 23 of 23 (phases 00–14).
 - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK: every account mapped, and the dev trial balance balances.
-- Databases set up earlier need `npm run db:migrate && npm run db:seed` (migrations 0038–0039, the statement-line seed step, the new accounts and keys).
+- Databases set up earlier need `npm run db:migrate && npm run db:seed` (migrations 0038–0041, the statement-line seed step, the new accounts and keys).
+
+**Review follow-ups (reviewer agent, 2026-10-14)**
+- **Fixed (must-fix): the next fiscal year opened only at the year-end close, so from January 1 nothing could be posted.**
+  - Receipts, the daily jobs and JVs were refused until the old year was fully closed, which takes weeks in practice.
+  - Now the next fiscal year opens with the first entry dated in it, once it has started. It opens only the year right after the latest one; a year two ahead still says "not set up".
+  - The year-end close now needs the year before closed, since its closing entry sweeps balances since the books began.
+- **Fixed (must-fix): the asset register could be blocked for good.**
+  - **Old assets:** an asset acquired before the books began could never be depreciated. Its first run waited on months the books don't have, so no month or year could close.
+  - **Late registrations:** an asset registered after its months were run was never caught up.
+  - **Typos:** a wrongly registered asset could never be changed or removed.
+  - **Now:**
+    - An asset can come in with its accumulated depreciation brought forward through a month, and is depreciated from the month after.
+    - Registering into months already run, or into a closed month, or before the books start, is refused, and the message says what to bring forward.
+    - Runs never go back, and only active assets due by the month need last month's run.
+    - A wrongly registered asset can be voided, with a reason and audited, until its first depreciation is posted. Its tag is then free again.
+  - Migration 0040: `opening_accumulated`, `depreciate_from` (backfilled from the acquisition month), `void_reason`, the VOID status, and a tag unique only among assets that aren't void. The trigger allows voiding only with no depreciation posted, and a voided asset never changes.
+- **Fixed:**
+  - **Period locks:**
+    - Posting reads its month FOR SHARE, so a close waits for entries being posted and a posting waits for a close.
+    - The year-end close locks every month of the year.
+    - Reopening takes the year's lock first, in the same order as the year-end close.
+  - **Missed daily jobs:** Period close has "Run the missed daily jobs" (gl.close, audited) for a month whose checklist is missing job dates. It runs only past dates, oldest first, and stops at the first failure. One missed cron day no longer blocks a month for good.
+  - **Bank reconciliation:**
+    - A bank account counts from the month it was set up (`opened_on`, migration 0041), so adding one doesn't hold up earlier months.
+    - Months are reconciled in order, so a later statement can't hide an earlier month's open entries.
+    - A double submit waits and then finds the month saved.
+  - **Depreciation runs, registering and voiding take turns** (an advisory lock): a double submit says "already run" instead of a database error.
+  - **Statement mapping:** an account goes only on a line of its own kind (an expense on an expense line, and so on). A receivable may still reduce an equity line (subscription receivable on share capital).
+  - **Statements and the export:**
+    - They start at the fiscal year's first day (`fiscal.year_start_month`), not January 1.
+    - The export clamps a start later than the end, as the page does.
+    - Period close opens on the current fiscal year.
+  - **Period close screen:** "Closed on" shows the Manila date and time, not the UTC date. The water item now reads "Water billing of the month posted", which is what it checks.
+- **New tests:**
+  - the next year opening and the year-before guard;
+  - assets brought forward, late registrations, runs not going back, voids and the trigger;
+  - the missed-jobs action;
+  - the year-end close blocked by the last month's checklist;
+  - reopening then closing again;
+  - bank accounts from their month and reconciling in order;
+  - the line-kind check;
+  - property and equipment and depreciation in the Financial Condition and Cash Flows;
+  - Changes in Equity after the year-end close, and a net loss closing into UNS.
+- **Not changed (logged):**
+  - The water item checks the zones billed in the month, not every zone with connections (Q-14.4).
+  - December can be closed from the month card before the year-end close; the year-end close then asks for it to be reopened (the acceptance tests close December by itself).
+  - A14.7 depreciates the current month (an entry dated its last day).
+  - Mapping changes restate closed years' statements (audited, not locked).
+  - The trial balance leaves out zero rows.
+  - Any bank-type cash account can be a bank account.
+  - `segments` and `asset_classes` are keyed by code.
+  - A daily job added in a later phase is due on every open month's dates since the first posting; run it with "Run the missed daily jobs".
+  - The PDF export's totals aren't checked by a test (the workbook's are).
+- **After the fixes:**
+  - `npm run gate` green: 660 tests, 52 files, scan clean. Phase 14 now has 29 integration tests.
+  - `npm run build` green.
+  - E2E on a production build green: phase-14, now 2 tests (the new one adds an asset brought forward and voids a wrong one), and ui-shell. The full E2E: 24 of 24 (phases 00–14).
+  - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (migrations 0040–0041).

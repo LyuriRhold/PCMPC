@@ -8,9 +8,9 @@ import { requirePermission } from "@/lib/auth-guard";
 import { isBusinessDate } from "@/lib/dates";
 import { format, parse as parseMoney } from "@/lib/money";
 import { LedgerError } from "@/modules/ledger/service";
-import { AccountingError, registerAsset, runDepreciation } from "./assets";
+import { AccountingError, registerAsset, runDepreciation, voidAsset } from "./assets";
 import { createBankAccount, saveRecon } from "./bank";
-import { closeMonth, reopenMonth, yearEndClose } from "./close";
+import { closeMonth, reopenMonth, runMissedDailyJobs, yearEndClose } from "./close";
 import { FsError, mapAccount, setSegment } from "./statements";
 
 const EXPECTED = [AccountingError, FsError, LedgerError];
@@ -42,13 +42,43 @@ const assetSchema = z.object({
   cost: z.string().trim().max(24),
   salvage: z.string().trim().max(24),
   lifeMonths: z.number().int(),
+  /** Accumulated depreciation brought forward from the books before, and the month it runs through. */
+  openingAccumulated: z.string().trim().max(24).optional(),
+  depreciatedThrough: z.union([period, z.literal("")]).optional(),
 });
 /** Bookkeeper: adds an asset to the register. */
 export async function registerAssetAction(input: z.input<typeof assetSchema>): Promise<ActionResult<{ id: string }>> {
   const actor = await requirePermission("gl.coa");
   try {
     const data = assetSchema.parse(input);
-    return ok(await withTx((tx) => registerAsset(tx, { ...data, cost: pesos(data.cost, "cost"), salvage: pesos(data.salvage || "0", "salvage value") }, actor.id)));
+    return ok(
+      await withTx((tx) =>
+        registerAsset(
+          tx,
+          {
+            ...data,
+            cost: pesos(data.cost, "cost"),
+            salvage: pesos(data.salvage || "0", "salvage value"),
+            openingAccumulated: pesos(data.openingAccumulated || "0", "accumulated depreciation brought forward"),
+            depreciatedThrough: data.depreciatedThrough || null,
+          },
+          actor.id,
+        ),
+      ),
+    );
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const voidSchema = z.object({ assetId: z.uuid(), reason: z.string().trim().max(300) });
+/** Bookkeeper: voids a wrongly registered asset (only before any depreciation was posted for it). */
+export async function voidAssetAction(input: z.input<typeof voidSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("gl.coa");
+  try {
+    const data = voidSchema.parse(input);
+    await withTx((tx) => voidAsset(tx, data, actor.id));
+    return ok(null);
   } catch (e) {
     return failFrom(e, EXPECTED);
   }
@@ -112,6 +142,17 @@ export async function closeMonthAction(input: z.input<typeof monthSchema>): Prom
     const data = monthSchema.parse(input);
     await withTx((tx) => closeMonth(tx, data, actor.id));
     return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+/** Bookkeeper: runs the daily jobs a month missed (past dates, oldest first), so its checklist can pass. */
+export async function runMissedJobsAction(input: z.input<typeof monthSchema>): Promise<ActionResult<{ dates: number }>> {
+  const actor = await requirePermission("gl.close");
+  try {
+    const data = monthSchema.parse(input);
+    return ok(await runMissedDailyJobs(data, actor.id));
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

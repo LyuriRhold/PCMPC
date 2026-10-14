@@ -3,10 +3,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import "@/modules/plugins";
 import { getDb, getPool, withTx } from "@/db/client";
 import { setClock } from "@/lib/dates";
-import { createBankAccountAction, registerAssetAction, runDepreciationAction, saveReconAction } from "@/modules/accounting/actions";
+import { closeMonthAction, createBankAccountAction, registerAssetAction, reopenMonthAction, runDepreciationAction, saveReconAction, yearEndCloseAction } from "@/modules/accounting/actions";
+import { monthChecklist, yearPeriods } from "@/modules/accounting/close";
 import { reconData, reconsDone } from "@/modules/accounting/bank";
-import { depreciationOf, monthlyDepreciation } from "@/modules/accounting/assets";
-import { accountSegments, assetClasses, bankRecons, depreciationRuns, fixedAssets, fsLineAccounts, fsLines } from "@/modules/accounting/schema";
+import { depreciationOf, monthlyDepreciation, registerAsset } from "@/modules/accounting/assets";
+import { accountSegments, assetClasses, bankRecons, closeChecklists, depreciationRuns, fixedAssets, fsLineAccounts, fsLines } from "@/modules/accounting/schema";
+import { reverseJvAction } from "@/modules/ledger/actions";
+import { members } from "@/modules/members/schema";
+import { depositAccounts, depositProducts } from "@/modules/savings/schema";
+import { posShifts } from "@/modules/store/schema";
+import { waterBillingPeriods, waterZones } from "@/modules/water/schema";
 import { seedFs } from "@/modules/accounting/seed";
 import { cashFlows, changesInEquity, financialCondition, operations, unmappedAccounts } from "@/modules/accounting/statements";
 import { ForbiddenError, runAs } from "@/lib/auth-guard";
@@ -14,7 +20,8 @@ import { ensureFiscalYear } from "@/modules/ledger/periods";
 import { accounts, journalEntries, journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, postJournal, trialBalance } from "@/modules/ledger/service";
 import { P } from "../helpers/phase03";
-import { fsPeople, on, postFixture, setupFs } from "../helpers/phase14";
+import { makeUser } from "../helpers/phase01";
+import { fsPeople, on, postFixture, runJobsThrough, setupFs } from "../helpers/phase14";
 
 beforeEach(async () => {
   await setupFs();
@@ -233,5 +240,65 @@ describe("T14.4 bank reconciliation", () => {
   it("a month not over can't be reconciled", async () => {
     const { bankId } = await bankFixture();
     expect(await runAs(fsPeople().bookkeeper, () => saveReconAction({ bankAccountId: bankId, period: "2026-12", bankBalance: "0", clearedLineIds: [], bankItems: [] }))).toEqual({ ok: false, error: "2026-12 isn't over yet" });
+  });
+});
+
+describe("T14.5 the month-close checklist, lock and reopen, the year-end close", () => {
+  const failing = async (year: number, month: number) => (await monthChecklist(year, month)).filter((i) => !i.ok).map((i) => i.key);
+  const close = (year: number, month: number) => runAs(fsPeople().bookkeeper, () => closeMonthAction({ year, month }));
+
+  it("an empty month passes; a month not over, or already closed, can't be closed; months needn't close in order", async () => {
+    expect(await failing(2026, 3)).toEqual([]);
+    expect((await monthChecklist(2026, 3)).map((i) => i.key)).toEqual(["teller_sessions", "pos_shifts", "water_billing", "draft_jvs", "daily_jobs", "depreciation", "savings_interest", "bank_recon"]);
+    expect(await close(2026, 12)).toEqual({ ok: false, error: "2026-12 isn't over yet; close it from Jan 01, 2027" });
+    expect((await close(2026, 5)).ok).toBe(true);
+    expect(await close(2026, 5)).toEqual({ ok: false, error: "2026-05 is already closed" });
+    const kept = await getDb().select().from(closeChecklists).where(eq(closeChecklists.period, "2026-05"));
+    expect(kept).toHaveLength(8);
+    expect(kept.every((k) => k.status === "PASS")).toBe(true);
+    await expect(runAs(fsPeople().teller, () => closeMonthAction({ year: 2026, month: 4 }))).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("each item fails on its own: POS shifts, water billing, draft JVs, daily jobs, depreciation, savings interest, bank reconciliation", async () => {
+    await postFixture();
+    on("2027-01-05");
+    // Daily jobs are due from the first posting (Dec 15).
+    expect(await failing(2026, 12)).toEqual(["daily_jobs"]);
+    expect((await monthChecklist(2026, 12)).find((i) => i.key === "daily_jobs")?.detail).toMatch(/on 17 date\(s\) from Dec 15, 2026/);
+    await runJobsThrough("2026-12-15", "2026-12-31");
+    expect(await failing(2026, 12)).toEqual([]);
+    // A POS shift left open; a draft JV; a zone in reading; an asset not depreciated; a savings account; a bank account.
+    const clerk = (await makeUser("STORE_CLERK", "clerk14")).id;
+    await getDb().insert(posShifts).values({ cashierId: clerk, businessDate: "2026-12-20", openingFund: 0n });
+    await getDb().insert(journalEntries).values({ book: "GJ", entryDate: "2026-12-28", particulars: "Draft", status: "DRAFT", sourceModule: "manual_jv", preparedBy: fsPeople().bookkeeper });
+    const [zone] = await getDb().select().from(waterZones).limit(1);
+    await getDb().insert(waterBillingPeriods).values({ period: "2026-12", zoneId: zone!.id, readingFrom: "2026-12-01", readingTo: "2026-12-05", billDate: "2026-12-06", dueDate: "2026-12-20", status: "READING" });
+    await withTx((tx) => registerAsset(tx, { tag: "C1", description: "Chair", classCode: "FURNITURE", acquisitionDate: "2026-12-01", cost: P(600), salvage: 0n, lifeMonths: 60 }, fsPeople().bookkeeper));
+    const bankGl = await accountIdFor("cash_in_bank");
+    await runAs(fsPeople().bookkeeper, () => createBankAccountAction({ name: "LBP", bankName: "Land Bank", accountNo: "1", glAccountId: bankGl }));
+    const memberId = (await getDb().select({ id: members.id }).from(members).limit(1))[0]!.id;
+    const [sav] = await getDb().select().from(depositProducts).where(eq(depositProducts.kind, "SAVINGS")).limit(1);
+    await getDb().insert(depositAccounts).values({ accountNo: "SA-TEST-1", memberId, productId: sav!.id, openedAt: "2026-12-15" });
+    expect(await failing(2026, 12)).toEqual(["pos_shifts", "water_billing", "draft_jvs", "depreciation", "savings_interest", "bank_recon"]);
+    const r = await close(2026, 12);
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/^2026-12 can't be closed yet: POS shifts closed and verified \(1 of 1 not closed and verified\); Water billing posted/) });
+  });
+
+  it("a closed year's months can't be reopened; the year-end close needs every other month closed", async () => {
+    await postFixture();
+    on("2027-01-05");
+    await runJobsThrough("2026-12-15", "2026-12-31");
+    expect(await runAs(fsPeople().bookkeeper, () => yearEndCloseAction({ year: 2026 }))).toEqual({ ok: false, error: expect.stringMatching(/^Close these months first: 2026-01, 2026-02, .*2026-11$/) });
+    for (let m = 1; m <= 11; m++) expect((await close(2026, m)).ok).toBe(true);
+    expect(await runAs(fsPeople().bookkeeper, () => yearEndCloseAction({ year: 2026 }))).toEqual({ ok: true, data: { netSurplus: "₱19,400.00" } });
+    expect(await runAs(fsPeople().bookkeeper, () => yearEndCloseAction({ year: 2026 }))).toEqual({ ok: false, error: "Fiscal year 2026 is already closed" });
+    expect(await runAs(fsPeople().admin, () => reopenMonthAction({ year: 2026, month: 12, reason: "x" }))).toEqual({ ok: false, error: "Fiscal year 2026 is closed; its months can't be reopened" });
+    const [closing] = await getDb().select().from(journalEntries).where(eq(journalEntries.sourceModule, "ledger.close"));
+    expect(closing).toMatchObject({ entryDate: "2026-12-31", reference: "CLOSE-2026" });
+    // Nobody reverses the closing entry from the Journal screen.
+    expect(await runAs(fsPeople().manager, () => reverseJvAction({ jeId: closing!.id, reason: "x" }))).toMatchObject({ ok: false });
+    // 2027 is open and starts from the closing balance sheet.
+    expect((await yearPeriods(2027))?.months).toHaveLength(12);
+    expect((await financialCondition("2027-01-31")).totals.assets).toBe(P(170400));
   });
 });

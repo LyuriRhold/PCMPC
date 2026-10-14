@@ -10,6 +10,7 @@ import { format, parse as parseMoney } from "@/lib/money";
 import { LedgerError } from "@/modules/ledger/service";
 import { AccountingError, registerAsset, runDepreciation } from "./assets";
 import { createBankAccount, saveRecon } from "./bank";
+import { closeMonth, reopenMonth, yearEndClose } from "./close";
 import { FsError } from "./statements";
 
 const EXPECTED = [AccountingError, FsError, LedgerError];
@@ -96,6 +97,47 @@ export async function saveReconAction(input: z.input<typeof reconSchema>): Promi
       saveRecon(tx, { ...data, bankBalance: pesos(data.bankBalance, "statement balance"), bankItems: data.bankItems.map((i) => ({ ...i, amount: pesos(i.amount, "bank-only amount") })) }, actor.id),
     );
     return ok({ id: r.id });
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+// ── Period close (gl.close; reopening: gl.reopen) ──
+
+const monthSchema = z.object({ year: z.number().int().min(2000).max(2200), month: z.number().int().min(1).max(12) });
+/** Bookkeeper: closes a month whose checklist passes (posting into it is then refused). */
+export async function closeMonthAction(input: z.input<typeof monthSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("gl.close");
+  try {
+    const data = monthSchema.parse(input);
+    await withTx((tx) => closeMonth(tx, data, actor.id));
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const reopenSchema = monthSchema.extend({ reason: z.string().trim().max(300) });
+/** Administrator: reopens a closed month with a reason (audited). */
+export async function reopenMonthAction(input: z.input<typeof reopenSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("gl.reopen");
+  try {
+    const data = reopenSchema.parse(input);
+    await withTx((tx) => reopenMonth(tx, data, actor.id));
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const yearSchema = z.object({ year: z.number().int().min(2000).max(2200) });
+/** Bookkeeper: the year-end close (closing entry, last month and the year closed, next year opened). */
+export async function yearEndCloseAction(input: z.input<typeof yearSchema>): Promise<ActionResult<{ netSurplus: string }>> {
+  const actor = await requirePermission("gl.close");
+  try {
+    const data = yearSchema.parse(input);
+    const r = await withTx((tx) => yearEndClose(tx, data, actor.id));
+    return ok({ netSurplus: format(r.netSurplus) });
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

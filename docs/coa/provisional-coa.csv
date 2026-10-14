@@ -13,6 +13,17 @@ code,name,type,normal_balance,parent_code,postable,sca_code,mapping_keys
 11290,Allowance for Probable Losses,ASSET,CR,11200,true,,allowance_probable_losses
 11300,Inventories,ASSET,DR,1,false,,
 11310,Merchandise Inventory,ASSET,DR,11300,true,,merchandise_inventory
+12000,Property and Equipment,ASSET,DR,1,false,,
+12110,Building,ASSET,DR,12000,true,,property_equipment_BUILDING
+12115,Accumulated Depreciation - Building,ASSET,CR,12000,true,,accumulated_depreciation_BUILDING
+12120,"Water System (Pipes, Pumps, Tanks)",ASSET,DR,12000,true,,property_equipment_WATER_SYSTEM
+12125,Accumulated Depreciation - Water System,ASSET,CR,12000,true,,accumulated_depreciation_WATER_SYSTEM
+12130,Office Equipment,ASSET,DR,12000,true,,property_equipment_OFFICE_EQUIPMENT
+12135,Accumulated Depreciation - Office Equipment,ASSET,CR,12000,true,,accumulated_depreciation_OFFICE_EQUIPMENT
+12140,Furniture and Fixtures,ASSET,DR,12000,true,,property_equipment_FURNITURE
+12145,Accumulated Depreciation - Furniture and Fixtures,ASSET,CR,12000,true,,accumulated_depreciation_FURNITURE
+12150,Transportation Equipment,ASSET,DR,12000,true,,property_equipment_TRANSPORTATION
+12155,Accumulated Depreciation - Transportation Equipment,ASSET,CR,12000,true,,accumulated_depreciation_TRANSPORTATION
 2,LIABILITIES,LIABILITY,CR,,false,,
 21000,Deposit Liabilities,LIABILITY,CR,2,false,,
 21110,Savings Deposits,LIABILITY,CR,21000,true,,savings_deposits
@@ -67,3 +78,5 @@ code,name,type,normal_balance,parent_code,postable,sca_code,mapping_keys
 53110,Depreciation Expense,EXPENSE,DR,53000,true,,depreciation_expense
 53120,Inventory Losses,EXPENSE,DR,53000,true,,inventory_losses
 53130,Cash Short / Over,EXPENSE,DR,53000,true,,cash_short_over
+53210,Salaries and Wages,EXPENSE,DR,53000,true,,salaries_wages
+53220,Utilities,EXPENSE,DR,53000,true,,utilities_expense

@@ -12,7 +12,9 @@ describe("chart of accounts", () => {
     expect(new Set(keys).size).toBe(keys.length);
     for (const k of REQUIRED_MAPPING_KEYS) expect(keys).toContain(k);
     // Extra keys beyond DOMAIN §6 (e.g. other-income accounts used by cashiering settings).
-    expect(keys.filter((k) => !(REQUIRED_MAPPING_KEYS as readonly string[]).includes(k)).sort()).toEqual(["certification_fee_income", "rental_income", "water_reconnection_fee_income"]);
+    expect(keys.filter((k) => !(REQUIRED_MAPPING_KEYS as readonly string[]).includes(k)).sort()).toEqual(
+      ["certification_fee_income", "rental_income", "salaries_wages", "utilities_expense", "water_reconnection_fee_income", "property_equipment_BUILDING", "property_equipment_WATER_SYSTEM", "property_equipment_OFFICE_EQUIPMENT", "property_equipment_FURNITURE", "property_equipment_TRANSPORTATION"].sort(),
+    );
     for (const r of PROVISIONAL_COA) if (r.mappingKeys.length) expect(r.isPostable, r.code).toBe(true);
   });
 

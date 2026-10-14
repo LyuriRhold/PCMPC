@@ -34,9 +34,20 @@ export const CUSTOMER_SUBSIDIARY_KEYS = ["ar_water", "customers_deposits", "cust
 export const SUPPLIER_SUBSIDIARY_KEYS = ["accounts_payable_trade"] as const;
 
 /**
+ * The sample fixed-asset classes (PHASE-14, CONFIRM): each has a property and equipment account
+ * (`property_equipment_{code}`) and an accumulated depreciation account (`accumulated_depreciation_{code}`).
+ */
+export const SAMPLE_ASSET_CLASSES = [
+  { code: "BUILDING", name: "Building", lifeMonths: 240 },
+  { code: "WATER_SYSTEM", name: "Water system (pipes, pumps, tanks)", lifeMonths: 180 },
+  { code: "OFFICE_EQUIPMENT", name: "Office equipment", lifeMonths: 36 },
+  { code: "FURNITURE", name: "Furniture and fixtures", lifeMonths: 60 },
+  { code: "TRANSPORTATION", name: "Transportation equipment", lifeMonths: 60 },
+] as const;
+
+/**
  * Every DOMAIN §6 mapping key the system posts to. Templated keys are expanded for the sample loan
- * products (REG, EMR, PRD; DOMAIN §2). `accumulated_depreciation_{class}` keys are added in
- * Phase 14 together with the fixed-asset classes.
+ * products (REG, EMR, PRD; DOMAIN §2) and the sample asset classes (`accumulated_depreciation_{class}`).
  */
 export const REQUIRED_MAPPING_KEYS = [
   "cash_on_hand",
@@ -83,6 +94,11 @@ export const REQUIRED_MAPPING_KEYS = [
   "cost_of_sales",
   "interest_expense_deposits",
   "depreciation_expense",
+  "accumulated_depreciation_BUILDING",
+  "accumulated_depreciation_WATER_SYSTEM",
+  "accumulated_depreciation_OFFICE_EQUIPMENT",
+  "accumulated_depreciation_FURNITURE",
+  "accumulated_depreciation_TRANSPORTATION",
   "inventory_losses",
   "cash_short_over",
 ] as const;
@@ -128,6 +144,17 @@ export const PROVISIONAL_COA: CoaRow[] = [
   p("11290", "Allowance for Probable Losses", "ASSET", "CR", "11200", ["allowance_probable_losses"]),
   h("11300", "Inventories", "ASSET", "DR", "1"),
   p("11310", "Merchandise Inventory", "ASSET", "DR", "11300", ["merchandise_inventory"]),
+  h("12000", "Property and Equipment", "ASSET", "DR", "1"),
+  p("12110", "Building", "ASSET", "DR", "12000", ["property_equipment_BUILDING"]),
+  p("12115", "Accumulated Depreciation - Building", "ASSET", "CR", "12000", ["accumulated_depreciation_BUILDING"]),
+  p("12120", "Water System (Pipes, Pumps, Tanks)", "ASSET", "DR", "12000", ["property_equipment_WATER_SYSTEM"]),
+  p("12125", "Accumulated Depreciation - Water System", "ASSET", "CR", "12000", ["accumulated_depreciation_WATER_SYSTEM"]),
+  p("12130", "Office Equipment", "ASSET", "DR", "12000", ["property_equipment_OFFICE_EQUIPMENT"]),
+  p("12135", "Accumulated Depreciation - Office Equipment", "ASSET", "CR", "12000", ["accumulated_depreciation_OFFICE_EQUIPMENT"]),
+  p("12140", "Furniture and Fixtures", "ASSET", "DR", "12000", ["property_equipment_FURNITURE"]),
+  p("12145", "Accumulated Depreciation - Furniture and Fixtures", "ASSET", "CR", "12000", ["accumulated_depreciation_FURNITURE"]),
+  p("12150", "Transportation Equipment", "ASSET", "DR", "12000", ["property_equipment_TRANSPORTATION"]),
+  p("12155", "Accumulated Depreciation - Transportation Equipment", "ASSET", "CR", "12000", ["accumulated_depreciation_TRANSPORTATION"]),
 
   h("2", "LIABILITIES", "LIABILITY", "CR", null),
   h("21000", "Deposit Liabilities", "LIABILITY", "CR", "2"),
@@ -186,4 +213,6 @@ export const PROVISIONAL_COA: CoaRow[] = [
   p("53110", "Depreciation Expense", "EXPENSE", "DR", "53000", ["depreciation_expense"]),
   p("53120", "Inventory Losses", "EXPENSE", "DR", "53000", ["inventory_losses"]),
   p("53130", "Cash Short / Over", "EXPENSE", "DR", "53000", ["cash_short_over"]),
+  p("53210", "Salaries and Wages", "EXPENSE", "DR", "53000", ["salaries_wages"]),
+  p("53220", "Utilities", "EXPENSE", "DR", "53000", ["utilities_expense"]),
 ];

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { addMonths, businessToday, daysBetween, formatDate, type BusinessDate } from "@/lib/dates";
@@ -668,6 +668,29 @@ export async function restructure(tx: Tx, input: { loanId: string; term: number;
   await tx.update(loans).set({ status: "RESTRUCTURED", closedAt: today }).where(eq(loans.id, old.id));
   await audit(tx, { action: "loans.restructure", entity: "loan", entityId: old.id, after: { into: loanNo, principal: format(principal), interest: format(interest), penalty: format(penalty), term: input.term, bodRef, reason }, userId: managerId });
   return { loanId: loan.id, loanNo, principal: total };
+}
+
+// ── Patronage and arrears (Phase 15: patronage refund; ISC/PR offset) ──
+
+/** The loan interest a member paid in a period (patronage refund): the interest of payments not reversed. */
+export async function loanInterestPaid(memberId: string, from: BusinessDate, to: BusinessDate, db: Db | Tx = getDb()): Promise<Money> {
+  const [r] = await db
+    .select({ s: sql<string>`coalesce(sum(${loanPayments.interestPart}), 0)::text` })
+    .from(loanPayments)
+    .innerJoin(loans, eq(loans.id, loanPayments.loanId))
+    .where(and(eq(loans.memberId, memberId), isNull(loanPayments.reversedBy), gte(loanPayments.payDate, from), lte(loanPayments.payDate, to)));
+  return BigInt(r?.s ?? "0");
+}
+
+/** A member's past-due amounts on open loans (installments due before `asOf`, with their penalties), oldest loan first. */
+export async function pastDueLoans(memberId: string, asOf: BusinessDate, db: Db | Tx = getDb()): Promise<Array<{ loanId: string; loanNo: string; amount: Money }>> {
+  const open = await db.select().from(loans).where(and(eq(loans.memberId, memberId), inArray(loans.status, OPEN))).orderBy(asc(loans.createdAt));
+  const out: Array<{ loanId: string; loanNo: string; amount: Money }> = [];
+  for (const loan of open) {
+    const amount = (await scheduleOf(db, loan.id)).filter((r) => r.dueDate < asOf).reduce((s, r) => s + unpaidOf(r).penalty + unpaidOf(r).interest + unpaidOf(r).principal, 0n);
+    if (amount > 0n) out.push({ loanId: loan.id, loanNo: loan.loanNo, amount });
+  }
+  return out;
 }
 
 // ── Offsets (termination) and payments from savings (T11.6) ──

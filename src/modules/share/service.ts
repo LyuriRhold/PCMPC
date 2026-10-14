@@ -421,12 +421,13 @@ registerTerminationRule({
 // ── CBU retention (Phase 11 loan release) ──
 
 /**
- * CBU retention on a loan release: the credit line(s) for the release entry. If the unpaid
- * subscription is smaller than the retention, enough whole shares are subscribed first (CONFIRM Q-08.2).
+ * Capital added without a teller payment (CBU retained on a loan release, ISC/PR capitalized): the
+ * credit line(s) for the entry. If the unpaid subscription is smaller than the amount, enough whole
+ * shares are subscribed first (CONFIRM Q-08.2).
  */
-export async function cbuLines(tx: Tx, memberId: string, amount: Money): Promise<LineInput[]> {
+export async function cbuLines(tx: Tx, memberId: string, amount: Money, what = "have CBU retained"): Promise<LineInput[]> {
   const m = await lockMember(tx, memberId);
-  assertMember(m, "have CBU retained");
+  assertMember(m, what);
   if (amount <= 0n) throw new ShareError("The CBU amount must be more than zero");
   const { unpaid } = await shareBalance(m.id, tx);
   return paymentLines(tx, { memberId: m.id, amount, autoSubscribe: await autoSubscription(tx, amount, unpaid) });
@@ -438,6 +439,29 @@ export async function cbuLines(tx: Tx, memberId: string, amount: Money): Promise
  * ledger can't drift from the GL.
  */
 export async function retainCbu(tx: Tx, memberId: string, amount: Money, source: { jeId: string; ref: string }, actorId: string | null): Promise<void> {
+  await recordCapital(tx, memberId, [{ type: "CBU_RETENTION", amount }], source, "Subscribed for CBU retention", actorId);
+}
+
+/**
+ * Records ISC and patronage refund capitalized by an entry the caller posted with `cbuLines` for
+ * their sum (Phase 15 distribution): one ISC_CAPITALIZED and one PR_CAPITALIZED row (paid-up +).
+ */
+export async function capitalizeIscPr(tx: Tx, memberId: string, parts: { isc: Money; pr: Money }, source: { jeId: string; ref: string }, actorId: string | null): Promise<void> {
+  await recordCapital(
+    tx,
+    memberId,
+    [
+      { type: "ISC_CAPITALIZED", amount: parts.isc },
+      { type: "PR_CAPITALIZED", amount: parts.pr },
+    ],
+    source,
+    "Subscribed for ISC and patronage refund capitalized",
+    actorId,
+  );
+}
+
+async function recordCapital(tx: Tx, memberId: string, parts: Array<{ type: "CBU_RETENTION" | "ISC_CAPITALIZED" | "PR_CAPITALIZED"; amount: Money }>, source: { jeId: string; ref: string }, subscribeRemark: string, actorId: string | null): Promise<void> {
+  const amount = parts.reduce((s, p) => s + p.amount, 0n);
   const rec = await accountIdFor(KEYS.receivable, tx);
   const cap = await accountIdFor(KEYS.capital, tx);
   const [posted] = await tx
@@ -451,9 +475,9 @@ export async function retainCbu(tx: Tx, memberId: string, amount: Money, source:
   if (auto) {
     const par = auto.amount / BigInt(auto.shares);
     const [sub] = await tx.insert(shareSubscriptions).values({ memberId, subDate: date, shares: auto.shares, parValue: par, amount: auto.amount, jeId: source.jeId, createdBy: actorId }).returning();
-    await txn(tx, { memberId, type: "SUBSCRIBE", amount: auto.amount, jeId: source.jeId, date, subscriptionId: sub?.id ?? null, refNo: source.ref, remarks: "Subscribed for CBU retention" }, actorId);
+    await txn(tx, { memberId, type: "SUBSCRIBE", amount: auto.amount, jeId: source.jeId, date, subscriptionId: sub?.id ?? null, refNo: source.ref, remarks: subscribeRemark }, actorId);
   }
-  await txn(tx, { memberId, type: "CBU_RETENTION", amount, jeId: source.jeId, date, refNo: source.ref }, actorId);
+  for (const p of parts) if (p.amount > 0n) await txn(tx, { memberId, type: p.type, amount: p.amount, jeId: source.jeId, date, refNo: source.ref }, actorId);
 }
 
 // ── Ledger and ASM ──

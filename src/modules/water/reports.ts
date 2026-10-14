@@ -352,6 +352,23 @@ export async function productionReadings(db: Db | Tx = getDb()) {
 
 // ── Dashboard tiles ──
 
+/**
+ * The water bills a member paid in a period (patronage refund, Phase 15, when the basis counts water):
+ * what valid receipts dated in the period applied to the bills of the member's water customers
+ * (not penalties, not advances).
+ */
+export async function waterBillsPaid(memberId: string, from: BusinessDate, to: BusinessDate, db: Db | Tx = getDb()): Promise<Money> {
+  const [r] = await db
+    .select({ s: sql<string>`coalesce(sum(${waterPaymentAllocations.billPart}), 0)::text` })
+    .from(waterPaymentAllocations)
+    .innerJoin(receiptItems, eq(receiptItems.id, waterPaymentAllocations.receiptItemId))
+    .innerJoin(receipts, eq(receipts.id, receiptItems.receiptId))
+    .innerJoin(waterBills, eq(waterBills.id, waterPaymentAllocations.billId))
+    .innerJoin(waterCustomers, eq(waterCustomers.id, waterBills.customerId))
+    .where(and(eq(receipts.status, "VALID"), eq(waterCustomers.memberId, memberId), gte(receipts.receiptDate, from), lte(receipts.receiptDate, to)));
+  return BigInt(r?.s ?? "0");
+}
+
 /** Billed and collected this month, collection efficiency (bills due this month), disconnection list size, NRW %. */
 export async function waterTiles(month: string, db: Db | Tx = getDb()) {
   const from = `${month}-01`;

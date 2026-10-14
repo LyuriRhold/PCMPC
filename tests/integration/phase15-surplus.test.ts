@@ -1,12 +1,29 @@
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import "@/modules/plugins";
-import { getPool } from "@/db/client";
-import { setClock } from "@/lib/dates";
+import { getDb, getPool, withTx } from "@/db/client";
+import { runAs } from "@/lib/auth-guard";
+import { businessToday, setClock } from "@/lib/dates";
+import { auditLog } from "@/modules/audit/schema";
+import { approveDvAction, releaseDvAction } from "@/modules/cashiering/actions";
+import { dvLines } from "@/modules/cashiering/schema";
+import { accountBalance, accountIdFor, trialBalance } from "@/modules/ledger/service";
+import { getLoan } from "@/modules/loans/servicing";
+import { accountBalance as savingsBalance } from "@/modules/savings/service";
+import { shareTransactions } from "@/modules/share/schema";
 import { ROLE_PERMISSIONS } from "@/modules/auth/permissions";
-import { getSetting } from "@/modules/settings/service";
+import { getSetting, updateSetting } from "@/modules/settings/service";
+import { approveAllocationAction, distributeAllocationAction, draftAllocationAction, postAllocationAction, setElectionAction } from "@/modules/surplus/actions";
+import { allocationLines, approveAllocation, getAllocation, memberEntitlements, memberShares } from "@/modules/surplus/service";
+import { waterBillsPaid } from "@/modules/water/reports";
+import { waterCustomers } from "@/modules/water/schema";
 import { makeUser } from "../helpers/phase01";
 import { applicant, createApplicantAs } from "../helpers/phase02";
-import { seedLedger } from "../helpers/phase03";
+import { P, seedLedger } from "../helpers/phase03";
+import { activeAccount } from "../helpers/phase06";
+import { at as waterAt, billMonth, payWater, setupCollections } from "../helpers/phase07";
+import { openSessionAs } from "../helpers/phase04";
+import { on, openSavings, postedAllocation, surplusFixture, surplusPeople } from "../helpers/phase15";
 
 afterEach(() => setClock(null));
 
@@ -78,5 +95,147 @@ describe("T15.1 schema, permissions and settings", () => {
     await expect(getPool().query("UPDATE surplus_member_lines SET isc = 50, gross = 71, net = 71 WHERE id = $1", [lineId])).rejects.toThrow(/only while the allocation is a draft/);
     await expect(getPool().query("DELETE FROM surplus_member_lines WHERE id = $1", [lineId])).rejects.toThrow(/only from a draft allocation/);
     await getPool().query("UPDATE surplus_member_lines SET elect_savings = 5000, elect_cash = 5000 WHERE id = $1", [lineId]);
+  });
+});
+
+describe("T15.3 each member's ASM and patronage, and their ISC and PR", () => {
+  const FY = { year: 2026, startDate: "2026-01-01", endDate: "2026-12-31" };
+  const ALL = { loanInterestPaid: true, netStorePurchases: true, waterBillsPaidByMembers: false };
+
+  it("ASM, loan interest paid and net store purchases of each eligible member; the pools shared to the centavo", async () => {
+    const f = await surplusFixture(P(20000));
+    const ents = await memberEntitlements(FY, ALL);
+    expect(ents).toEqual([
+      { memberId: f.a, asm: P(12000), loanInterest: 0n, store: P(10000), water: 0n, patronage: P(10000) },
+      { memberId: f.b, asm: P(9000), loanInterest: P(150), store: P(29850), water: 0n, patronage: P(30000) },
+      { memberId: f.c, asm: P(77000), loanInterest: 0n, store: P(2000), water: 0n, patronage: P(2000) },
+    ]);
+    const shares = memberShares(2026, { iscPool: P(9800), prPool: P(4200) }, ents);
+    expect([shares.iscRate, shares.prRate]).toEqual(["0.1", "0.1"]);
+    expect(shares.lines.map((l) => [l.isc, l.pr, l.gross])).toEqual([
+      [P(1200), P(1000), P(2200)],
+      [P(900), P(3000), P(3900)],
+      [P(7700), P(200), P(7900)],
+    ]);
+    // When only loan interest counts, B alone shares the patronage refund.
+    const interestOnly = await memberEntitlements(FY, { ...ALL, netStorePurchases: false });
+    expect(memberShares(2026, { iscPool: 0n, prPool: P(4200) }, interestOnly).lines.map((l) => [l.memberId, l.pr])).toEqual([[f.b, P(4200)]]);
+    expect(() => memberShares(2026, { iscPool: P(1), prPool: 0n }, [])).toThrow("No member had share capital in 2026 to share the interest on share capital");
+    expect(() => memberShares(2026, { iscPool: 0n, prPool: P(1) }, [])).toThrow("No member had patronage in 2026 to share the patronage refund");
+  });
+
+  it("water bills a member paid count when the basis says so: what was applied to bills in the year", async () => {
+    const u = await setupCollections(); // Oct 7, 2026
+    const mine = await activeAccount({ clerk: u.clerk.id, manager: u.manager.id, routeId: u.routeId, initialReading: 0, kind: "MEMBER" });
+    const other = await activeAccount({ clerk: u.clerk.id, manager: u.manager.id, routeId: u.routeId, initialReading: 0 });
+    await billMonth(u.clerk.id, u.zoneId, "2026-10", [
+      [mine.accountId, 18],
+      [other.accountId, 18],
+    ]);
+    setClock(() => waterAt("2026-11-05"));
+    expect((await payWater(mine.customer.id, mine.accountId, "300.00")).ok).toBe(true);
+    expect((await payWater(other.customer.id, other.accountId, "300.00")).ok).toBe(true);
+    const [c] = await getDb().select().from(waterCustomers).where(eq(waterCustomers.id, mine.customer.id));
+    expect(await waterBillsPaid(c!.memberId!, "2026-01-01", "2026-12-31")).toBe(P(300));
+    expect(await waterBillsPaid(c!.memberId!, "2027-01-01", "2027-12-31")).toBe(0n);
+    const ents = await memberEntitlements(FY, { ...ALL, waterBillsPaidByMembers: true });
+    expect(ents.find((e) => e.memberId === c!.memberId)).toMatchObject({ water: P(300), patronage: P(300) });
+    expect((await memberEntitlements(FY, ALL)).find((e) => e.memberId === c!.memberId)).toBeUndefined();
+  });
+});
+
+describe("T15.4 the workflow: draft → approve → post → distribute", () => {
+  const book = () => surplusPeople().book;
+  const lineOf = async (allocationId: string, memberId: string) => (await allocationLines(allocationId)).find((l) => l.memberId === memberId)!;
+  const elect = (lineId: string, savings: string, capitalize: string, cash: string) => runAs(book(), () => setElectionAction({ lineId, savings, capitalize, cash }));
+  const net = async (key: string) => (await accountBalance(await accountIdFor(key), businessToday())).net;
+
+  it("a draft needs the year closed with a net surplus; the GA's percentages or the settings; a re-draft recomputes and keeps elections; the steps go in order", async () => {
+    const f = await surplusFixture(P(20000));
+    on("2027-03-01");
+    expect(await runAs(book(), () => draftAllocationAction({ year: 2027 }))).toEqual({ ok: false, error: "Close fiscal year 2027 first (the year-end close, on Period close)" });
+    expect(await runAs(book(), () => draftAllocationAction({ year: 2026, reserve: "8" }))).toEqual({ ok: false, error: "The reserve fund must be at least 10% of net surplus (8.00% entered)" });
+    const d = await runAs(book(), () => draftAllocationAction({ year: 2026, reserve: "12", optional: "5", iscShare: "60", prShare: "40" }));
+    if (!d.ok) throw new Error(d.error);
+    expect(await getAllocation(d.data.id)).toMatchObject({ status: "DRAFT", reservePct: "0.12", optionalPct: "0.05", reserve: P(2400), etfLocal: P(1000), cetf: P(1000), cdf: P(600), optional: P(1000), remaining: P(14000), iscPool: P(8400), prPool: P(5600) });
+    const a = await lineOf(d.data.id, f.a);
+    expect(await elect(a.id, "50", "30", "0")).toEqual({ ok: false, error: "The payout parts add up to 100%" });
+    expect((await elect(a.id, "0", "100", "0")).ok).toBe(true);
+    // Re-drafted with the settings: amounts recomputed, A's election kept, the others on the default (savings).
+    expect((await runAs(book(), () => draftAllocationAction({ year: 2026 }))).ok).toBe(true);
+    expect(await lineOf(d.data.id, f.a)).toMatchObject({ isc: P(1200), pr: P(1000), electSavings: 0, electCapitalize: 10000, electCash: 0 });
+    expect(await lineOf(d.data.id, f.c)).toMatchObject({ electSavings: 10000, electCapitalize: 0, electCash: 0 });
+    // Order and separation of duties.
+    expect(await runAs(book(), () => postAllocationAction({ allocationId: d.data.id, gaResolutionNo: "GA-1" }))).toEqual({ ok: false, error: "Fiscal year 2026's allocation isn't approved yet" });
+    expect(await runAs(book(), () => distributeAllocationAction({ allocationId: d.data.id }))).toEqual({ ok: false, error: "Post fiscal year 2026's allocation first" });
+    await expect(withTx((tx) => approveAllocation(tx, { allocationId: d.data.id }, book()))).rejects.toThrow("The one who prepared the allocation can't approve it");
+    expect((await runAs(surplusPeople().manager, () => approveAllocationAction({ allocationId: d.data.id }))).ok).toBe(true);
+    expect(await runAs(book(), () => draftAllocationAction({ year: 2026 }))).toEqual({ ok: false, error: "Fiscal year 2026's allocation is already approved" });
+    const [audited] = await getDb().select().from(auditLog).where(eq(auditLog.action, "surplus.redraft"));
+    expect(audited?.userId).toBe(book());
+  });
+
+  it("distribution: withholding tax, then arrears; savings, share capital (ISC/PR capitalized) and cash by DV, drawn from ISC payable first; the payables are empty once the DVs are released", async () => {
+    const f = await surplusFixture(P(20000));
+    await withTx((tx) => updateSetting(tx, "surplus.isc_pr_wtax_rate", "0.1", surplusPeople().manager));
+    on("2027-03-01");
+    const id = await postedAllocation(2026);
+    const [a, b] = [await lineOf(id, f.a), await lineOf(id, f.b)];
+    expect((await elect(a.id, "0", "50", "50")).ok).toBe(true);
+    expect((await elect(b.id, "0", "0", "100")).ok).toBe(true);
+    // C stays on the default (savings) but has no savings account yet.
+    expect(await runAs(book(), () => distributeAllocationAction({ allocationId: id }))).toMatchObject({ ok: false, error: expect.stringMatching(/^These members chose savings but have no savings account; open one or change their payout: M-\d+ .*Charlie$/) });
+    const savingsC = await openSavings(f.c);
+    expect(await runAs(book(), () => distributeAllocationAction({ allocationId: id }))).toEqual({ ok: true, data: { members: 3 } });
+    // A: 2,200 − 10% (220) = 1,980 → 990 to share capital (980 ISC + 10 PR), 990 in cash (PR).
+    expect(await lineOf(id, f.a)).toMatchObject({ wtax: P(220), arrearsOffset: 0n, net: P(1980), payoutCapitalize: P(990), payoutCash: P(990), payoutSavings: 0n });
+    const capital = await getDb().select().from(shareTransactions).where(eq(shareTransactions.memberId, f.a));
+    expect(capital.filter((t) => t.type === "ISC_CAPITALIZED" || t.type === "PR_CAPITALIZED").map((t) => [t.type, t.amount])).toEqual([
+      ["ISC_CAPITALIZED", P(980)],
+      ["PR_CAPITALIZED", P(10)],
+    ]);
+    // B: 3,900 − 390 − 500 arrears = 3,010 in cash (10 ISC + 3,000 PR).
+    expect(await lineOf(id, f.b)).toMatchObject({ wtax: P(390), arrearsOffset: P(500), net: P(3010), payoutCash: P(3010) });
+    // C: 7,900 − 790 = 7,110 to savings.
+    expect(await lineOf(id, f.c)).toMatchObject({ wtax: P(790), net: P(7110), payoutSavings: P(7110), savingsAccountId: savingsC });
+    expect(await savingsBalance(savingsC)).toBe(P(7110));
+    expect(-(await net("withholding_tax_payable"))).toBe(P(1400));
+    const dvOf = async (memberId: string) => {
+      const line = await lineOf(id, memberId);
+      return getDb().select().from(dvLines).where(eq(dvLines.dvId, line.dvId!));
+    };
+    const [iscPayable, prPayable] = [await accountIdFor("isc_payable"), await accountIdFor("patronage_refund_payable")];
+    expect((await dvOf(f.a)).map((l) => [l.accountId, l.amount])).toEqual([[prPayable, P(990)]]);
+    expect((await dvOf(f.b)).map((l) => [l.accountId, l.amount])).toEqual([
+      [iscPayable, P(10)],
+      [prPayable, P(3000)],
+    ]);
+    expect([-(await net("isc_payable")), -(await net("patronage_refund_payable"))]).toEqual([P(10), P(3990)]);
+    // The manager approves the DVs; a teller releases them: nothing is left payable.
+    const teller = surplusPeople().teller;
+    await openSessionAs(teller, "10,000.00");
+    for (const memberId of [f.a, f.b]) {
+      const dvId = (await lineOf(id, memberId)).dvId!;
+      expect((await runAs(surplusPeople().manager, () => approveDvAction({ dvId }))).ok).toBe(true);
+      expect((await runAs(teller, () => releaseDvAction({ dvId }))).ok).toBe(true);
+    }
+    expect([await net("isc_payable"), await net("patronage_refund_payable")]).toEqual([0n, 0n]);
+    expect(await getAllocation(id)).toMatchObject({ status: "DISTRIBUTED" });
+    expect(await runAs(book(), () => distributeAllocationAction({ allocationId: id }))).toEqual({ ok: false, error: "Fiscal year 2026's allocation is already distributed" });
+    expect(await elect(a.id, "100", "0", "0")).toEqual({ ok: false, error: "This member's ISC and patronage refund were already paid out" });
+    expect((await trialBalance(businessToday())).balanced).toBe(true);
+  });
+
+  it("arrears larger than the ISC and PR take all of it; nothing is left to pay out", async () => {
+    const f = await surplusFixture(P(20000));
+    on("2027-06-01"); // installments 1–4 are past due: ₱500.00 + 3 × ₱2,650.00 = ₱8,450.00
+    const id = await postedAllocation(2026);
+    const b = await lineOf(id, f.b);
+    expect((await elect(b.id, "0", "0", "100")).ok).toBe(true);
+    await openSavings(f.a);
+    await openSavings(f.c);
+    expect((await runAs(book(), () => distributeAllocationAction({ allocationId: id }))).ok).toBe(true);
+    expect(await lineOf(id, f.b)).toMatchObject({ arrearsOffset: P(3900), net: 0n, payoutCash: 0n, dvId: null });
+    expect((await getLoan(f.bLoanId))?.payments.at(-1)).toMatchObject({ kind: "OFFSET", amount: P(3900) });
   });
 });

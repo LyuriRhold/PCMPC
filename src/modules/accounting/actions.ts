@@ -9,6 +9,7 @@ import { isBusinessDate } from "@/lib/dates";
 import { format, parse as parseMoney } from "@/lib/money";
 import { LedgerError } from "@/modules/ledger/service";
 import { AccountingError, registerAsset, runDepreciation } from "./assets";
+import { createBankAccount, saveRecon } from "./bank";
 import { FsError } from "./statements";
 
 const EXPECTED = [AccountingError, FsError, LedgerError];
@@ -60,6 +61,41 @@ export async function runDepreciationAction(input: z.input<typeof periodSchema>)
     const data = periodSchema.parse(input);
     const r = await withTx((tx) => runDepreciation(tx, data, actor.id));
     return ok({ total: format(r.total), assets: r.assets });
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+// ── Bank reconciliation (gl.coa: bank accounts; gl.jv_prepare: reconciliations) ──
+
+const bankSchema = z.object({ name: z.string().trim().max(80), bankName: z.string().trim().max(80), accountNo: z.string().trim().max(40), glAccountId: z.uuid() });
+/** Bookkeeper: a bank account and its cash GL account. */
+export async function createBankAccountAction(input: z.input<typeof bankSchema>): Promise<ActionResult<{ id: string }>> {
+  const actor = await requirePermission("gl.coa");
+  try {
+    const data = bankSchema.parse(input);
+    return ok(await withTx((tx) => createBankAccount(tx, data, actor.id)));
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const reconSchema = z.object({
+  bankAccountId: z.uuid(),
+  period,
+  bankBalance: z.string().trim().max(24),
+  clearedLineIds: z.array(z.uuid()).max(5000),
+  bankItems: z.array(z.object({ date, description: z.string().trim().max(120), amount: z.string().trim().max(24) })).max(200),
+});
+/** Bookkeeper: saves a month's bank reconciliation (it must balance). */
+export async function saveReconAction(input: z.input<typeof reconSchema>): Promise<ActionResult<{ id: string }>> {
+  const actor = await requirePermission("gl.jv_prepare");
+  try {
+    const data = reconSchema.parse(input);
+    const r = await withTx((tx) =>
+      saveRecon(tx, { ...data, bankBalance: pesos(data.bankBalance, "statement balance"), bankItems: data.bankItems.map((i) => ({ ...i, amount: pesos(i.amount, "bank-only amount") })) }, actor.id),
+    );
+    return ok({ id: r.id });
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

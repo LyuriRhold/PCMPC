@@ -3,15 +3,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import "@/modules/plugins";
 import { getDb, getPool, withTx } from "@/db/client";
 import { setClock } from "@/lib/dates";
-import { registerAssetAction, runDepreciationAction } from "@/modules/accounting/actions";
+import { createBankAccountAction, registerAssetAction, runDepreciationAction, saveReconAction } from "@/modules/accounting/actions";
+import { reconData, reconsDone } from "@/modules/accounting/bank";
 import { depreciationOf, monthlyDepreciation } from "@/modules/accounting/assets";
-import { accountSegments, assetClasses, depreciationRuns, fixedAssets, fsLineAccounts, fsLines } from "@/modules/accounting/schema";
+import { accountSegments, assetClasses, bankRecons, depreciationRuns, fixedAssets, fsLineAccounts, fsLines } from "@/modules/accounting/schema";
 import { seedFs } from "@/modules/accounting/seed";
 import { cashFlows, changesInEquity, financialCondition, operations, unmappedAccounts } from "@/modules/accounting/statements";
 import { ForbiddenError, runAs } from "@/lib/auth-guard";
 import { ensureFiscalYear } from "@/modules/ledger/periods";
 import { accounts, journalEntries, journalLines } from "@/modules/ledger/schema";
-import { accountIdFor, trialBalance } from "@/modules/ledger/service";
+import { accountIdFor, postJournal, trialBalance } from "@/modules/ledger/service";
 import { P } from "../helpers/phase03";
 import { fsPeople, on, postFixture, setupFs } from "../helpers/phase14";
 
@@ -184,5 +185,53 @@ describe("T14.3 fixed assets and depreciation", () => {
     const [done] = await getDb().select().from(fixedAssets).where(eq(fixedAssets.id, pump.data.id));
     expect(done).toMatchObject({ accumulated: P(9000), status: "FULLY_DEPRECIATED" });
     expect((await trialBalance("2027-12-31")).balanced).toBe(true);
+  });
+});
+
+describe("T14.4 bank reconciliation", () => {
+  /** Cash in Bank in December: a ₱10,000.00 deposit, check 101 for ₱3,000.00, check 102 for ₱1,500.00 (outstanding). */
+  async function bankFixture() {
+    const [bankGl, cash, fees] = [await accountIdFor("cash_in_bank"), await accountIdFor("cash_on_hand"), await accountIdFor("service_fee_income")];
+    const post = (date: string, reference: string, lines: Parameters<typeof postJournal>[1]["lines"]) => withTx((tx) => postJournal(tx, { date, book: "GJ", particulars: reference, reference, lines }, fsPeople().bookkeeper));
+    await post("2026-12-02", "DEP-1", [{ accountId: bankGl, debit: P(10000) }, { accountId: cash, credit: P(10000) }]);
+    await post("2026-12-10", "CHK-101", [{ accountId: fees, debit: P(3000) }, { accountId: bankGl, credit: P(3000) }]);
+    await post("2026-12-20", "CHK-102", [{ accountId: fees, debit: P(1500) }, { accountId: bankGl, credit: P(1500) }]);
+    const b = await runAs(fsPeople().bookkeeper, () => createBankAccountAction({ name: "LBP current", bankName: "Land Bank", accountNo: "0011-2233-44", glAccountId: bankGl }));
+    if (!b.ok) throw new Error(b.error);
+    return { bankId: b.data.id, bankGl };
+  }
+
+  it("a bank account's GL account is a cash account, once", async () => {
+    const fees = await accountIdFor("service_fee_income");
+    expect(await runAs(fsPeople().bookkeeper, () => createBankAccountAction({ name: "X", bankName: "Y", accountNo: "1", glAccountId: fees }))).toEqual({ ok: false, error: "41120 Service Fee Income isn't a cash account" });
+    const { bankGl } = await bankFixture();
+    expect(await runAs(fsPeople().bookkeeper, () => createBankAccountAction({ name: "Again", bankName: "Y", accountNo: "2", glAccountId: bankGl }))).toEqual({ ok: false, error: "11130 Cash in Bank already belongs to a bank account" });
+  });
+
+  it("bank balance + deposits in transit − outstanding checks = book balance + bank-only items; saved once", async () => {
+    const { bankId } = await bankFixture();
+    on("2027-01-05");
+    const data = await reconData(bankId, "2026-12");
+    expect(data.bookBalance).toBe(P(5500));
+    expect(data.open.map((l) => l.reference)).toEqual(["DEP-1", "CHK-101", "CHK-102"]);
+    const cleared = data.open.filter((l) => l.reference !== "CHK-102").map((l) => l.id);
+    const save = (bankBalance: string) =>
+      runAs(fsPeople().bookkeeper, () => saveReconAction({ bankAccountId: bankId, period: "2026-12", bankBalance, clearedLineIds: cleared, bankItems: [{ date: "2026-12-31", description: "Bank service charge", amount: "-50.00" }] }));
+    // Statement: 10,000 − 3,000 − 50 = 6,950. Adjusted bank 6,950 − 1,500 = 5,450 = book 5,500 − 50.
+    expect(await save("6,900.00")).toEqual({ ok: false, error: "It doesn't reconcile: the adjusted bank balance differs from the adjusted book balance by -₱50.00" });
+    expect((await save("6,950.00")).ok).toBe(true);
+    const [recon] = await getDb().select().from(bankRecons).where(eq(bankRecons.bankAccountId, bankId));
+    expect(recon).toMatchObject({ bookBalance: P(5500), bankBalance: P(6950), depositsInTransit: 0n, outstandingChecks: P(1500), adjustments: -P(50), difference: 0n });
+    expect(await save("6,950.00")).toEqual({ ok: false, error: "LBP current is already reconciled for 2026-12" });
+    // January: check 102 is still open until a statement clears it.
+    on("2027-02-03");
+    expect((await reconData(bankId, "2027-01")).open.map((l) => l.reference)).toEqual(["CHK-102"]);
+    expect(await reconsDone("2026-12")).toEqual({ ok: true, detail: "1 reconciled" });
+    expect(await reconsDone("2027-01")).toEqual({ ok: false, detail: "Not reconciled: LBP current" });
+  });
+
+  it("a month not over can't be reconciled", async () => {
+    const { bankId } = await bankFixture();
+    expect(await runAs(fsPeople().bookkeeper, () => saveReconAction({ bankAccountId: bankId, period: "2026-12", bankBalance: "0", clearedLineIds: [], bankItems: [] }))).toEqual({ ok: false, error: "2026-12 isn't over yet" });
   });
 });

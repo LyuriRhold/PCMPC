@@ -1,5 +1,6 @@
 import { and, asc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
+import { audit } from "@/lib/audit";
 import { addDays, type BusinessDate } from "@/lib/dates";
 import type { Money } from "@/lib/money";
 import { accounts, journalEntries, journalLines } from "@/modules/ledger/schema";
@@ -279,4 +280,44 @@ export async function unmappedAccounts(db: Db | Tx = getDb()) {
       return !line || line.statement !== wants || line.computed;
     });
   }
+}
+
+// ── Mapping (Financial statements › Account mapping) ──
+
+/** Puts a postable account on a statement line of the right statement (moving it if it was elsewhere). */
+export async function mapAccount(tx: Tx, input: { accountId: string; fsLineId: string }, actorId: string) {
+  const [a] = await tx.select().from(accounts).where(eq(accounts.id, input.accountId));
+  if (!a || !a.isPostable) throw new FsError("Choose a postable account");
+  const [line] = await tx.select().from(fsLines).where(eq(fsLines.id, input.fsLineId));
+  if (!line || line.computed) throw new FsError("Choose a statement line");
+  const wants = ["ASSET", "LIABILITY", "EQUITY"].includes(a.type) ? "SFC" : "SOO";
+  if (line.statement !== wants) throw new FsError(`${a.code} ${a.name} belongs on the ${wants === "SFC" ? "Statement of Financial Condition" : "Statement of Operations"}`);
+  const [before] = await tx.select().from(fsLineAccounts).where(eq(fsLineAccounts.accountId, a.id));
+  if (before) await tx.update(fsLineAccounts).set({ fsLineId: line.id }).where(eq(fsLineAccounts.id, before.id));
+  else await tx.insert(fsLineAccounts).values({ fsLineId: line.id, accountId: a.id, createdBy: actorId });
+  await audit(tx, { action: "fs.map", entity: "account", entityId: a.id, before: before ? { fsLineId: before.fsLineId } : null, after: { line: line.code }, userId: actorId });
+}
+
+/** The business segment of a revenue or expense account (GENERAL removes the assignment). */
+export async function setSegment(tx: Tx, input: { accountId: string; segmentCode: string }, actorId: string) {
+  const [a] = await tx.select().from(accounts).where(eq(accounts.id, input.accountId));
+  if (!a || (a.type !== "REVENUE" && a.type !== "EXPENSE")) throw new FsError("Only revenue and expense accounts have a segment");
+  const [seg] = await tx.select().from(segments).where(eq(segments.code, input.segmentCode));
+  if (!seg) throw new FsError("Choose a segment");
+  await tx.delete(accountSegments).where(eq(accountSegments.accountId, a.id));
+  if (seg.code !== "GENERAL") await tx.insert(accountSegments).values({ accountId: a.id, segmentCode: seg.code, createdBy: actorId });
+  await audit(tx, { action: "fs.segment", entity: "account", entityId: a.id, after: { segment: seg.code }, userId: actorId });
+}
+
+/** Every statement line with its accounts, and each revenue or expense account's segment (mapping screen). */
+export async function mappingView(db: Db | Tx = getDb()) {
+  const lines = await db.select().from(fsLines).orderBy(asc(fsLines.sortOrder));
+  const rows = await db
+    .select({ fsLineId: fsLineAccounts.fsLineId, accountId: accounts.id, code: accounts.code, name: accounts.name, type: accounts.type, segment: accountSegments.segmentCode })
+    .from(fsLineAccounts)
+    .innerJoin(accounts, eq(accounts.id, fsLineAccounts.accountId))
+    .leftJoin(accountSegments, eq(accountSegments.accountId, accounts.id))
+    .orderBy(asc(accounts.code));
+  const segs = await db.select().from(segments).orderBy(asc(segments.sortOrder));
+  return { lines: lines.map((l) => ({ line: l, accounts: rows.filter((r) => r.fsLineId === l.id) })), segments: segs };
 }

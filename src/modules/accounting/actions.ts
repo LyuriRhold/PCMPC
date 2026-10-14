@@ -11,7 +11,7 @@ import { LedgerError } from "@/modules/ledger/service";
 import { AccountingError, registerAsset, runDepreciation } from "./assets";
 import { createBankAccount, saveRecon } from "./bank";
 import { closeMonth, reopenMonth, yearEndClose } from "./close";
-import { FsError } from "./statements";
+import { FsError, mapAccount, setSegment } from "./statements";
 
 const EXPECTED = [AccountingError, FsError, LedgerError];
 
@@ -138,6 +138,34 @@ export async function yearEndCloseAction(input: z.input<typeof yearSchema>): Pro
     const data = yearSchema.parse(input);
     const r = await withTx((tx) => yearEndClose(tx, data, actor.id));
     return ok({ netSurplus: format(r.netSurplus) });
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+// ── Statement mapping (gl.coa) ──
+
+const mapSchema = z.object({ accountId: z.uuid(), fsLineId: z.uuid() });
+/** Bookkeeper: puts an account on a statement line (assets, liabilities and equity on the Financial Condition; revenues and expenses on Operations). */
+export async function mapAccountAction(input: z.input<typeof mapSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("gl.coa");
+  try {
+    const data = mapSchema.parse(input);
+    await withTx((tx) => mapAccount(tx, data, actor.id));
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const segmentSchema = z.object({ accountId: z.uuid(), segmentCode: z.string().trim().max(20) });
+/** Bookkeeper: the business segment of a revenue or expense account. */
+export async function setSegmentAction(input: z.input<typeof segmentSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("gl.coa");
+  try {
+    const data = segmentSchema.parse(input);
+    await withTx((tx) => setSegment(tx, data, actor.id));
+    return ok(null);
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

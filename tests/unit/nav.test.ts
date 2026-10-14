@@ -28,7 +28,8 @@ describe("module registry (sidebar, dashboard, coming-soon pages)", () => {
   });
 
   it("comingSoonItem resolves only planned paths", () => {
-    expect(comingSoonItem("/accounting/statements")?.phase).toBe("14");
+    expect(comingSoonItem("/year-end/surplus")?.phase).toBe("15");
+    expect(comingSoonItem("/accounting/statements")).toBeUndefined();
     expect(comingSoonItem("/store/pos")).toBeUndefined();
     expect(comingSoonItem("/store/inventory")).toBeUndefined();
     expect(comingSoonItem("/loans/servicing")).toBeUndefined();
@@ -41,7 +42,9 @@ describe("module registry (sidebar, dashboard, coming-soon pages)", () => {
 
   it("live items need their permission; coming-soon items are visible to everyone", () => {
     const none = visibleHrefs(new Set());
-    expect(none).toContain("/accounting/statements");
+    expect(none).toContain("/year-end/surplus");
+    expect(none).not.toContain("/accounting/statements");
+    expect(visibleHrefs(new Set(["gl.read"]))).toEqual(expect.arrayContaining(["/accounting/statements", "/accounting/close", "/accounting/fixed-assets", "/accounting/bank"]));
     expect(none).not.toContain("/store/pos");
     expect(visibleHrefs(new Set(["store.pos"]))).toContain("/store/pos");
     expect(none).not.toContain("/store/inventory");

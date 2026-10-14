@@ -337,18 +337,21 @@ export async function trialBalance(asOf: BusinessDate, db: Db | Tx = getDb()) {
     .where(and(posted, lte(journalEntries.entryDate, asOf)))
     .groupBy(accounts.id)
     .orderBy(asc(accounts.code));
-  const out: TbRow[] = rows.map((r) => {
-    const net = BigInt(r.dr) - BigInt(r.cr);
-    return {
-      accountId: r.accountId,
-      code: r.code,
-      name: r.name,
-      type: r.type,
-      provisional: r.provisional,
-      debit: net > 0n ? net : 0n,
-      credit: net < 0n ? -net : 0n,
-    };
-  });
+  const out: TbRow[] = rows
+    .map((r) => {
+      const net = BigInt(r.dr) - BigInt(r.cr);
+      return {
+        accountId: r.accountId,
+        code: r.code,
+        name: r.name,
+        type: r.type,
+        provisional: r.provisional,
+        debit: net > 0n ? net : 0n,
+        credit: net < 0n ? -net : 0n,
+      };
+    })
+    // A trial balance lists the accounts with a balance (e.g. revenues and expenses are gone after the year-end close).
+    .filter((r) => r.debit !== 0n || r.credit !== 0n);
   const totalDebit = out.reduce((s, r) => s + r.debit, 0n);
   const totalCredit = out.reduce((s, r) => s + r.credit, 0n);
   return { asOf, rows: out, totalDebit, totalCredit, balanced: totalDebit === totalCredit };

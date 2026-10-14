@@ -1,9 +1,11 @@
 import { eq } from "drizzle-orm";
+import ExcelJS from "exceljs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import "@/modules/plugins";
 import { getDb, getPool, withTx } from "@/db/client";
 import { setClock } from "@/lib/dates";
-import { closeMonthAction, createBankAccountAction, registerAssetAction, reopenMonthAction, runDepreciationAction, saveReconAction, yearEndCloseAction } from "@/modules/accounting/actions";
+import { closeMonthAction, createBankAccountAction, mapAccountAction, registerAssetAction, reopenMonthAction, runDepreciationAction, saveReconAction, setSegmentAction, yearEndCloseAction } from "@/modules/accounting/actions";
+import { fsWorkbook } from "@/modules/accounting/export";
 import { monthChecklist, yearPeriods } from "@/modules/accounting/close";
 import { reconData, reconsDone } from "@/modules/accounting/bank";
 import { depreciationOf, monthlyDepreciation, registerAsset } from "@/modules/accounting/assets";
@@ -14,7 +16,7 @@ import { depositAccounts, depositProducts } from "@/modules/savings/schema";
 import { posShifts } from "@/modules/store/schema";
 import { waterBillingPeriods, waterZones } from "@/modules/water/schema";
 import { seedFs } from "@/modules/accounting/seed";
-import { cashFlows, changesInEquity, financialCondition, operations, unmappedAccounts } from "@/modules/accounting/statements";
+import { cashFlows, changesInEquity, financialCondition, mappingView, operations, unmappedAccounts } from "@/modules/accounting/statements";
 import { ForbiddenError, runAs } from "@/lib/auth-guard";
 import { ensureFiscalYear } from "@/modules/ledger/periods";
 import { accounts, journalEntries, journalLines } from "@/modules/ledger/schema";
@@ -300,5 +302,42 @@ describe("T14.5 the month-close checklist, lock and reopen, the year-end close",
     // 2027 is open and starts from the closing balance sheet.
     expect((await yearPeriods(2027))?.months).toHaveLength(12);
     expect((await financialCondition("2027-01-31")).totals.assets).toBe(P(170400));
+  });
+});
+
+describe("T14.6 mapping from the screen and the exports", () => {
+  it("the bookkeeper maps an account to a line of the right statement and sets a revenue or expense account's segment", async () => {
+    const [parent] = await getDb().select().from(accounts).where(eq(accounts.code, "53000"));
+    const [acct] = await getDb().insert(accounts).values({ code: "53160", name: "Office Supplies", type: "EXPENSE", normalBalance: "DR", parentId: parent!.id, isPostable: true }).returning();
+    const lines = await getDb().select().from(fsLines);
+    const byCode = (c: string) => lines.find((l) => l.code === c)!.id;
+    const { bookkeeper, teller } = fsPeople();
+    await expect(runAs(teller, () => mapAccountAction({ accountId: acct!.id, fsLineId: byCode("OPERATING_EXPENSES") }))).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await runAs(bookkeeper, () => mapAccountAction({ accountId: acct!.id, fsLineId: byCode("CASH") }))).toEqual({ ok: false, error: "53160 Office Supplies belongs on the Statement of Operations" });
+    expect(await runAs(bookkeeper, () => mapAccountAction({ accountId: acct!.id, fsLineId: byCode("NET_SURPLUS") }))).toEqual({ ok: false, error: "Choose a statement line" });
+    expect((await runAs(bookkeeper, () => mapAccountAction({ accountId: acct!.id, fsLineId: byCode("COST_OF_SALES") }))).ok).toBe(true);
+    expect((await runAs(bookkeeper, () => mapAccountAction({ accountId: acct!.id, fsLineId: byCode("OPERATING_EXPENSES") }))).ok).toBe(true);
+    expect(await unmappedAccounts()).toEqual([]);
+    expect((await runAs(bookkeeper, () => setSegmentAction({ accountId: acct!.id, segmentCode: "CONSUMER" }))).ok).toBe(true);
+    const view = await mappingView();
+    const ops = view.lines.find((l) => l.line.code === "OPERATING_EXPENSES")!;
+    expect(ops.accounts.find((a) => a.code === "53160")).toMatchObject({ segment: "CONSUMER" });
+    expect((await runAs(bookkeeper, () => setSegmentAction({ accountId: acct!.id, segmentCode: "GENERAL" }))).ok).toBe(true);
+    expect((await mappingView()).lines.find((l) => l.line.code === "OPERATING_EXPENSES")!.accounts.find((a) => a.code === "53160")?.segment).toBeNull();
+    const cash = await accountIdFor("cash_on_hand");
+    expect(await runAs(bookkeeper, () => setSegmentAction({ accountId: cash, segmentCode: "CREDIT" }))).toEqual({ ok: false, error: "Only revenue and expense accounts have a segment" });
+  });
+
+  it("the workbook has a sheet per statement", async () => {
+    await postFixture();
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await fsWorkbook({ from: "2026-01-01", to: "2026-12-31" }, "PCMPC")) as unknown as ArrayBuffer);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["Financial Condition", "Operations", "Changes in Equity", "Cash Flows"]);
+    const last = (name: string) => {
+      const ws = wb.getWorksheet(name)!;
+      return ws.getRow(ws.rowCount).values as unknown[];
+    };
+    expect(last("Cash Flows").slice(1, 3)).toEqual(["Cash at the end", 82400]);
+    expect(last("Changes in Equity").slice(1, 3)).toEqual(["Total equity", 0]);
   });
 });

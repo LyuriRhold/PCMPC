@@ -193,7 +193,7 @@
 - [x] T14.3 Fixed assets + depreciation run
 - [x] T14.4 Bank reconciliation
 - [x] T14.5 Month close checklist + lock/reopen; year-end close + new FY opening
-- [ ] T14.6 UI + Excel (exceljs) and PDF exports
+- [x] T14.6 UI + Excel (exceljs) and PDF exports
 - [x] Acceptance tests written first (tests/acceptance/phase-14.test.ts)
 - [ ] Exit checks passed
 

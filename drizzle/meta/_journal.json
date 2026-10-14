@@ -246,6 +246,27 @@
       "when": 1791859153034,
       "tag": "0034_store_review",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791881546775,
+      "tag": "0035_pos",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791881573843,
+      "tag": "0036_pos_immutable",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791936866920,
+      "tag": "0037_sale_return_split",
+      "breakpoints": true
     }
   ]
 }

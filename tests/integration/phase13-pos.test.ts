@@ -1,0 +1,463 @@
+import { eq } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import "@/modules/plugins";
+import { getDb, getPool } from "@/db/client";
+import { ForbiddenError, runAs } from "@/lib/auth-guard";
+import { setClock } from "@/lib/dates";
+import { auditLog } from "@/modules/audit/schema";
+import { users } from "@/modules/auth/schema";
+import { cancelReceiptAction, issueReceiptAction } from "@/modules/cashiering/actions";
+import { duesFor } from "@/modules/cashiering/registry";
+import { changeMemberStatusAction } from "@/modules/members/actions";
+import { journalEntries, journalLines } from "@/modules/ledger/schema";
+import { accountIdFor, subsidiaryLedger, trialBalance } from "@/modules/ledger/service";
+import { createCategoryAction, updateProductAction } from "@/modules/store/actions";
+import { closeShiftAction, findMembersAction, findProductAction, openShiftAction, returnSaleAction, setChargeLimitAction, setChargeLimitByNoAction, verifyShiftAction, voidSaleAction } from "@/modules/store/pos-actions";
+import { chargeAvailable, getSale, memberCharges, shiftReading } from "@/modules/store/pos";
+import { salesReport, slowMovers, topItems } from "@/modules/store/sales-reports";
+import { posShifts, sales, stockMoves } from "@/modules/store/schema";
+import { stockBalance } from "@/modules/store/service";
+import { makeUser } from "../helpers/phase01";
+import { P } from "../helpers/phase03";
+import { openSessionAs } from "../helpers/phase04";
+import { product, receive } from "../helpers/phase12";
+import { member, openShift, posFixture, sell, setupPos, storePeople, supervisor } from "../helpers/phase13";
+
+beforeEach(async () => {
+  await setupPos();
+});
+afterEach(() => setClock(null));
+
+describe("T13.1 schema and data rules", () => {
+  it("one open shift per cashier; a shift keeps its cashier, date and opening fund and closes once", async () => {
+    const { clerk, manager } = storePeople();
+    const [s] = await getDb().insert(posShifts).values({ cashierId: clerk, businessDate: "2026-10-07", openingFund: P(1000) }).returning();
+    await expect(getDb().insert(posShifts).values({ cashierId: clerk, businessDate: "2026-10-07", openingFund: P(500) })).rejects.toThrow();
+    const pool = getPool();
+    await expect(pool.query("UPDATE pos_shifts SET opening_fund = 1 WHERE id = $1", [s!.id])).rejects.toThrow(/only the closing and verification are recorded/);
+    await expect(pool.query("UPDATE pos_shifts SET status = 'VERIFIED' WHERE id = $1", [s!.id])).rejects.toThrow(/closed first/);
+    await expect(pool.query("DELETE FROM pos_shifts WHERE id = $1", [s!.id])).rejects.toThrow(/can't be deleted/);
+    await pool.query("UPDATE pos_shifts SET status = 'CLOSED', counted_cash = 100000, expected_cash = 100000, variance = 0 WHERE id = $1", [s!.id]);
+    await expect(pool.query("UPDATE pos_shifts SET counted_cash = 5 WHERE id = $1", [s!.id])).rejects.toThrow(/CLOSED POS shift can't change/);
+    await expect(pool.query("UPDATE pos_shifts SET status = 'VERIFIED', verified_by = cashier_id WHERE id = $1", [s!.id])).rejects.toThrow(/pos_shifts_sod_chk/);
+    await pool.query("UPDATE pos_shifts SET status = 'VERIFIED', verified_by = $2 WHERE id = $1", [s!.id, manager]);
+    // A new shift can open once the other is closed.
+    await getDb().insert(posShifts).values({ cashierId: clerk, businessDate: "2026-10-08", openingFund: P(500) });
+  });
+});
+
+describe("T13.2 sales", () => {
+  it("a sale needs the cashier's open shift for today; one shift at a time", async () => {
+    const { p1 } = posFixture();
+    expect(await sell({ lines: [[p1, 1]], tendered: "70.00" })).toEqual({ ok: false, error: "Open your shift first" });
+    await expect(runAs(storePeople().manager, () => openShiftAction({ openingFund: "500.00" }))).rejects.toBeInstanceOf(ForbiddenError);
+    await openShift("1,000.00");
+    expect(await runAs(storePeople().clerk, () => openShiftAction({ openingFund: "500.00" }))).toEqual({ ok: false, error: "Your shift is already open" });
+    setClock(() => new Date("2026-10-08T01:00:00Z"));
+    expect(await sell({ lines: [[p1, 1]], tendered: "70.00" })).toEqual({ ok: false, error: "Close your shift from an earlier day first" });
+  });
+
+  it("prices come from the item master; cash covers the total; stock never goes below zero; nothing is posted on an error", async () => {
+    const { p1 } = posFixture();
+    await openShift();
+    expect(await sell({ lines: [[p1, 2]], tendered: "100.00" })).toEqual({ ok: false, error: "The amount tendered (₱100.00) is less than the total (₱140.00)" });
+    expect(await sell({ lines: [[p1, 2]], tendered: null })).toEqual({ ok: false, error: "Enter the amount tendered" });
+    expect(await sell({ lines: [[p1, 16]], tendered: "2,000.00" })).toEqual({ ok: false, error: "P1 Sardines 155 g: Insufficient stock (15)" });
+    expect(await sell({ lines: [[p1, 0]], tendered: "1.00" })).toMatchObject({ ok: false, error: expect.stringMatching(/whole number from 1 to 100,000/) });
+    expect(await getDb().select().from(sales)).toHaveLength(0);
+    // The same product on two lines is fine; the second line takes the stock left by the first.
+    const r = await sell({ lines: [[p1, 10], [p1, 5]], tendered: "1,050.00" });
+    if (!r.ok) throw new Error(r.error);
+    expect(r.data).toMatchObject({ saleNo: "S-2026-000001", total: "₱1,050.00", change: "₱0.00" });
+    const sale = (await getSale(r.data.id))!;
+    expect(sale.lines.map((l) => [l.qty, l.unitPrice, l.lineTotal, l.unitCost, l.cogs])).toEqual([
+      [10, P(70), P(700), "55.0000", P(550)],
+      [5, P(70), P(350), "55.0000", P(275)],
+    ]);
+    expect(await stockBalance(p1)).toEqual({ qty: 0, avgCost: "55.0000", value: 0n });
+    const [je] = await getDb().select().from(journalEntries).where(eq(journalEntries.id, r.data.jeId));
+    expect(je).toMatchObject({ book: "SJ", sourceModule: "store" });
+    // An inactive product is no longer sold.
+    await runAs(storePeople().manager, () => updateProductAction({ id: p1, sku: "P1", barcode: null, name: "Sardines 155 g", unit: "pc", categoryId: null, reorderLevel: 5, vatClass: "VAT_EXEMPT", isActive: false }));
+    expect(await sell({ lines: [[p1, 1]], tendered: "70.00" })).toEqual({ ok: false, error: "P1 Sardines 155 g is no longer sold" });
+  });
+
+  it("a member's cash sale counts for the member; a charge goes to their AR (member-tagged) within the limit", async () => {
+    const { p1 } = posFixture();
+    await openShift();
+    const m = await member();
+    const cash = await sell({ lines: [[p1, 1]], memberId: m.id, tendered: "100.00" });
+    if (!cash.ok) throw new Error(cash.error);
+    expect((await getSale(cash.data.id))!.sale).toMatchObject({ customerType: "MEMBER", memberId: m.id, payment: "CASH", change: P(30) });
+    const charge = await sell({ lines: [[p1, 2]], payment: "CHARGE", memberId: m.id });
+    if (!charge.ok) throw new Error(charge.error);
+    const ar = await accountIdFor("accounts_receivable_members");
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, charge.data.jeId));
+    expect(lines.filter((l) => l.accountId === ar).map((l) => [l.debit, l.memberId])).toEqual([[P(140), m.id]]);
+    expect((await subsidiaryLedger("accounts_receivable_members", m.id, "2026-01-01", "2026-12-31")).closing).toBe(P(140));
+    // A member who isn't ACTIVE can't buy as a member.
+    await runAs(storePeople().manager, () => changeMemberStatusAction({ memberId: m.id, to: "INACTIVE", reason: "No activity" }));
+    expect(await sell({ lines: [[p1, 1]], payment: "CHARGE", memberId: m.id })).toMatchObject({ ok: false, error: expect.stringMatching(/is not an ACTIVE member/) });
+    expect((await trialBalance("2026-12-31")).balanced).toBe(true);
+  });
+
+  it("voids need a supervisor (store.supervise) other than the cashier; a wrong password counts toward the lockout", async () => {
+    const { p1 } = posFixture();
+    const { clerk } = storePeople();
+    await openShift();
+    const lines = [{ productId: p1, qty: 3 }];
+    expect(await runAs(clerk, () => voidSaleAction({ memberId: null, lines, reason: "x", supervisor: null }))).toEqual({ ok: false, error: "A supervisor's username and password are needed to void a sale" });
+    expect(await runAs(clerk, () => voidSaleAction({ memberId: null, lines, reason: "x", supervisor: { username: "clerk1", password: "Correct-Horse-2026" } }))).toEqual({
+      ok: false,
+      error: "clerk1 can't approve this (store.supervise is required)",
+    });
+    expect(await runAs(clerk, () => voidSaleAction({ memberId: null, lines, reason: "x", supervisor: { username: "mgr1", password: "nope" } }))).toEqual({ ok: false, error: "Invalid supervisor username or password" });
+    const [mgr] = await getDb().select().from(users).where(eq(users.username, "mgr1"));
+    expect(mgr?.failedAttempts).toBe(1);
+    expect(await runAs(clerk, () => voidSaleAction({ memberId: null, lines, reason: " ", supervisor: supervisor() }))).toEqual({ ok: false, error: "Enter why the sale is voided" });
+    const v = await runAs(clerk, () => voidSaleAction({ memberId: null, lines, reason: "Customer left", supervisor: supervisor() }));
+    if (!v.ok) throw new Error(v.error);
+    const sale = (await getSale(v.data.id))!;
+    expect(sale.sale).toMatchObject({ saleNo: "S-2026-000001", status: "VOIDED", total: P(210), jeId: null, voidReason: "Customer left" });
+    expect(sale.lines.map((l) => [l.qty, l.cogs])).toEqual([[3, 0n]]);
+    expect(await getDb().select().from(stockMoves).where(eq(stockMoves.refId, v.data.id))).toHaveLength(0);
+    // The next sale keeps the series gapless.
+    const next = await sell({ lines: [[p1, 1]], tendered: "70.00" });
+    expect(next).toMatchObject({ ok: true, data: { saleNo: "S-2026-000002" } });
+    await expect(getPool().query("UPDATE sales SET total = 1 WHERE id = $1", [v.data.id])).rejects.toThrow(/immutable/);
+  });
+
+  it("the scanner finds a product by barcode or SKU; members are found by no. or name", async () => {
+    const clerk = storePeople().clerk;
+    const p2 = await product({ sku: "p-milk", name: "Milk 1 L" });
+    await runAs(storePeople().manager, () => updateProductAction({ id: p2, sku: "P-MILK", barcode: "4800361400111", name: "Milk 1 L", unit: "box", categoryId: null, reorderLevel: 0, vatClass: "VAT_EXEMPT", isActive: true }));
+    await receive(posFixture().s1, [[p2, 4, "80.00"]]);
+    expect(await runAs(clerk, () => findProductAction({ code: "4800361400111" }))).toEqual({ ok: true, data: { id: p2, sku: "P-MILK", name: "Milk 1 L", unit: "box", price: "7000", onHand: 4 } });
+    expect(await runAs(clerk, () => findProductAction({ code: "p-milk" }))).toMatchObject({ ok: true, data: { id: p2 } });
+    expect(await runAs(clerk, () => findProductAction({ code: "000" }))).toEqual({ ok: false, error: 'No product with barcode or SKU "000"' });
+    const m = await member("Dela Cruz");
+    expect(await runAs(clerk, () => findMembersAction({ q: m.memberNo }))).toMatchObject({ ok: true, data: [{ id: m.id, memberNo: m.memberNo }] });
+    expect(await runAs(clerk, () => findMembersAction({ q: "dela cruz" }))).toMatchObject({ ok: true, data: [{ id: m.id }] });
+  });
+});
+
+describe("T13.3 returns", () => {
+  const giveBack = (saleId: string, lines: Array<{ saleLineId: string; qty: number }>, refundMode: "CASH" | "AR" = "CASH") =>
+    runAs(storePeople().clerk, () => returnSaleAction({ saleId, lines, refundMode, reason: "Returned" }));
+
+  it("not more than was sold less earlier returns; the last units take what is left of the line's COGS", async () => {
+    const { s1 } = posFixture();
+    const p2 = await product({ sku: "P2", name: "Corned beef", price: "12.00" });
+    await receive(s1, [[p2, 3, "10.00"]]);
+    await receive(s1, [[p2, 4, "10.01"]]);
+    await openShift();
+    const s = await sell({ lines: [[p2, 7]], tendered: "84.00" });
+    if (!s.ok) throw new Error(s.error);
+    const line = (await getSale(s.data.id))!.lines[0]!;
+    expect([line.unitCost, line.cogs]).toEqual(["10.0057", P(70, 4)]);
+    expect(await giveBack(s.data.id, [{ saleLineId: line.id, qty: 8 }])).toEqual({ ok: false, error: "P2 Corned beef: only 7 of 7 can still be returned" });
+    const first = await giveBack(s.data.id, [{ saleLineId: line.id, qty: 3 }]);
+    if (!first.ok) throw new Error(first.error);
+    expect(first.data.returnNo).toBe("SR-2026-000001");
+    expect(await giveBack(s.data.id, [{ saleLineId: line.id, qty: 5 }])).toEqual({ ok: false, error: "P2 Corned beef: only 4 of 7 can still be returned" });
+    const rest = await giveBack(s.data.id, [{ saleLineId: line.id, qty: 4 }]);
+    if (!rest.ok) throw new Error(rest.error);
+    const after = (await getSale(s.data.id))!;
+    // 3 × 10.0057 = ₱30.02; the last 4 take the rest of ₱70.04: ₱40.02. Nothing drifts.
+    expect(after.returns.map((r) => [r.total, r.cost])).toEqual([
+      [P(36), P(30, 2)],
+      [P(48), P(40, 2)],
+    ]);
+    expect(await stockBalance(p2)).toMatchObject({ qty: 7, value: P(70, 4) });
+    expect((await trialBalance("2026-12-31")).balanced).toBe(true);
+  });
+
+  it("a charge sale can be credited back to the member's account; a cash sale can't", async () => {
+    const { p1 } = posFixture();
+    const m = await member();
+    await openShift();
+    const cash = await sell({ lines: [[p1, 1]], tendered: "70.00" });
+    const charge = await sell({ lines: [[p1, 3]], payment: "CHARGE", memberId: m.id });
+    if (!cash.ok || !charge.ok) throw new Error("sales failed");
+    const cashLine = (await getSale(cash.data.id))!.lines[0]!;
+    const chargeLine = (await getSale(charge.data.id))!.lines[0]!;
+    expect(await giveBack(cash.data.id, [{ saleLineId: cashLine.id, qty: 1 }], "AR")).toEqual({ ok: false, error: "Only a charge sale is refunded to the member's account" });
+    expect(await giveBack(cash.data.id, [{ saleLineId: chargeLine.id, qty: 1 }])).toEqual({ ok: false, error: expect.stringMatching(/isn't on S-2026-000001/) });
+    const r = await giveBack(charge.data.id, [{ saleLineId: chargeLine.id, qty: 2 }], "AR");
+    if (!r.ok) throw new Error(r.error);
+    const ar = await accountIdFor("accounts_receivable_members");
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, r.data.jeId));
+    expect(lines.filter((l) => l.accountId === ar).map((l) => [l.credit, l.memberId])).toEqual([[P(140), m.id]]);
+    expect((await subsidiaryLedger("accounts_receivable_members", m.id, "2026-01-01", "2026-12-31")).closing).toBe(P(70));
+    expect((await giveBack(charge.data.id, [{ saleLineId: chargeLine.id, qty: 1 }], "AR")).ok).toBe(true);
+    expect((await subsidiaryLedger("accounts_receivable_members", m.id, "2026-01-01", "2026-12-31")).closing).toBe(0n);
+  });
+
+  it("a voided sale has nothing to return", async () => {
+    const { p1 } = posFixture();
+    await openShift();
+    const v = await runAs(storePeople().clerk, () => voidSaleAction({ memberId: null, lines: [{ productId: p1, qty: 1 }], reason: "Customer left", supervisor: supervisor() }));
+    if (!v.ok) throw new Error(v.error);
+    const line = (await getSale(v.data.id))!.lines[0]!;
+    expect(await giveBack(v.data.id, [{ saleLineId: line.id, qty: 1 }])).toEqual({ ok: false, error: "S-2026-000001 was voided; nothing to return" });
+  });
+});
+
+describe("T13.4 shifts, Z-reading and the cash count", () => {
+  it("the Z-reading: cash and charge sales, voids, cash and account refunds; the drawer should hold the opening fund + cash sales − cash refunds", async () => {
+    const { p1 } = posFixture();
+    const { clerk } = storePeople();
+    const m = await member();
+    const shiftId = await openShift("500.00");
+    const cash = await sell({ lines: [[p1, 4]], tendered: "300.00" });
+    const charge = await sell({ lines: [[p1, 2]], payment: "CHARGE", memberId: m.id });
+    if (!cash.ok || !charge.ok) throw new Error("sales failed");
+    await runAs(clerk, () => voidSaleAction({ memberId: null, lines: [{ productId: p1, qty: 1 }], reason: "Customer left", supervisor: supervisor() }));
+    const cashLine = (await getSale(cash.data.id))!.lines[0]!;
+    const chargeLine = (await getSale(charge.data.id))!.lines[0]!;
+    await runAs(clerk, () => returnSaleAction({ saleId: cash.data.id, lines: [{ saleLineId: cashLine.id, qty: 1 }], refundMode: "CASH", reason: "Dented" }));
+    await runAs(clerk, () => returnSaleAction({ saleId: charge.data.id, lines: [{ saleLineId: chargeLine.id, qty: 1 }], refundMode: "AR", reason: "Dented" }));
+    const z = await shiftReading(shiftId);
+    expect(z).toMatchObject({
+      salesCount: 2,
+      voidsCount: 1,
+      returnsCount: 2,
+      grossSales: P(420),
+      cashSales: P(280),
+      chargeSales: P(140),
+      returns: P(140),
+      cashRefunds: P(70),
+      arRefunds: P(70),
+      netSales: P(280),
+      netCashSales: P(210),
+      expectedCash: P(710),
+    });
+  });
+
+  it("the cashier closes with the count; the manager (not the cashier) verifies and a variance goes to Cash Short/Over", async () => {
+    const { p1 } = posFixture();
+    const { clerk, manager } = storePeople();
+    const shiftId = await openShift("1,000.00");
+    const s = await sell({ lines: [[p1, 5]], tendered: "500.00" });
+    if (!s.ok) throw new Error(s.error);
+    const otherClerk = (await makeUser("STORE_CLERK", "clerk2")).id;
+    expect(await runAs(otherClerk, () => closeShiftAction({ shiftId, countedCash: "1,350.00" }))).toEqual({ ok: false, error: "Only the cashier who opened the shift can close it" });
+    expect(await runAs(manager, () => verifyShiftAction({ shiftId }))).toEqual({ ok: false, error: "The cashier closes the shift first" });
+    // ₱1,350.00 expected; ₱1,340.00 counted: ₱10.00 short.
+    expect(await runAs(clerk, () => closeShiftAction({ shiftId, countedCash: "1,340.00" }))).toEqual({ ok: true, data: { expectedCash: "₱1,350.00", variance: "-₱10.00" } });
+    const [closed] = await getDb().select().from(posShifts).where(eq(posShifts.id, shiftId));
+    expect(closed).toMatchObject({ status: "CLOSED", expectedCash: P(1350), countedCash: P(1340), variance: -P(10) });
+    expect(closed?.zReading).toMatchObject({ salesCount: 1, grossSales: "35000", netCashSales: "35000", expectedCash: "135000", variance: "-1000" });
+    expect(await sell({ lines: [[p1, 1]], tendered: "70.00" })).toEqual({ ok: false, error: "Open your shift first" });
+    expect(await runAs(clerk, () => closeShiftAction({ shiftId, countedCash: "1,340.00" }))).toEqual({ ok: false, error: "This shift is already CLOSED" });
+    await expect(runAs(clerk, () => verifyShiftAction({ shiftId }))).rejects.toBeInstanceOf(ForbiddenError);
+    const v = await runAs(manager, () => verifyShiftAction({ shiftId }));
+    if (!v.ok) throw new Error(v.error);
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, v.data.varianceJeId!));
+    const [shortOver, cash] = [await accountIdFor("cash_short_over"), await accountIdFor("cash_on_hand")];
+    expect(lines.map((l) => [l.accountId, l.debit, l.credit])).toEqual([
+      [shortOver, P(10), 0n],
+      [cash, 0n, P(10)],
+    ]);
+    expect(await runAs(manager, () => verifyShiftAction({ shiftId }))).toEqual({ ok: false, error: "This shift is already verified" });
+    // A cash refund needs the cashier's open drawer.
+    const line = (await getSale(s.data.id))!.lines[0]!;
+    expect(await runAs(clerk, () => returnSaleAction({ saleId: s.data.id, lines: [{ saleLineId: line.id, qty: 1 }], refundMode: "CASH", reason: "x" }))).toEqual({ ok: false, error: "Open your shift first" });
+    // The next shift opens; a count that agrees posts nothing.
+    const next = await openShift("1,000.00");
+    expect(await runAs(clerk, () => closeShiftAction({ shiftId: next, countedCash: "1,000.00" }))).toEqual({ ok: true, data: { expectedCash: "₱1,000.00", variance: "₱0.00" } });
+    expect(await runAs(manager, () => verifyShiftAction({ shiftId: next }))).toEqual({ ok: true, data: { varianceJeId: null } });
+    expect((await trialBalance("2026-12-31")).balanced).toBe(true);
+  });
+});
+
+describe("T13.5 member charge accounts and STORE_AR_PAYMENT", () => {
+  const pay = (memberId: string, amount: string, items?: Array<{ refId: string; amount: string }>) =>
+    runAs(storePeople().teller, () =>
+      issueReceiptAction({
+        payor: { type: "MEMBER", id: memberId, name: "" },
+        mode: "CASH",
+        checkNo: null,
+        birReceiptNo: `BIR-${Math.random().toString(36).slice(2, 8)}`,
+        items: (items ?? [{ refId: memberId, amount }]).map((i) => ({ type: "STORE_AR_PAYMENT", refId: i.refId, amount: i.amount, description: null })),
+      }),
+    );
+  const ar = async (memberId: string) => (await subsidiaryLedger("accounts_receivable_members", memberId, "2026-01-01", "2026-12-31")).closing;
+
+  it("the manager sets a member's own credit limit; the list shows what each member owes and can still charge", async () => {
+    const { p1 } = posFixture();
+    const m = await member();
+    await openShift();
+    await expect(runAs(storePeople().clerk, () => setChargeLimitAction({ memberId: m.id, limit: "2,000.00" }))).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await chargeAvailable(m.id)).toMatchObject({ limit: P(1000), own: false, balance: 0n, available: P(1000) });
+    expect((await runAs(storePeople().manager, () => setChargeLimitAction({ memberId: m.id, limit: "1,500.00" }))).ok).toBe(true);
+    // ₱1,050.00 (15 × P1) fits ₱1,500.00, not the default ₱1,000.00.
+    expect((await sell({ lines: [[p1, 15]], payment: "CHARGE", memberId: m.id })).ok).toBe(true);
+    expect(await memberCharges()).toEqual([expect.objectContaining({ balance: P(1050), limit: P(1500), own: true, available: P(450) })]);
+    expect((await runAs(storePeople().manager, () => setChargeLimitAction({ memberId: m.id, limit: "500.00" }))).ok).toBe(true);
+    expect(await chargeAvailable(m.id)).toMatchObject({ limit: P(500), balance: P(1050), available: 0n });
+  });
+
+  it("STORE_AR_PAYMENT: owed shown as due; not more than owed; one per member per receipt; cancelling the receipt puts the charge back", async () => {
+    const { p1 } = posFixture();
+    const m = await member();
+    const other = await member("Other");
+    await openShift();
+    expect((await sell({ lines: [[p1, 5]], payment: "CHARGE", memberId: m.id })).ok).toBe(true);
+    await openSessionAs(storePeople().teller);
+    expect(await duesFor(getDb(), { type: "MEMBER", id: m.id, name: "" })).toEqual(expect.arrayContaining([expect.objectContaining({ type: "STORE_AR_PAYMENT", amount: P(350), payable: true })]));
+    expect(await pay(m.id, "350.01")).toEqual({ ok: false, error: "The member owes the store ₱350.00" });
+    expect(await pay(m.id, "", [{ refId: other.id, amount: "10.00" }])).toEqual({ ok: false, error: "That is another member's store account" });
+    expect(await pay(m.id, "", [{ refId: m.id, amount: "100.00" }, { refId: m.id, amount: "100.00" }])).toEqual({ ok: false, error: "Put one store charges payment per member on a receipt" });
+    const r = await pay(m.id, "200.00");
+    if (!r.ok) throw new Error(r.error);
+    expect(await ar(m.id)).toBe(P(150));
+    // A return on the charge sale is credited to the account up to what is owed (₱150.00); the rest (₱60.00) is cash.
+    const sale = (await getDb().select().from(sales).where(eq(sales.memberId, m.id)))[0]!;
+    const line = (await getSale(sale.id))!.lines[0]!;
+    const back = await runAs(storePeople().clerk, () => returnSaleAction({ saleId: sale.id, lines: [{ saleLineId: line.id, qty: 3 }], refundMode: "AR", reason: "x" }));
+    if (!back.ok) throw new Error(back.error);
+    const [arAcct, cashAcct] = [await accountIdFor("accounts_receivable_members"), await accountIdFor("cash_on_hand")];
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, back.data.jeId));
+    expect(lines.filter((l) => l.accountId === arAcct || l.accountId === cashAcct).map((l) => [l.accountId, l.credit])).toEqual([
+      [arAcct, P(150)],
+      [cashAcct, P(60)],
+    ]);
+    expect((await getSale(sale.id))!.returns[0]).toMatchObject({ refundMode: "AR", total: P(210), arCredit: P(150), cashRefund: P(60) });
+    expect(await ar(m.id)).toBe(0n);
+    expect((await runAs(storePeople().manager, () => cancelReceiptAction({ receiptId: r.data.id, reason: "Wrong member" }))).ok).toBe(true);
+    expect(await ar(m.id)).toBe(P(200));
+    expect((await trialBalance("2026-12-31")).balanced).toBe(true);
+  });
+});
+
+describe("T13.7 store reports", () => {
+  it("sales and gross margin by day, category and product; top items; slow movers", async () => {
+    const { p1, s1 } = posFixture();
+    const { clerk, manager } = storePeople();
+    const canned = await runAs(manager, () => createCategoryAction({ name: "Canned goods" }));
+    const grains = await runAs(manager, () => createCategoryAction({ name: "Grains" }));
+    if (!canned.ok || !grains.ok) throw new Error("categories");
+    await runAs(manager, () => updateProductAction({ id: p1, sku: "P1", barcode: null, name: "Sardines 155 g", unit: "pc", categoryId: canned.data.id, reorderLevel: 5, vatClass: "VAT_EXEMPT", isActive: true }));
+    const p2 = await product({ sku: "P2", name: "Rice 5 kg", price: "450.00" });
+    await runAs(manager, () => updateProductAction({ id: p2, sku: "P2", barcode: null, name: "Rice 5 kg", unit: "sack", categoryId: grains.data.id, reorderLevel: 0, vatClass: "VAT_EXEMPT", isActive: true }));
+    const p3 = await product({ sku: "P3", name: "Vinegar" });
+    await receive(s1, [[p2, 2, "400.00"]]);
+    await receive(s1, [[p3, 5, "20.00"]]);
+
+    // Oct 7: 5 × P1 (₱350.00, cost ₱275.00) and 1 × P2 (₱450.00, cost ₱400.00).
+    const day1 = await openShift();
+    const first = await sell({ lines: [[p1, 5], [p2, 1]], tendered: "800.00" });
+    if (!first.ok) throw new Error(first.error);
+    await runAs(clerk, () => closeShiftAction({ shiftId: day1, countedCash: "1,800.00" }));
+    // Oct 8: 2 × P1 (₱140.00, cost ₱110.00) and 1 × P1 of the Oct 7 sale returned (₱70.00, cost ₱55.00).
+    setClock(() => new Date("2026-10-08T01:00:00Z"));
+    await openShift();
+    expect((await sell({ lines: [[p1, 2]], tendered: "140.00" })).ok).toBe(true);
+    const line = (await getSale(first.data.id))!.lines.find((l) => l.productId === p1)!;
+    expect((await runAs(clerk, () => returnSaleAction({ saleId: first.data.id, lines: [{ saleLineId: line.id, qty: 1 }], refundMode: "CASH", reason: "Dented" }))).ok).toBe(true);
+
+    const r = await salesReport("2026-10-07", "2026-10-08");
+    expect(r.salesCount).toBe(2);
+    expect(r.total).toEqual({ qty: 7, sales: P(940), returns: P(70), net: P(870), cogs: P(730), margin: P(140), marginPct: "16.09" });
+    expect(r.byDay.map((d) => [d.day, d.qty, d.net, d.cogs, d.margin, d.marginPct])).toEqual([
+      ["2026-10-07", 6, P(800), P(675), P(125), "15.63"],
+      ["2026-10-08", 1, P(70), P(55), P(15), "21.43"],
+    ]);
+    expect(r.byCategory.map((c) => [c.category, c.net, c.margin])).toEqual([
+      ["Canned goods", P(420), P(90)],
+      ["Grains", P(450), P(50)],
+    ]);
+    expect(r.byProduct.map((p) => [p.product.sku, p.qty, p.net, p.marginPct])).toEqual([
+      ["P2", 1, P(450), "11.11"],
+      ["P1", 6, P(420), "21.43"],
+    ]);
+    expect((await topItems("2026-10-07", "2026-10-08", 1)).map((p) => p.product.sku)).toEqual(["P2"]);
+    expect((await salesReport("2026-10-08", "2026-10-08")).total).toMatchObject({ sales: P(140), returns: P(70), net: P(70) });
+    expect((await slowMovers("2026-10-07", "2026-10-08")).map((s) => [s.product.sku, s.soldQty, s.onHand, s.lastSold])).toEqual([
+      ["P3", 0, 5, null],
+      ["P2", 1, 1, "2026-10-07"],
+      ["P1", 6, 9, "2026-10-08"],
+    ]);
+  });
+});
+
+describe("review follow-ups", () => {
+  it("no cash leaves the drawer for a charge sale while the member owes the store", async () => {
+    const { p1 } = posFixture();
+    const m = await member();
+    await openShift();
+    const charge = await sell({ lines: [[p1, 2]], payment: "CHARGE", memberId: m.id });
+    if (!charge.ok) throw new Error(charge.error);
+    const line = (await getSale(charge.data.id))!.lines[0]!;
+    const back = (qty: number, refundMode: "CASH" | "AR") => runAs(storePeople().clerk, () => returnSaleAction({ saleId: charge.data.id, lines: [{ saleLineId: line.id, qty }], refundMode, reason: "x" }));
+    expect(await back(1, "CASH")).toEqual({ ok: false, error: expect.stringMatching(/owes the store ₱140\.00: a return on a charge sale is credited to the account first/) });
+    // Paid in full at the teller: then a return is cash.
+    await openSessionAs(storePeople().teller);
+    expect((await runAs(storePeople().teller, () => issueReceiptAction({ payor: { type: "MEMBER", id: m.id, name: "" }, mode: "CASH", checkNo: null, birReceiptNo: "BIR-9", items: [{ type: "STORE_AR_PAYMENT", refId: m.id, amount: "140.00", description: null }] }))).ok).toBe(true);
+    const cash = await back(1, "CASH");
+    if (!cash.ok) throw new Error(cash.error);
+    expect((await getSale(charge.data.id))!.returns[0]).toMatchObject({ refundMode: "CASH", cashRefund: P(70), arCredit: 0n });
+    expect(await shiftReading((await getSale(charge.data.id))!.sale.shiftId)).toMatchObject({ cashRefunds: P(70), arRefunds: 0n });
+  });
+
+  it("a return to the account and a payment for the same member at once never take the account below zero", async () => {
+    const { p1 } = posFixture();
+    const m = await member();
+    await openShift();
+    const charge = await sell({ lines: [[p1, 5]], payment: "CHARGE", memberId: m.id });
+    if (!charge.ok) throw new Error(charge.error);
+    const line = (await getSale(charge.data.id))!.lines[0]!;
+    await openSessionAs(storePeople().teller);
+    await Promise.all([
+      runAs(storePeople().teller, () => issueReceiptAction({ payor: { type: "MEMBER", id: m.id, name: "" }, mode: "CASH", checkNo: null, birReceiptNo: "BIR-10", items: [{ type: "STORE_AR_PAYMENT", refId: m.id, amount: "350.00", description: null }] })),
+      runAs(storePeople().clerk, () => returnSaleAction({ saleId: charge.data.id, lines: [{ saleLineId: line.id, qty: 5 }], refundMode: "AR", reason: "x" })),
+    ]);
+    expect((await subsidiaryLedger("accounts_receivable_members", m.id, "2026-01-01", "2026-12-31")).closing).toBeGreaterThanOrEqual(0n);
+  });
+
+  it("supervisor checks give one answer for unknown, wrong, locked or inactive accounts, and are audited with the cashier who asked", async () => {
+    const { p1 } = posFixture();
+    const { clerk, manager } = storePeople();
+    await openShift();
+    const lines = [{ productId: p1, qty: 1 }];
+    const tryVoid = (username: string, password: string) => runAs(clerk, () => voidSaleAction({ memberId: null, lines, reason: "Left", supervisor: { username, password } }));
+    expect(await tryVoid("nobody", "x")).toEqual({ ok: false, error: "Invalid supervisor username or password" });
+    const mgr2 = await makeUser("MANAGER", "mgr2");
+    await getPool().query("UPDATE users SET is_active = false WHERE id = $1", [mgr2.id]);
+    expect(await tryVoid("mgr2", "Correct-Horse-2026")).toEqual({ ok: false, error: "Invalid supervisor username or password" });
+    const fails = await getDb().select().from(auditLog).where(eq(auditLog.action, "auth.supervisor_failed"));
+    expect(fails.map((f) => [f.userId, (f.after as { purpose: string }).purpose])).toEqual([
+      [clerk, "store.sale_void"],
+      [clerk, "store.sale_void"],
+    ]);
+    const v = await tryVoid("mgr1", "Correct-Horse-2026");
+    if (!v.ok) throw new Error(v.error);
+    const [check] = await getDb().select().from(auditLog).where(eq(auditLog.action, "auth.supervisor_check"));
+    expect(check).toMatchObject({ userId: manager, after: expect.objectContaining({ requestedBy: clerk, purpose: "store.sale_void" }) });
+    expect(await getDb().select().from(auditLog).where(eq(auditLog.action, "store.sale_void"))).toHaveLength(1);
+  });
+
+  it("a shift count over the expected cash is posted Dr Cash / Cr Cash Short/Over", async () => {
+    const { clerk, manager } = storePeople();
+    const shiftId = await openShift("500.00");
+    await runAs(clerk, () => closeShiftAction({ shiftId, countedCash: "505.00" }));
+    const v = await runAs(manager, () => verifyShiftAction({ shiftId }));
+    if (!v.ok) throw new Error(v.error);
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, v.data.varianceJeId!));
+    const [cash, shortOver] = [await accountIdFor("cash_on_hand"), await accountIdFor("cash_short_over")];
+    expect(lines.map((l) => [l.accountId, l.debit, l.credit])).toEqual([
+      [cash, P(5), 0n],
+      [shortOver, 0n, P(5)],
+    ]);
+  });
+
+  it("the manager sets a credit limit by member no. before the first charge", async () => {
+    const m = await member();
+    expect(await runAs(storePeople().manager, () => setChargeLimitByNoAction({ memberNo: "M-999999", limit: "0.00" }))).toEqual({ ok: false, error: "Member M-999999 not found" });
+    expect((await runAs(storePeople().manager, () => setChargeLimitByNoAction({ memberNo: m.memberNo.toLowerCase(), limit: "0.00" }))).ok).toBe(true);
+    await openShift();
+    expect(await sell({ lines: [[posFixture().p1, 1]], payment: "CHARGE", memberId: m.id })).toEqual({ ok: false, error: "Exceeds credit limit (available ₱0.00)" });
+    expect(await runAs(storePeople().manager, () => setChargeLimitByNoAction({ memberNo: m.memberNo, limit: "999,999,999.00" }))).toEqual({ ok: false, error: "The credit limit is too large" });
+  });
+});

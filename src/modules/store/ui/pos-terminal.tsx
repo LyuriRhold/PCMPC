@@ -12,9 +12,14 @@ import { Err } from "./store-forms";
 
 type Line = ScannedProduct & { qty: number };
 
+/** The most of one item on a line (the server's limit too). */
+const MAX_QTY = 100_000;
+
 const qtyOf = (s: string) => {
   const t = s.replace(/,/g, "").trim();
-  return /^\d+$/.test(t) ? Number(t) : NaN;
+  if (!/^\d{1,6}$/.test(t)) return NaN;
+  const n = Number(t);
+  return n > MAX_QTY ? NaN : n;
 };
 
 /**
@@ -59,7 +64,7 @@ export function PosTerminal() {
         setError(r.error);
       } else {
         const n = Number.isNaN(add) || add <= 0 ? 1 : add;
-        setLines((ls) => (ls.some((l) => l.id === r.data.id) ? ls.map((l) => (l.id === r.data.id ? { ...l, qty: l.qty + n } : l)) : [...ls, { ...r.data, qty: n }]));
+        setLines((ls) => (ls.some((l) => l.id === r.data.id) ? ls.map((l) => (l.id === r.data.id ? { ...l, qty: Math.min(l.qty + n, MAX_QTY) } : l)) : [...ls, { ...r.data, qty: n }]));
         setDone(null);
       }
       setCode("");
@@ -69,7 +74,7 @@ export function PosTerminal() {
   }
 
   function setQty(id: string, qty: number) {
-    setLines((ls) => ls.map((l) => (l.id === id ? { ...l, qty } : l)).filter((l) => l.qty > 0));
+    setLines((ls) => ls.map((l) => (l.id === id ? { ...l, qty: Math.min(qty, MAX_QTY) } : l)).filter((l) => l.qty > 0));
   }
 
   function searchMember() {
@@ -193,20 +198,20 @@ export function PosTerminal() {
                 <td className="py-2 text-right tabular-nums">{format(BigInt(l.price))}</td>
                 <td className="py-2">
                   <div className="flex items-center justify-center gap-1">
-                    <Button type="button" size="sm" variant="outline" aria-label={`One less ${l.sku}`} onClick={() => setQty(l.id, l.qty - 1)}>
+                    <Button type="button" variant="outline" className="h-10 w-10" aria-label={`One less ${l.sku}`} onClick={() => setQty(l.id, l.qty - 1)}>
                       −
                     </Button>
                     <Input
                       aria-label={`Quantity, ${l.sku}`}
                       inputMode="numeric"
-                      className="h-9 w-16 text-center"
+                      className="h-10 w-16 text-center"
                       value={String(l.qty)}
                       onChange={(e) => {
                         const n = qtyOf(e.target.value);
                         if (!Number.isNaN(n)) setQty(l.id, n);
                       }}
                     />
-                    <Button type="button" size="sm" variant="outline" aria-label={`One more ${l.sku}`} onClick={() => setQty(l.id, l.qty + 1)}>
+                    <Button type="button" variant="outline" className="h-10 w-10" aria-label={`One more ${l.sku}`} onClick={() => setQty(l.id, l.qty + 1)}>
                       +
                     </Button>
                   </div>

@@ -4,6 +4,7 @@ import "@/modules/plugins";
 import { getDb, getPool } from "@/db/client";
 import { ForbiddenError, runAs } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
+import { auditLog } from "@/modules/audit/schema";
 import { users } from "@/modules/auth/schema";
 import { cancelReceiptAction, issueReceiptAction } from "@/modules/cashiering/actions";
 import { duesFor } from "@/modules/cashiering/registry";
@@ -11,7 +12,7 @@ import { changeMemberStatusAction } from "@/modules/members/actions";
 import { journalEntries, journalLines } from "@/modules/ledger/schema";
 import { accountIdFor, subsidiaryLedger, trialBalance } from "@/modules/ledger/service";
 import { createCategoryAction, updateProductAction } from "@/modules/store/actions";
-import { closeShiftAction, findMembersAction, findProductAction, openShiftAction, returnSaleAction, setChargeLimitAction, verifyShiftAction, voidSaleAction } from "@/modules/store/pos-actions";
+import { closeShiftAction, findMembersAction, findProductAction, openShiftAction, returnSaleAction, setChargeLimitAction, setChargeLimitByNoAction, verifyShiftAction, voidSaleAction } from "@/modules/store/pos-actions";
 import { chargeAvailable, getSale, memberCharges, shiftReading } from "@/modules/store/pos";
 import { salesReport, slowMovers, topItems } from "@/modules/store/sales-reports";
 import { posShifts, sales, stockMoves } from "@/modules/store/schema";
@@ -311,12 +312,21 @@ describe("T13.5 member charge accounts and STORE_AR_PAYMENT", () => {
     const r = await pay(m.id, "200.00");
     if (!r.ok) throw new Error(r.error);
     expect(await ar(m.id)).toBe(P(150));
-    // A charge returned to the account can't be more than what is now owed.
+    // A return on the charge sale is credited to the account up to what is owed (₱150.00); the rest (₱60.00) is cash.
     const sale = (await getDb().select().from(sales).where(eq(sales.memberId, m.id)))[0]!;
     const line = (await getSale(sale.id))!.lines[0]!;
-    expect(await runAs(storePeople().clerk, () => returnSaleAction({ saleId: sale.id, lines: [{ saleLineId: line.id, qty: 3 }], refundMode: "AR", reason: "x" }))).toEqual({ ok: false, error: "The member owes ₱150.00; refund the rest in cash" });
+    const back = await runAs(storePeople().clerk, () => returnSaleAction({ saleId: sale.id, lines: [{ saleLineId: line.id, qty: 3 }], refundMode: "AR", reason: "x" }));
+    if (!back.ok) throw new Error(back.error);
+    const [arAcct, cashAcct] = [await accountIdFor("accounts_receivable_members"), await accountIdFor("cash_on_hand")];
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, back.data.jeId));
+    expect(lines.filter((l) => l.accountId === arAcct || l.accountId === cashAcct).map((l) => [l.accountId, l.credit])).toEqual([
+      [arAcct, P(150)],
+      [cashAcct, P(60)],
+    ]);
+    expect((await getSale(sale.id))!.returns[0]).toMatchObject({ refundMode: "AR", total: P(210), arCredit: P(150), cashRefund: P(60) });
+    expect(await ar(m.id)).toBe(0n);
     expect((await runAs(storePeople().manager, () => cancelReceiptAction({ receiptId: r.data.id, reason: "Wrong member" }))).ok).toBe(true);
-    expect(await ar(m.id)).toBe(P(350));
+    expect(await ar(m.id)).toBe(P(200));
     expect((await trialBalance("2026-12-31")).balanced).toBe(true);
   });
 });
@@ -369,5 +379,85 @@ describe("T13.7 store reports", () => {
       ["P2", 1, 1, "2026-10-07"],
       ["P1", 6, 9, "2026-10-08"],
     ]);
+  });
+});
+
+describe("review follow-ups", () => {
+  it("no cash leaves the drawer for a charge sale while the member owes the store", async () => {
+    const { p1 } = posFixture();
+    const m = await member();
+    await openShift();
+    const charge = await sell({ lines: [[p1, 2]], payment: "CHARGE", memberId: m.id });
+    if (!charge.ok) throw new Error(charge.error);
+    const line = (await getSale(charge.data.id))!.lines[0]!;
+    const back = (qty: number, refundMode: "CASH" | "AR") => runAs(storePeople().clerk, () => returnSaleAction({ saleId: charge.data.id, lines: [{ saleLineId: line.id, qty }], refundMode, reason: "x" }));
+    expect(await back(1, "CASH")).toEqual({ ok: false, error: expect.stringMatching(/owes the store ₱140\.00: a return on a charge sale is credited to the account first/) });
+    // Paid in full at the teller: then a return is cash.
+    await openSessionAs(storePeople().teller);
+    expect((await runAs(storePeople().teller, () => issueReceiptAction({ payor: { type: "MEMBER", id: m.id, name: "" }, mode: "CASH", checkNo: null, birReceiptNo: "BIR-9", items: [{ type: "STORE_AR_PAYMENT", refId: m.id, amount: "140.00", description: null }] }))).ok).toBe(true);
+    const cash = await back(1, "CASH");
+    if (!cash.ok) throw new Error(cash.error);
+    expect((await getSale(charge.data.id))!.returns[0]).toMatchObject({ refundMode: "CASH", cashRefund: P(70), arCredit: 0n });
+    expect(await shiftReading((await getSale(charge.data.id))!.sale.shiftId)).toMatchObject({ cashRefunds: P(70), arRefunds: 0n });
+  });
+
+  it("a return to the account and a payment for the same member at once never take the account below zero", async () => {
+    const { p1 } = posFixture();
+    const m = await member();
+    await openShift();
+    const charge = await sell({ lines: [[p1, 5]], payment: "CHARGE", memberId: m.id });
+    if (!charge.ok) throw new Error(charge.error);
+    const line = (await getSale(charge.data.id))!.lines[0]!;
+    await openSessionAs(storePeople().teller);
+    await Promise.all([
+      runAs(storePeople().teller, () => issueReceiptAction({ payor: { type: "MEMBER", id: m.id, name: "" }, mode: "CASH", checkNo: null, birReceiptNo: "BIR-10", items: [{ type: "STORE_AR_PAYMENT", refId: m.id, amount: "350.00", description: null }] })),
+      runAs(storePeople().clerk, () => returnSaleAction({ saleId: charge.data.id, lines: [{ saleLineId: line.id, qty: 5 }], refundMode: "AR", reason: "x" })),
+    ]);
+    expect((await subsidiaryLedger("accounts_receivable_members", m.id, "2026-01-01", "2026-12-31")).closing).toBeGreaterThanOrEqual(0n);
+  });
+
+  it("supervisor checks give one answer for unknown, wrong, locked or inactive accounts, and are audited with the cashier who asked", async () => {
+    const { p1 } = posFixture();
+    const { clerk, manager } = storePeople();
+    await openShift();
+    const lines = [{ productId: p1, qty: 1 }];
+    const tryVoid = (username: string, password: string) => runAs(clerk, () => voidSaleAction({ memberId: null, lines, reason: "Left", supervisor: { username, password } }));
+    expect(await tryVoid("nobody", "x")).toEqual({ ok: false, error: "Invalid supervisor username or password" });
+    const mgr2 = await makeUser("MANAGER", "mgr2");
+    await getPool().query("UPDATE users SET is_active = false WHERE id = $1", [mgr2.id]);
+    expect(await tryVoid("mgr2", "Correct-Horse-2026")).toEqual({ ok: false, error: "Invalid supervisor username or password" });
+    const fails = await getDb().select().from(auditLog).where(eq(auditLog.action, "auth.supervisor_failed"));
+    expect(fails.map((f) => [f.userId, (f.after as { purpose: string }).purpose])).toEqual([
+      [clerk, "store.sale_void"],
+      [clerk, "store.sale_void"],
+    ]);
+    const v = await tryVoid("mgr1", "Correct-Horse-2026");
+    if (!v.ok) throw new Error(v.error);
+    const [check] = await getDb().select().from(auditLog).where(eq(auditLog.action, "auth.supervisor_check"));
+    expect(check).toMatchObject({ userId: manager, after: expect.objectContaining({ requestedBy: clerk, purpose: "store.sale_void" }) });
+    expect(await getDb().select().from(auditLog).where(eq(auditLog.action, "store.sale_void"))).toHaveLength(1);
+  });
+
+  it("a shift count over the expected cash is posted Dr Cash / Cr Cash Short/Over", async () => {
+    const { clerk, manager } = storePeople();
+    const shiftId = await openShift("500.00");
+    await runAs(clerk, () => closeShiftAction({ shiftId, countedCash: "505.00" }));
+    const v = await runAs(manager, () => verifyShiftAction({ shiftId }));
+    if (!v.ok) throw new Error(v.error);
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, v.data.varianceJeId!));
+    const [cash, shortOver] = [await accountIdFor("cash_on_hand"), await accountIdFor("cash_short_over")];
+    expect(lines.map((l) => [l.accountId, l.debit, l.credit])).toEqual([
+      [cash, P(5), 0n],
+      [shortOver, 0n, P(5)],
+    ]);
+  });
+
+  it("the manager sets a credit limit by member no. before the first charge", async () => {
+    const m = await member();
+    expect(await runAs(storePeople().manager, () => setChargeLimitByNoAction({ memberNo: "M-999999", limit: "0.00" }))).toEqual({ ok: false, error: "Member M-999999 not found" });
+    expect((await runAs(storePeople().manager, () => setChargeLimitByNoAction({ memberNo: m.memberNo.toLowerCase(), limit: "0.00" }))).ok).toBe(true);
+    await openShift();
+    expect(await sell({ lines: [[posFixture().p1, 1]], payment: "CHARGE", memberId: m.id })).toEqual({ ok: false, error: "Exceeds credit limit (available ₱0.00)" });
+    expect(await runAs(storePeople().manager, () => setChargeLimitByNoAction({ memberNo: m.memberNo, limit: "999,999,999.00" }))).toEqual({ ok: false, error: "The credit limit is too large" });
   });
 });

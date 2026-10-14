@@ -21,7 +21,7 @@
 | 10 | [Loan Products, Amortization Engine & Applications](docs/phases/PHASE-10-loan-applications.md) | ✅ | phase-10-loan-applications · tag `phase-10` | rldejoya (reviewer agent: small-loan error + tiny-loan rows fixed; follow-ups) · 2026-10-12 |
 | 11 | [Loan Release, Collections, Penalties & Aging](docs/phases/PHASE-11-loan-servicing.md) | ✅ | phase-11-loan-servicing · tag `phase-11` | rldejoya (reviewer agent: stuck pending release + historical aging fixed; follow-ups) · 2026-10-12 |
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ✅ | phase-12-store-inventory · tag `phase-12` | rldejoya (reviewer agent: stock-move order fixed; follow-ups) · 2026-10-13 |
-| 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | 🟡 awaiting review | phase-13-store-pos | |
+| 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | 🟡 reviewed (reviewer agent: charge-sale refunds fixed); awaiting merge | phase-13-store-pos | |
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ⬜ | | |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ⬜ | | |
 | 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ⬜ | | |
@@ -340,8 +340,8 @@
 - [ ] Q-13.3 (phase 13) VAT on store sales. | default used: none (every product VAT-exempt, Q-12.3); no output VAT is posted | answer:
 - [ ] Q-13.4 (phase 13) Store credit. | default used: charges for ACTIVE members only, up to ₱1,000.00 owed (store.member_credit_limit) unless the manager sets the member's own limit; AR–Members holds only store charges; members pay at the teller (Store charges payment), up to what they owe | answer:
 - [ ] Q-13.5 (phase 13) Voids. | default used: before a sale is completed, a supervisor (a user with store.supervise, the manager) types their username and password at the POS; never the cashier; a wrong password counts toward their lockout. The voided sale keeps its number and lines; nothing is posted | answer:
-- [ ] Q-13.6 (phase 13) Returns. | default used: the cashier records them (no supervisor), any time after the sale; restocked at the sale's cost; refunded in cash from the cashier's open drawer, or for a charge sale credited to the member's account up to what they owe. Should returns need a supervisor, or have a time limit? | answer:
-- [ ] Q-13.7 (phase 13) Store patronage. | default used: a member's completed purchases (cash and charge) in the year less what they returned in the year (by return date); only sales where the cashier picked the member count; walk-in sales never count | answer:
+- [ ] Q-13.6 (phase 13) Returns. | default used: the cashier records them (no supervisor), any time after the sale; restocked at the sale's cost; a cash sale is refunded in cash from the cashier's open drawer; a charge sale is credited to the member's account first (up to what they owe) and only the rest is paid in cash. Note (reviewer): without a supervisor, a cashier could sell for cash and then refund it to themselves, the same effect as a void without the credential, found only at the next stock count. Should cash refunds (or returns of another cashier's sale) need a supervisor's credential, or have a time limit? | answer:
+- [ ] Q-13.7 (phase 13) Store patronage. | default used: a member's completed purchases (cash and charge) in the year less what they returned in the year (by return date); only sales where the cashier picked the member count; walk-in sales never count; a year never goes below zero (a January return of a December purchase). Phase 15 may prefer to attribute returns to the sale's year | answer:
 - [ ] Q-13.8 (phase 13) Sale numbers and the slip. | default used: sales S-{YYYY}-{000000} (a voided sale keeps its number), returns SR-{YYYY}-{000000}; the POS slip says "Not an official receipt" until the store has a BIR-accredited POS or invoice (PLAN R1); a BIR invoice no. can be kept per sale but the POS screen doesn't ask for it yet | answer:
 
 ## Decisions log
@@ -386,6 +386,7 @@
 - The store's cash turnover at day-end (POS drawer → treasurer/teller or bank deposit) recorded as its own entry (Q-13.1)
 - BIR invoice no. on the POS screen once the store has an accredited POS or invoices (Q-13.8, PLAN R1)
 - Store discounts / member prices if PCMPC adopts them (Q-13.2)
+- A manager force-close for a POS shift a cashier left open; a blind cash count (the shift page shows the expected cash before the count, as the Phase 4 teller screen does) (Phase 13 review)
 - Corrections for loan payments made without a receipt (pay from savings, share-capital offsets on termination): a reversal in the loans module that also reverses the savings or share posting (Phase 11 review)
 - Penalty on the payment day: a payment made before the day's job runs collects penalties only up to the last run; compute the penalty to the payment date live (Phase 11 review)
 - Lock order between the loans daily job (locks every open loan) and receipts with several loan payments; run the job before the counter opens or lock loans in id order everywhere (Phase 11 review)
@@ -1455,3 +1456,36 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - The trial balance balances after sales, returns, store-charge payments and shift verification (integration tests).
 - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.
 - Databases set up earlier need `npm run db:migrate && npm run db:seed` (migrations 0035–0036, the SR series, `store.supervise`).
+
+**Review follow-ups (reviewer agent, 2026-10-14)**
+- **Fixed (must-fix): a charge sale could be refunded in cash while the member still owed it.**
+  - The member then had the cash and the debt, and the store had the goods: a cash loan from the drawer without approval.
+  - Now a return on a charge sale is credited to the member's account first, up to what they owe, and only the rest is paid in cash. Asking for cash while they owe is refused.
+  - Returns keep the split (`ar_credit` + `cash_refund` = total; migration 0037, which backfills the existing rows), and the Z-reading counts the cash part as cash refunds.
+- **Fixed (must-fix): a return to the account wasn't serialized with payments and charges.** It now locks the member, as charges and teller payments do, so a concurrent payment and return can't take the account below zero (test with both at once).
+- **Fixed:**
+  - **Supervisor checks:**
+    - Unknown, wrong, locked and inactive accounts all get the same message after the same password work, so a counter can't probe usernames; an expired lock is cleared as at sign-in.
+    - Failures and successes are audited with the cashier who asked and why (`auth.supervisor_failed`, `auth.supervisor_check`).
+  - **Credit limits by member no.:** the manager can set any member's limit, e.g. ₱0.00 before their first charge.
+  - **Limits and the tablet screen:**
+    - POS amounts are capped (₱100,000,000.00) with plain messages instead of database errors.
+    - The POS screen caps a line at 100,000 (a huge number no longer breaks the cart), and the +/− buttons are larger for a tablet.
+  - **Store patronage never goes below zero.**
+- **New tests:**
+  - no cash refund on a charge sale while owed;
+  - the split;
+  - the concurrent return and payment;
+  - the supervisor answers and their audit;
+  - the void audit;
+  - the "over" short/over entry;
+  - limits by member no.
+- **Logged:**
+  - Q-13.6 now carries the reviewer's point that cash refunds without a supervisor work like voids without one.
+  - Q-13.7 notes the zero floor.
+  - Backlog: a manager force-close for abandoned shifts, and a blind cash count.
+- **After the fixes:**
+  - `npm run gate` green: 622 tests, 50 files, scan clean. Phase 13 now has 19 integration tests.
+  - `npm run build` green.
+  - E2E on a production build green: phase-13 (A13.10) and ui-shell.
+  - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (migration 0037).

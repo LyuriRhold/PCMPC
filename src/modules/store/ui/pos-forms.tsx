@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAction } from "@/components/use-action";
-import { selectClass } from "@/modules/members/ui/member-form";
 import { closeShiftAction, openShiftAction, returnSaleAction, verifyShiftAction } from "../pos-actions";
 import { Done, Err } from "./store-forms";
 
@@ -107,14 +106,11 @@ export function ReturnForm({ saleId, lines, charge }: { saleId: string; lines: R
           <Input id={`ret-${l.id}`} name={`ret-${l.id}`} aria-label={`Return, ${l.label}`} inputMode="numeric" className="w-20 text-right" />
         </div>
       ))}
+      <p className="text-xs text-muted-foreground">
+        {charge ? "A charge sale is credited to the member's store account first (up to what they owe); only the rest is refunded in cash from your drawer." : "Refunded in cash from your drawer."}
+      </p>
+      <input type="hidden" name="refundMode" value={charge ? "AR" : "CASH"} />
       <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="refundMode">Refund</Label>
-          <select id="refundMode" name="refundMode" className={selectClass} defaultValue={charge ? "AR" : "CASH"}>
-            <option value="CASH">Cash from my drawer</option>
-            {charge ? <option value="AR">Credit the member&apos;s store account</option> : null}
-          </select>
-        </div>
         <div className="flex min-w-56 flex-1 flex-col gap-1.5">
           <Label htmlFor="returnReason">Reason</Label>
           <Input id="returnReason" name="returnReason" maxLength={300} />

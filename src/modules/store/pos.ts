@@ -286,17 +286,20 @@ export async function storePatronage(memberId: string, year: number, db: Db | Tx
     .from(saleReturns)
     .innerJoin(sales, eq(sales.id, saleReturns.saleId))
     .where(and(eq(sales.memberId, memberId), gte(saleReturns.returnDate, from), lte(saleReturns.returnDate, to)));
-  return BigInt(bought?.s ?? "0") - BigInt(back?.s ?? "0");
+  const net = BigInt(bought?.s ?? "0") - BigInt(back?.s ?? "0");
+  // Returns count in the year they happen (Q-13.7): a January return of a December purchase can't make a year negative.
+  return net > 0n ? net : 0n;
 }
 
 // ── Returns (T13.3) ──
 
 /**
  * Goods returned from a completed sale (not more than was sold less earlier returns): restocked at
- * the sale's unit cost (the last units of a line take what is left of its COGS, so nothing drifts),
- * refunded in cash from the cashier's open drawer, or, for a charge sale, taken off the member's
- * account (up to what they owe). One entry: Dr Sales Returns / Cr Cash or AR–Members; Dr Merchandise
- * Inventory / Cr COGS.
+ * the sale's unit cost (the last units of a line take what is left of its COGS, so nothing drifts).
+ * A cash sale is refunded in cash from the cashier's open drawer. A charge sale is credited to the
+ * member's account first, up to what they owe (the member is locked, as for charges and payments),
+ * and only the rest is paid in cash: no cash leaves the drawer while the member still owes the
+ * store. One entry: Dr Sales Returns / Cr AR–Members and/or Cash; Dr Merchandise Inventory / Cr COGS.
  */
 export async function returnSale(tx: Tx, input: { saleId: string; lines: Array<{ saleLineId: string; qty: number }>; refundMode: RefundMode; reason: string }, cashierId: string) {
   const reason = input.reason.trim();
@@ -306,7 +309,6 @@ export async function returnSale(tx: Tx, input: { saleId: string; lines: Array<{
   if (sale.status !== "COMPLETED") throw new StoreError(`${sale.saleNo} was voided; nothing to return`);
   if (input.lines.length === 0) throw new StoreError("Choose what is returned");
   if (input.refundMode === "AR" && (sale.payment !== "CHARGE" || !sale.memberId)) throw new StoreError("Only a charge sale is refunded to the member's account");
-  const shift = input.refundMode === "CASH" ? await requireOpenShift(tx, cashierId) : await currentShift(cashierId, tx);
   const detail = (await getSale(sale.id, tx))!;
   const byId = new Map(detail.lines.map((l) => [l.id, l]));
   const wanted = new Map<string, number>();
@@ -326,10 +328,18 @@ export async function returnSale(tx: Tx, input: { saleId: string; lines: Array<{
   const total = lines.reduce((s, l) => s + l.amount, 0n);
   const cost = lines.reduce((s, l) => s + l.cost, 0n);
   if (total <= 0n) throw new StoreError("Nothing to refund");
-  if (input.refundMode === "AR" && sale.memberId) {
+  let arCredit = 0n;
+  if (sale.payment === "CHARGE" && sale.memberId) {
+    const [m] = await tx.select().from(members).where(eq(members.id, sale.memberId)).for("update");
     const owed = await memberAr(sale.memberId, tx);
-    if (total > owed) throw new StoreError(`The member owes ${format(owed > 0n ? owed : 0n)}; refund the rest in cash`);
+    arCredit = owed <= 0n ? 0n : owed < total ? owed : total;
+    if (input.refundMode === "CASH" && arCredit > 0n) {
+      throw new StoreError(`${m ? nameOf(m) : "The member"} owes the store ${format(owed)}: a return on a charge sale is credited to the account first`);
+    }
   }
+  const cashRefund = total - arCredit;
+  const shift = cashRefund > 0n ? await requireOpenShift(tx, cashierId) : await currentShift(cashierId, tx);
+  const refundMode: RefundMode = arCredit > 0n ? "AR" : "CASH";
 
   const plans = await planStockMoves(
     tx,
@@ -343,14 +353,13 @@ export async function returnSale(tx: Tx, input: { saleId: string; lines: Array<{
     {
       date: today,
       book: "SJ",
-      particulars: `${returnNo} · return on ${sale.saleNo} · ${input.refundMode === "CASH" ? "cash refund" : "credited to the member's account"}: ${reason}`,
+      particulars: `${returnNo} · return on ${sale.saleNo} · ${[arCredit > 0n ? `${format(arCredit)} credited to the member's account` : "", cashRefund > 0n ? `${format(cashRefund)} refunded in cash` : ""].filter(Boolean).join(", ")}: ${reason}`,
       reference: returnNo,
       source: { module: "store", id: returnId },
       lines: [
         { accountId: await accountIdFor("sales_returns", tx), debit: total, memo: returnNo },
-        input.refundMode === "AR"
-          ? { accountId: await accountIdFor("accounts_receivable_members", tx), credit: total, memberId: sale.memberId, memo: returnNo }
-          : { accountId: await accountIdFor("cash_on_hand", tx), credit: total, memo: returnNo },
+        ...(arCredit > 0n ? [{ accountId: await accountIdFor("accounts_receivable_members", tx), credit: arCredit, memberId: sale.memberId, memo: returnNo }] : []),
+        ...(cashRefund > 0n ? [{ accountId: await accountIdFor("cash_on_hand", tx), credit: cashRefund, memo: returnNo }] : []),
         ...(cost > 0n
           ? [
               { accountId: await accountIdFor("merchandise_inventory", tx), debit: cost, memo: returnNo },
@@ -361,13 +370,13 @@ export async function returnSale(tx: Tx, input: { saleId: string; lines: Array<{
     },
     cashierId,
   );
-  await tx.insert(saleReturns).values({ id: returnId, returnNo, saleId: sale.id, shiftId: shift?.id ?? null, returnDate: today, refundMode: input.refundMode, total, cost, reason, cashierId, jeId: je.id, createdBy: cashierId });
+  await tx.insert(saleReturns).values({ id: returnId, returnNo, saleId: sale.id, shiftId: shift?.id ?? null, returnDate: today, refundMode, total, cashRefund, arCredit, cost, reason, cashierId, jeId: je.id, createdBy: cashierId });
   await tx.insert(saleReturnLines).values(
     lines.map((l) => ({ returnId, saleLineId: l.line.id, productId: l.line.productId, qty: l.qty, unitPrice: l.line.unitPrice, amount: l.amount, unitCost: l.line.unitCost, cost: l.cost, createdBy: cashierId })),
   );
   await recordStockMoves(tx, plans, { date: today, refType: "RETURN", refId: returnId, jeId: je.id }, cashierId);
-  await audit(tx, { action: "store.sale_return", entity: "sale", entityId: sale.id, after: { returnNo, total: format(total), cost: format(cost), refundMode: input.refundMode, reason }, userId: cashierId });
-  return { id: returnId, returnNo, jeId: je.id, total };
+  await audit(tx, { action: "store.sale_return", entity: "sale", entityId: sale.id, after: { returnNo, total: format(total), cost: format(cost), cashRefund: format(cashRefund), arCredit: format(arCredit), reason }, userId: cashierId });
+  return { id: returnId, returnNo, jeId: je.id, total, cashRefund, arCredit };
 }
 
 // ── Z-reading, closing and verification (T13.4) ──
@@ -393,8 +402,8 @@ export async function shiftReading(shiftId: string, db: Db | Tx = getDb()) {
     .select({
       count: sql<number>`count(*)::int`,
       total: sql<string>`coalesce(sum(${saleReturns.total}), 0)::text`,
-      cash: sql<string>`coalesce(sum(${saleReturns.total}) FILTER (WHERE ${saleReturns.refundMode} = 'CASH'), 0)::text`,
-      ar: sql<string>`coalesce(sum(${saleReturns.total}) FILTER (WHERE ${saleReturns.refundMode} = 'AR'), 0)::text`,
+      cash: sql<string>`coalesce(sum(${saleReturns.cashRefund}), 0)::text`,
+      ar: sql<string>`coalesce(sum(${saleReturns.arCredit}), 0)::text`,
     })
     .from(saleReturns)
     .where(eq(saleReturns.shiftId, shiftId));

@@ -9,7 +9,7 @@ import { format } from "@/lib/money";
 import { guardPage } from "@/lib/page-guard";
 import { getSetting } from "@/modules/settings/service";
 import { memberCharges } from "@/modules/store/pos";
-import { ChargeLimitForm } from "@/modules/store/ui/charge-forms";
+import { ChargeLimitByNoForm, ChargeLimitForm } from "@/modules/store/ui/charge-forms";
 
 export const metadata: Metadata = { title: "Member charges · PCMPC MIS" };
 
@@ -30,6 +30,7 @@ async function ChargesContent() {
           pay at the teller counter (Store charges payment).
         </p>
       </div>
+      {canSet ? <ChargeLimitByNoForm /> : null}
       <Table>
         <TableHeader>
           <TableRow>

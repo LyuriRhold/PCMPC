@@ -459,9 +459,10 @@ export const REFUND_MODES = ["CASH", "AR"] as const;
 export type RefundMode = (typeof REFUND_MODES)[number];
 
 /**
- * Goods returned from a completed sale: restocked at the sale's unit cost; refunded in cash from
- * the cashier's drawer, or (for a charge sale) taken off the member's account. One entry: Dr Sales
- * Returns / Cr Cash or AR–Members; Dr Merchandise Inventory / Cr COGS.
+ * Goods returned from a completed sale: restocked at the sale's unit cost. A cash sale is refunded in
+ * cash from the cashier's drawer; a charge sale is credited to the member's account first (up to
+ * what they owe) and only the rest is paid in cash (`ar_credit` + `cash_refund` = `total`). One
+ * entry: Dr Sales Returns / Cr AR–Members and/or Cash; Dr Merchandise Inventory / Cr COGS.
  */
 export const saleReturns = pgTable(
   "sale_returns",
@@ -476,6 +477,10 @@ export const saleReturns = pgTable(
     returnDate: date("return_date", { mode: "string" }).notNull(),
     refundMode: text("refund_mode").$type<RefundMode>().notNull(),
     total: money("total").notNull(),
+    /** What was paid back from the drawer. */
+    cashRefund: money("cash_refund").notNull().default(sql`0`),
+    /** What was taken off the member's account. */
+    arCredit: money("ar_credit").notNull().default(sql`0`),
     cost: money("cost").notNull(),
     reason: text("reason").notNull(),
     cashierId: uuid("cashier_id")
@@ -488,7 +493,7 @@ export const saleReturns = pgTable(
   },
   (t) => [
     check("sale_returns_mode_chk", inList("refund_mode", REFUND_MODES)),
-    check("sale_returns_amounts_chk", sql`${t.total} > 0 AND ${t.cost} >= 0 AND (${t.refundMode} = 'AR' OR ${t.shiftId} IS NOT NULL)`),
+    check("sale_returns_amounts_chk", sql`${t.total} > 0 AND ${t.cost} >= 0 AND ${t.cashRefund} >= 0 AND ${t.arCredit} >= 0 AND ${t.cashRefund} + ${t.arCredit} = ${t.total} AND (${t.cashRefund} = 0 OR ${t.shiftId} IS NOT NULL) AND ((${t.refundMode} = 'CASH') = (${t.arCredit} = 0))`),
     index("sale_returns_sale_idx").on(t.saleId),
     index("sale_returns_shift_idx").on(t.shiftId),
   ],

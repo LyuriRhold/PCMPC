@@ -18,12 +18,18 @@ import { StockError, StoreError } from "./service";
 
 const EXPECTED = [StoreError, StockError, LedgerError, CashieringError, AuthError];
 
+/** No POS amount is near this (₱100,000,000.00); it keeps typed amounts inside the database's range. */
+const MAX_AMOUNT = 10_000_000_000n;
+
 function pesos(text: string, what = "amount"): bigint {
+  let value: bigint;
   try {
-    return parseMoney(text);
+    value = parseMoney(text);
   } catch {
     throw new StoreError(`Enter the ${what} in pesos, e.g. 500.00`);
   }
+  if (value > MAX_AMOUNT) throw new StoreError(`The ${what} is too large`);
+  return value;
 }
 
 const id = z.uuid();
@@ -74,7 +80,7 @@ export async function voidSaleAction(input: z.input<typeof voidSchema>): Promise
   try {
     const data = voidSchema.parse(input);
     if (!data.supervisor || !data.supervisor.username || !data.supervisor.password) throw new StoreError("A supervisor's username and password are needed to void a sale");
-    const sup = await verifySupervisor(data.supervisor, "store.supervise");
+    const sup = await verifySupervisor(data.supervisor, "store.supervise", { requestedBy: actor.id, purpose: "store.sale_void" });
     return ok(await withTx((tx) => voidSale(tx, { memberId: data.memberId, payment: data.payment ?? "CASH", lines: data.lines, reason: data.reason }, actor.id, sup.id)));
   } catch (e) {
     return failFrom(e, EXPECTED);
@@ -155,6 +161,21 @@ export async function verifyShiftAction(input: z.input<typeof shiftIdSchema>): P
   try {
     const data = shiftIdSchema.parse(input);
     return ok(await withTx((tx) => verifyShift(tx, data, actor.id)));
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const limitByNoSchema = z.object({ memberNo: z.string().trim().min(1).max(20), limit: z.string().trim().max(20) });
+/** Manager: a member's own store credit limit, by member no. (e.g. before their first charge). */
+export async function setChargeLimitByNoAction(input: z.input<typeof limitByNoSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("store.supervise");
+  try {
+    const data = limitByNoSchema.parse(input);
+    const [m] = await getDb().select({ id: members.id }).from(members).where(eq(members.memberNo, data.memberNo.toUpperCase()));
+    if (!m) throw new StoreError(`Member ${data.memberNo.toUpperCase()} not found`);
+    await withTx((tx) => setChargeLimit(tx, { memberId: m.id, limit: pesos(data.limit, "credit limit") }, actor.id));
+    return ok(null);
   } catch (e) {
     return failFrom(e, EXPECTED);
   }

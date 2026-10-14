@@ -90,7 +90,9 @@ async function SaleContent(props: PageProps<"/store/pos/sales/[id]">) {
           <div className="mt-3 border-t pt-2 text-xs">
             {returns.map((r) => (
               <p key={r.id}>
-                Return {r.returnNo} · {formatDate(r.returnDate)} · {format(r.total)} {r.refundMode === "AR" ? "credited to the account" : "refunded in cash"}
+                Return {r.returnNo} · {formatDate(r.returnDate)} · {format(r.total)}
+                {r.arCredit > 0n ? ` · ${format(r.arCredit)} credited to the account` : ""}
+                {r.cashRefund > 0n ? ` · ${format(r.cashRefund)} refunded in cash` : ""}
               </p>
             ))}
           </div>

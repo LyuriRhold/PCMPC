@@ -56,7 +56,7 @@ async function SurplusContent() {
     ["Interest on share capital", `${ratePercent(iscShare)} of what remains, by average share month`],
     ["Patronage refund", `${ratePercent(prShare)} of what remains, by patronage (${counts})`],
     ["Withholding tax on ISC and PR", ratePercent(wtax)],
-    ["Unpaid loan balances", offset ? "deducted first" : "not deducted"],
+    ["Past-due loan amounts", offset ? "deducted first" : "not deducted"],
     ["Paid out unless the member chooses", payoutText],
   ];
   return (

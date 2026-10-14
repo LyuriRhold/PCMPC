@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAction } from "@/components/use-action";
 import { selectClass } from "@/modules/members/ui/member-form";
-import { approveAllocationAction, distributeAllocationAction, draftAllocationAction, postAllocationAction, remitCetfAction, setElectionAction } from "../actions";
+import { approveAllocationAction, distributeAllocationAction, draftAllocationAction, postAllocationAction, remitCetfAction, returnToDraftAction, setElectionAction } from "../actions";
 
 function Err({ error }: { error: string | null }) {
   return error ? (
@@ -71,13 +71,13 @@ export function DraftForm({ years, defaults }: { years: number[]; defaults: Perc
   );
 }
 
-/** Bookkeeper: recomputes a draft with the current settings (members' elections are kept). */
+/** Bookkeeper: recomputes a draft with its percentages and the latest figures (members' elections are kept). */
 export function RedraftButton({ year }: { year: number }) {
   const { pending, error, done, run } = useAction();
   return (
     <div className="flex flex-col gap-1">
       <div>
-        <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => run(() => draftAllocationAction({ year }), { success: "Recomputed with the current settings and figures." })}>
+        <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => run(() => draftAllocationAction({ year }), { success: "Recomputed with the latest figures." })}>
           Recompute
         </Button>
       </div>
@@ -87,18 +87,32 @@ export function RedraftButton({ year }: { year: number }) {
   );
 }
 
-/** Manager: approves the draft. */
-export function ApproveButton({ allocationId }: { allocationId: string }) {
+/** Manager: approves the draft as shown (its revision). */
+export function ApproveButton({ allocationId, revision }: { allocationId: string; revision: number }) {
   const { pending, error, run } = useAction();
   return (
     <div className="flex flex-col gap-1">
       <div>
-        <Button type="button" size="sm" disabled={pending} onClick={() => run(() => approveAllocationAction({ allocationId }), { success: "Approved." })}>
+        <Button type="button" size="sm" disabled={pending} onClick={() => run(() => approveAllocationAction({ allocationId, revision }), { success: "Approved." })}>
           Approve
         </Button>
       </div>
       <Err error={error} />
     </div>
+  );
+}
+
+/** Manager: sends the approved allocation back to draft, with a reason. */
+export function ReturnToDraftForm({ allocationId }: { allocationId: string }) {
+  const { pending, error, run } = useAction();
+  return (
+    <form className="flex flex-wrap items-center gap-2" action={(fd) => run(() => returnToDraftAction({ allocationId, reason: String(fd.get("returnReason") ?? "") }))}>
+      <Input name="returnReason" aria-label="Why it goes back to draft" placeholder="Why it goes back to draft" maxLength={300} className="w-64" />
+      <Button type="submit" size="sm" variant="outline" disabled={pending}>
+        Back to draft
+      </Button>
+      <Err error={error} />
+    </form>
   );
 }
 

@@ -17,13 +17,13 @@ export const TEST_PASSWORD = "Correct-Horse-2026";
  * test. So the first seed of an empty database (per worker database and business date: the fiscal
  * year seeded depends on the clock) runs the real seed steps and keeps a copy of the rows they
  * wrote in the `seedsnap` schema; later seeds of an emptied database on the same business date copy
- * those rows back in one transaction. Any other call (a database that isn't empty) runs the seed
- * steps as usual.
+ * those rows back in one transaction. Any other call (a database with any row in `public`) runs
+ * the seed steps as usual.
  */
 export async function seedReference(): Promise<void> {
   const pool = getPool();
   const key = businessToday();
-  const empty = (await pool.query<{ empty: boolean }>("SELECT NOT EXISTS (SELECT 1 FROM public.roles) AS empty")).rows[0]?.empty ?? false;
+  const empty = await databaseEmpty(pool);
   if (empty) {
     const restore = await snapshotFor(pool, key);
     if (restore) {
@@ -36,6 +36,14 @@ export async function seedReference(): Promise<void> {
 }
 
 const ident = (s: string) => `"${s.replace(/"/g, '""')}"`;
+
+/** Whether every table in `public` is empty (a snapshot is taken from, and restored into, nothing else). */
+async function databaseEmpty(pool: Pool): Promise<boolean> {
+  const tables = (await pool.query<{ name: string }>("SELECT tablename AS name FROM pg_tables WHERE schemaname = 'public'")).rows.map((r) => r.name);
+  if (tables.length === 0) return true;
+  const sql = `SELECT ${tables.map((t) => `NOT EXISTS (SELECT 1 FROM public.${ident(t)})`).join(" AND ")} AS empty`;
+  return (await pool.query<{ empty: boolean }>(sql)).rows[0]?.empty ?? false;
+}
 
 /** The SQL that restores the snapshot taken on `key`, or null if there is none. */
 async function snapshotFor(pool: Pool, key: string): Promise<string | null> {

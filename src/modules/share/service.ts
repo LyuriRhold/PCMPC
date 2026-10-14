@@ -2,7 +2,7 @@ import Decimal from "decimal.js";
 import { and, asc, eq, inArray, like, lte, or, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
-import { businessToday, monthEnd, type BusinessDate } from "@/lib/dates";
+import { addMonths, businessToday, monthEnd, type BusinessDate } from "@/lib/dates";
 import { divide, format, type Money } from "@/lib/money";
 import { normalizeName } from "@/lib/names";
 import { receiptItems, receipts } from "@/modules/cashiering/schema";
@@ -545,10 +545,16 @@ export async function memberShareLedger(memberId: string, range: { from?: Busine
  * paid-up balances of the year ÷ 12, rounded HALF-UP to the centavo.
  */
 export async function averageShareMonth(memberId: string, year: number, db: Db | Tx = getDb()): Promise<Money> {
-  const rows = await countedRows(db, memberId, `${year}-12-31`);
+  return averageShareMonthFrom(memberId, `${year}-01-01`, db);
+}
+
+/** The ASM of the 12 months starting with `start`'s month (a fiscal year that may not start in January). */
+export async function averageShareMonthFrom(memberId: string, start: BusinessDate, db: Db | Tx = getDb()): Promise<Money> {
+  const first = `${start.slice(0, 7)}-01`;
+  const rows = await countedRows(db, memberId, monthEnd(addMonths(first, 11)));
   let total = 0n;
-  for (let month = 1; month <= 12; month++) {
-    const end = monthEnd(`${year}-${String(month).padStart(2, "0")}-01`);
+  for (let i = 0; i < 12; i++) {
+    const end = monthEnd(addMonths(first, i));
     total += rows.filter((r) => r.t.txnDate <= end).reduce((s, r) => s + BigInt(EFFECT[r.t.type].paidUp) * r.t.amount, 0n);
   }
   return divide(total, 12n);

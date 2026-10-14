@@ -12,10 +12,12 @@ import { accountBalance, accountIdFor, trialBalance } from "@/modules/ledger/ser
 import { getLoan } from "@/modules/loans/servicing";
 import { accountBalance as savingsBalance } from "@/modules/savings/service";
 import { shareTransactions } from "@/modules/share/schema";
+import { averageShareMonthFrom } from "@/modules/share/service";
+import { storePatronageBetween } from "@/modules/store/pos";
 import { ROLE_PERMISSIONS } from "@/modules/auth/permissions";
 import { getSetting, updateSetting } from "@/modules/settings/service";
 import { surplusWorkbook } from "@/modules/surplus/export";
-import { approveAllocationAction, distributeAllocationAction, draftAllocationAction, postAllocationAction, remitCetfAction, setElectionAction } from "@/modules/surplus/actions";
+import { approveAllocationAction, distributeAllocationAction, draftAllocationAction, postAllocationAction, remitCetfAction, returnToDraftAction, setElectionAction } from "@/modules/surplus/actions";
 import { allocationLines, approveAllocation, cetfReport, getAllocation, memberEntitlements, memberShares } from "@/modules/surplus/service";
 import { waterBillsPaid } from "@/modules/water/reports";
 import { waterCustomers } from "@/modules/water/schema";
@@ -163,10 +165,16 @@ describe("T15.4 the workflow: draft → approve → post → distribute", () => 
     const a = await lineOf(d.data.id, f.a);
     expect(await elect(a.id, "50", "30", "0")).toEqual({ ok: false, error: "The payout parts add up to 100%" });
     expect((await elect(a.id, "0", "100", "0")).ok).toBe(true);
-    // Re-drafted with the settings: amounts recomputed, A's election kept, the others on the default (savings).
+    // Recomputed: the GA's percentages stay; A's election is kept.
     expect((await runAs(book(), () => draftAllocationAction({ year: 2026 }))).ok).toBe(true);
+    expect(await getAllocation(d.data.id)).toMatchObject({ reservePct: "0.12", iscShare: "0.6", iscPool: P(8400), revision: 2 });
+    expect(await lineOf(d.data.id, f.a)).toMatchObject({ electSavings: 0, electCapitalize: 10000, electCash: 0 });
+    // Re-drafted with other percentages: amounts recomputed, A's election still kept, the others on the default (savings).
+    expect((await runAs(book(), () => draftAllocationAction({ year: 2026, reserve: "10", etf: "10", cdf: "3", optional: "7", iscShare: "70", prShare: "30" }))).ok).toBe(true);
     expect(await lineOf(d.data.id, f.a)).toMatchObject({ isc: P(1200), pr: P(1000), electSavings: 0, electCapitalize: 10000, electCash: 0 });
     expect(await lineOf(d.data.id, f.c)).toMatchObject({ electSavings: 10000, electCapitalize: 0, electCash: 0 });
+    // The manager approves only the revision they looked at.
+    expect(await runAs(surplusPeople().manager, () => approveAllocationAction({ allocationId: d.data.id, revision: 2 }))).toEqual({ ok: false, error: "The draft was recomputed after you opened it; look at the new figures and approve again" });
     // Order and separation of duties.
     expect(await runAs(book(), () => postAllocationAction({ allocationId: d.data.id, gaResolutionNo: "GA-1" }))).toEqual({ ok: false, error: "Fiscal year 2026's allocation isn't approved yet" });
     expect(await runAs(book(), () => distributeAllocationAction({ allocationId: d.data.id }))).toEqual({ ok: false, error: "Post fiscal year 2026's allocation first" });
@@ -175,6 +183,33 @@ describe("T15.4 the workflow: draft → approve → post → distribute", () => 
     expect(await runAs(book(), () => draftAllocationAction({ year: 2026 }))).toEqual({ ok: false, error: "Fiscal year 2026's allocation is already approved" });
     const [audited] = await getDb().select().from(auditLog).where(eq(auditLog.action, "surplus.redraft"));
     expect(audited?.userId).toBe(book());
+    // Approved: the figures are frozen and no member line is added; the manager can send it back to draft.
+    await expect(getPool().query("UPDATE surplus_allocations SET reserve = reserve + 1, remaining = remaining - 1, prepared_by = prepared_by WHERE id = $1", [d.data.id])).rejects.toThrow(/approved allocation keeps its figures/);
+    await expect(getPool().query("INSERT INTO surplus_member_lines (allocation_id, member_id, asm, isc, patronage_loan_interest, patronage_store, patronage_water, patronage_total, pr, gross, elect_savings, elect_capitalize, elect_cash, net) SELECT allocation_id, member_id, asm, isc, 0, 0, 0, 0, 0, isc, 10000, 0, 0, isc FROM surplus_member_lines WHERE allocation_id = $1 LIMIT 1", [d.data.id])).rejects.toThrow(/only to a draft allocation/);
+    await expect(runAs(book(), () => returnToDraftAction({ allocationId: d.data.id, reason: "x" }))).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await runAs(surplusPeople().manager, () => returnToDraftAction({ allocationId: d.data.id, reason: " " }))).toEqual({ ok: false, error: "Enter why the allocation goes back to draft" });
+    expect(await runAs(surplusPeople().manager, () => returnToDraftAction({ allocationId: d.data.id, reason: "The GA changed the ISC share" }))).toEqual({ ok: true, data: null });
+    expect(await getAllocation(d.data.id)).toMatchObject({ status: "DRAFT", approvedBy: null });
+    expect(await runAs(surplusPeople().manager, () => returnToDraftAction({ allocationId: d.data.id, reason: "again" }))).toEqual({ ok: false, error: "Fiscal year 2026's allocation is a draft" });
+    // Approved again and posted; posting twice is refused.
+    expect((await runAs(surplusPeople().manager, () => approveAllocationAction({ allocationId: d.data.id }))).ok).toBe(true);
+    expect((await runAs(book(), () => postAllocationAction({ allocationId: d.data.id, gaResolutionNo: "GA-2027-07" }))).ok).toBe(true);
+    expect(await runAs(book(), () => postAllocationAction({ allocationId: d.data.id, gaResolutionNo: "GA-2027-07" }))).toEqual({ ok: false, error: "Fiscal year 2026's allocation is already posted" });
+    expect(await runAs(surplusPeople().manager, () => returnToDraftAction({ allocationId: d.data.id, reason: "x" }))).toEqual({ ok: false, error: "Fiscal year 2026's allocation is already posted" });
+  });
+
+  it("ASM and store purchases follow the fiscal year's own months; a default payout with odd percentages still adds up to 100%", async () => {
+    const f = await surplusFixture(P(20000));
+    // B paid up ₱9,000.00 in January 2026: a fiscal year from July 2025 has six month-ends with it.
+    expect(await averageShareMonthFrom(f.b, "2025-07-01")).toBe(P(4500));
+    expect(await averageShareMonthFrom(f.b, "2026-01-01")).toBe(P(9000));
+    expect(await storePatronageBetween(f.a, "2026-03-11", "2027-03-10")).toBe(0n);
+    expect(await storePatronageBetween(f.a, "2026-03-10", "2026-03-10")).toBe(P(10000));
+    await withTx((tx) => updateSetting(tx, "surplus.default_payout", { savings: "0.33333", capitalize: "0.33333", cash: "0.33334" }, surplusPeople().manager));
+    on("2027-03-01");
+    const d = await runAs(book(), () => draftAllocationAction({ year: 2026 }));
+    if (!d.ok) throw new Error(d.error);
+    expect(await lineOf(d.data.id, f.a)).toMatchObject({ electSavings: 3333, electCapitalize: 3333, electCash: 3334 });
   });
 
   it("distribution: withholding tax, then arrears; savings, share capital (ISC/PR capitalized) and cash by DV, drawn from ISC payable first; the payables are empty once the DVs are released", async () => {

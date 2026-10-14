@@ -23,7 +23,7 @@
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ✅ | phase-12-store-inventory · tag `phase-12` | rldejoya (reviewer agent: stock-move order fixed; follow-ups) · 2026-10-13 |
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ✅ | phase-13-store-pos · tag `phase-13` | rldejoya (reviewer agent: charge-sale refunds fixed; follow-ups) · 2026-10-14 |
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ✅ | phase-14-fs-close · tag `phase-14` | rldejoya (reviewer agent: next fiscal year and asset register fixed; follow-ups) · 2026-10-14 |
-| 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | 🟡 awaiting review | phase-15-surplus-allocation | |
+| 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | 🟡 reviewed (reviewer agent: fiscal-year windows fixed); awaiting merge | phase-15-surplus-allocation | |
 | 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ⬜ | | |
 | 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | ⬜ | | |
 | 18 | [Hardening, Vercel Deployment, Backups, UAT & Go-Live](docs/phases/PHASE-18-golive.md) | ⬜ | | |
@@ -351,7 +351,7 @@
 - [ ] Q-14.6 (phase 14) Cash flow classification. | default used: loans, receivables, inventories, deposits and payables are operating; property and equipment at cost is investing (accumulated depreciation is the operating add-back); share capital, statutory funds and undivided net surplus are financing | answer:
 - [ ] Q-14.7 (phase 14) Bank reconciliation. | default used: the bookkeeper enters the statement's ending balance, ticks the book entries the bank cleared and lists the bank-only items (charges, interest); it saves only when it balances and isn't changed afterwards; the bank-only items are then posted by a JV, ticked as cleared on the next month's reconciliation. Months are reconciled in order, from the month the bank account was set up | answer:
 - [ ] Q-15.1 (phase 15) The allocation percentages. | default used: the settings (reserve 10%, ETF 10% with half to the CETF, CDF 3%, optional 7%; of what remains, ISC 70% and PR 30%); an allocation may use other percentages approved by the GA, within the law (reserve ≥ 10%, ETF ≤ 10%, CDF ≥ 3%, optional ≤ 7%, PR ≥ 30% of what remains, ISC + PR = 100%). Please send the by-laws' allocation article and the last GA resolution on the net surplus | answer:
-- [ ] Q-15.2 (phase 15) Who shares ISC and PR, and on what. | default used: active and inactive members when the allocation is drafted (applicants, terminated and deceased members don't); ISC by the year's ASM (month-end paid-up ÷ 12); PR by patronage = loan interest paid in the year (not penalties) + net store purchases (purchases less returns in the year); water bills paid count only if enabled (what receipts applied to bills, not penalties or advances). ASM and store purchases are taken by calendar year, which matches a January fiscal year | answer:
+- [ ] Q-15.2 (phase 15) Who shares ISC and PR, and on what. | default used: active and inactive members when the allocation is drafted (applicants, terminated and deceased members don't); ISC by the year's ASM (month-end paid-up ÷ 12); PR by patronage = loan interest paid in the year (not penalties) + net store purchases (purchases less returns in the year); water bills paid count only if enabled (what receipts applied to bills, not penalties or advances). all over the fiscal year's own months | answer:
 - [ ] Q-15.3 (phase 15) How ISC and PR are paid out. | default used: 100% to the member's savings unless the member chooses another split of savings, share capital and cash (setting surplus.default_payout); share capital subscribes whole shares as needed and, like CBU, isn't held to the 10% holding cap; cash goes out by a disbursement voucher (the manager approves, a teller releases). Withholding tax 0% (when set: on ISC and PR each, HALF-UP, before arrears) | answer:
 - [ ] Q-15.4 (phase 15) Arrears offset. | default used: on (setting); the past-due amounts of the member's open loans on the distribution date (installments due before it, with penalties accrued), oldest loan first, are paid first as a loan payment (penalty → interest → principal); if they are more than the member's ISC and PR, all of it goes to the arrears | answer:
 - [ ] Q-15.5 (phase 15) Posting dates and the CETF. | default used: the allocation entry is dated the day it is posted after the GA (in the new year), not the year-end; each member's payout entry is dated the distribution day; the CETF is remitted to the federation/union named on the DV (cash or check), tracked per year. Which federation/union receives PCMPC's CETF? | answer:
@@ -407,7 +407,7 @@
 - Fixed-asset disposal (sale or retirement: the gain or loss and taking the asset off the register) (Phase 14)
 - Statement lines in a hierarchy (current / non-current subtotals) and allocating shared expenses to the segments (Q-14.1, Q-14.2)
 - A printable ISC/PR notice per member, and taking members' payout choices in bulk (e.g. from the GA forms) (Phase 15)
-- ASM and store patronage over a fiscal year that doesn't start in January (Q-15.2)
+- Correcting a GA resolution no. after posting; re-issuing a cancelled ISC/PR cash DV from the allocation; distributing member by member (resumable) for a large membership (Phase 15 review)
 - Importing the bank statement (CSV) instead of ticking entries by hand (Phase 14)
 - The monthly allowance (provision) entry per aging bucket (`loan.allowance_rates`): the Phase 11 follow-up expected it at the period close, but the Phase 14 spec doesn't include it
 - A pre-closing trial balance (or an option to list zero rows) for the auditor; locking the statement mapping of closed years (Phase 14 review)
@@ -1639,7 +1639,7 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - `surplus_allocations`: one per fiscal year, with the percentages applied, the split, the ISC and PR rates, the GA resolution, who prepared, approved, posted and distributed it, and the entry.
   - `surplus_member_lines`: per member, the ASM, ISC, patronage (loan interest, store, water), PR, gross, the payout choice, and once paid the withholding, arrears offset, net, payouts, the entry and the DV.
   - `cetf_remittances`.
-  - Triggers: a posted allocation only gets its distribution recorded; member amounts change only on a draft; a paid line never changes; nothing is deleted.
+  - Triggers: a posted allocation only gets its distribution recorded; member amounts change only on a draft (a re-draft replaces its lines); a paid line never changes; allocations are never deleted.
 - **Engine (T15.2):** the law's floors and ceilings, each with its own message; every split uses `allocate`.
 - **Per member (T15.3):** ISC by ASM (`averageShareMonth`); PR by patronage: loan interest paid (new `loanInterestPaid`), net store purchases (`storePatronage`) and, when the basis says so, water bills paid (new `waterBillsPaid`). Active and inactive members share.
 - **Workflow (T15.4):**
@@ -1677,7 +1677,7 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 
 **Follow-ups**
 - Answer Q-15.1–Q-15.5; send the by-laws' allocation article and the CETF recipient.
-- Backlog: a printable ISC/PR notice per member and taking payout choices in bulk; ASM and store patronage over a fiscal year that doesn't start in January.
+- Backlog: a printable ISC/PR notice per member and taking payout choices in bulk.
 
 **Exit checks / counts:**
 - `npm run gate` is green: 683 tests (55 files), scan clean. Phase 15 adds:
@@ -1695,3 +1695,37 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - Then: `npm run gate` green in 19 minutes on 1 worker (683 tests; vitest 1,037 s, versus 815 s on 2 workers before).
 - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.
 - Databases set up earlier need `npm run db:migrate && npm run db:seed` (migrations 0042–0043, the surplus permissions and the default-payout setting).
+
+**Review follow-ups (reviewer agent, 2026-10-14)**
+- **Fixed (must-fix): a fiscal year not starting in January mixed date windows.**
+  - ASM and store purchases were taken by calendar year, while loan interest and water bills used the fiscal year.
+  - Now all four use the fiscal year's own months:
+    - `averageShareMonthFrom` (share);
+    - `storePatronageBetween` (store).
+- **Fixed:**
+  - **Workflow:**
+    - The manager can send an approved allocation back to draft, with a reason (audited), e.g. when the GA changes the percentages.
+    - The approval names the revision the manager looked at, so a draft recomputed in the meantime isn't approved unseen (new `revision` column, migration 0044).
+    - Recompute keeps the draft's own (GA) percentages; new ones are entered on the draft form.
+    - Before posting, the members' ISC and PR are checked to add up to the pools.
+  - **Triggers (migration 0044):**
+    - an approved allocation keeps its figures (only posted or sent back);
+    - member lines are added only to a draft.
+  - **Locks:** an election locks the allocation before the line, and the distribution locks each member before their loans, savings and capital, the same order as elsewhere.
+  - **Default payout:** odd percentages (33.333 / 33.333 / 33.334) become basis points that add up to exactly 100% (`allocate`).
+  - **Wording:** the screens say "past-due loan amounts" (what is offset), not "unpaid balances".
+  - **Seed snapshot:** taken from and restored into a database only when every `public` table is empty.
+  - **Engine:** the remainder weight is never in exponent form.
+- **New tests:**
+  - sending back to draft and its permission;
+  - approving a stale revision;
+  - posting twice;
+  - frozen approved figures and no lines added (raw SQL);
+  - recompute keeping the GA percentages;
+  - fiscal-year windows for ASM and store purchases;
+  - the odd default payout.
+- **Logged:**
+  - Backlog: correcting a GA resolution no. after posting; re-issuing a cancelled ISC/PR cash DV; a member-by-member (resumable) distribution for a large membership.
+  - The reviewer accepts the 30-minute gate timeout as reasonable (it changes how long a run may take, not what it checks). Because I changed my own guardrail files, it should be confirmed by Rhold.
+- **After the fixes:**
+GATE15_LINE

@@ -14,7 +14,7 @@ import { format, type Money } from "@/lib/money";
 import { guardPage } from "@/lib/page-guard";
 import { ratePercent } from "@/modules/surplus/engine";
 import { allocationLines, cetfReport, getAllocation } from "@/modules/surplus/service";
-import { ApproveButton, CetfRemitForm, DistributeButton, ElectionForm, PostForm, RedraftButton } from "@/modules/surplus/ui/forms";
+import { ApproveButton, CetfRemitForm, DistributeButton, ElectionForm, PostForm, RedraftButton, ReturnToDraftForm } from "@/modules/surplus/ui/forms";
 
 export const metadata: Metadata = { title: "Net surplus allocation · PCMPC MIS" };
 
@@ -104,18 +104,19 @@ async function AllocationContent(props: PageProps<"/year-end/surplus/[id]">) {
               <>
                 <p>The bookkeeper checks the figures and the members&apos; choices; the manager approves.</p>
                 {prepare ? <RedraftButton year={a.fiscalYear} /> : null}
-                {can(user, "surplus.approve") ? <ApproveButton allocationId={a.id} /> : null}
+                {can(user, "surplus.approve") ? <ApproveButton allocationId={a.id} revision={a.revision} /> : null}
               </>
             ) : null}
             {a.status === "APPROVED" ? (
               <>
                 <p>Once the General Assembly approves it, enter its resolution no. to post the allocation to the ledger.</p>
                 {prepare ? <PostForm allocationId={a.id} /> : null}
+                {can(user, "surplus.approve") ? <ReturnToDraftForm allocationId={a.id} /> : null}
               </>
             ) : null}
             {a.status === "POSTED" ? (
               <>
-                <p>Each member&apos;s unpaid loan balances are deducted first (if set), then the rest goes to savings, share capital or cash, as they chose.</p>
+                <p>Each member&apos;s past-due loan amounts are deducted first (if set), then the rest goes to savings, share capital or cash, as they chose.</p>
                 {prepare ? <DistributeButton allocationId={a.id} members={lines.length} /> : null}
               </>
             ) : null}

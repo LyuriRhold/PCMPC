@@ -54,6 +54,8 @@ export const surplusAllocations = pgTable(
     prRate: text("pr_rate").notNull(),
     status: text("status").$type<AllocationStatus>().notNull().default("DRAFT"),
     gaResolutionNo: text("ga_resolution_no"),
+    /** Goes up with every re-draft: an approval names the revision the manager looked at. */
+    revision: integer("revision").notNull().default(1),
     preparedBy: uuid("prepared_by")
       .notNull()
       .references(() => users.id),

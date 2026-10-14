@@ -13,7 +13,7 @@ import { LoanError } from "@/modules/loans/service";
 import { SavingsError } from "@/modules/savings/service";
 import { ShareError } from "@/modules/share/service";
 import { SurplusError, type SurplusPercents } from "./engine";
-import { approveAllocation, distributeAllocation, draftAllocation, postAllocation, remitCetf, setElection } from "./service";
+import { approveAllocation, distributeAllocation, draftAllocation, postAllocation, remitCetf, returnToDraft, setElection } from "./service";
 
 const EXPECTED = [SurplusError, LedgerError, LoanError, SavingsError, ShareError, CashieringError];
 
@@ -63,12 +63,26 @@ export async function draftAllocationAction(input: z.input<typeof draftSchema>):
 }
 
 const idSchema = z.object({ allocationId: z.uuid() });
-/** Manager: approves a draft (never the one who prepared it). */
-export async function approveAllocationAction(input: z.input<typeof idSchema>): Promise<ActionResult<null>> {
+const approveSchema = idSchema.extend({ revision: z.number().int().min(1).optional() });
+/** Manager: approves a draft (never the one who prepared it); the screen sends the revision it showed. */
+export async function approveAllocationAction(input: z.input<typeof approveSchema>): Promise<ActionResult<null>> {
   const actor = await requirePermission("surplus.approve");
   try {
-    const data = idSchema.parse(input);
+    const data = approveSchema.parse(input);
     await withTx((tx) => approveAllocation(tx, data, actor.id));
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, EXPECTED);
+  }
+}
+
+const returnSchema = idSchema.extend({ reason: z.string().trim().max(300) });
+/** Manager: sends an approved allocation back to draft, with a reason. */
+export async function returnToDraftAction(input: z.input<typeof returnSchema>): Promise<ActionResult<null>> {
+  const actor = await requirePermission("surplus.approve");
+  try {
+    const data = returnSchema.parse(input);
+    await withTx((tx) => returnToDraft(tx, data, actor.id));
     return ok(null);
   } catch (e) {
     return failFrom(e, EXPECTED);

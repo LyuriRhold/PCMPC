@@ -1,4 +1,3 @@
-import Decimal from "decimal.js";
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
@@ -13,17 +12,18 @@ import { loanInterestPaid, loanPaymentLines, pastDueLoans, planLoanPayment, reco
 import { members, type MemberStatus } from "@/modules/members/schema";
 import { checkTransferIn, depositableAccounts, recordTransfer, savingsGlAccountId } from "@/modules/savings/service";
 import { getSetting } from "@/modules/settings/service";
-import { averageShareMonth, capitalizeIscPr, cbuLines } from "@/modules/share/service";
-import { storePatronage } from "@/modules/store/pos";
+import { averageShareMonthFrom, capitalizeIscPr, cbuLines } from "@/modules/share/service";
+import { storePatronageBetween } from "@/modules/store/pos";
 import { waterBillsPaid } from "@/modules/water/reports";
-import { patronageOf, sharePool, splitSurplus, SurplusError, type SurplusPercents, type SurplusSplit } from "./engine";
+import { patronageOf, sharePool, splitSurplus, SurplusError, weightsOf, type SurplusPercents, type SurplusSplit } from "./engine";
 import { cetfRemittances, surplusAllocations, surplusMemberLines, type AllocationStatus, type PrBasis, type SurplusAllocation, type SurplusMemberLine } from "./schema";
 
 /**
  * Net surplus allocation (PHASE-15): who shares the year's ISC and PR, and how much (T15.3); the
  * workflow: draft → approve → post → distribute (T15.4).
  * ISC is shared by ASM (share.asm_basis, Phase 08); PR by patronage: loan interest paid (Phase 11),
- * net store purchases (Phase 13) and, if the basis says so, water bills paid (surplus.pr_basis).
+ * net store purchases (Phase 13) and, if the basis says so, water bills paid (surplus.pr_basis), all
+ * over the fiscal year's own months.
  */
 
 /** Members who share ISC and PR: active and inactive members (CONFIRM Q-15.2); applicants, terminated and deceased members don't. */
@@ -36,9 +36,9 @@ export async function memberEntitlements(fy: { year: number; startDate: Business
   const rows = await db.select({ id: members.id }).from(members).where(inArray(members.status, ELIGIBLE)).orderBy(asc(members.memberNo));
   const out: Entitlement[] = [];
   for (const { id } of rows) {
-    const asm = await averageShareMonth(id, fy.year, db);
+    const asm = await averageShareMonthFrom(id, fy.startDate, db);
     const loanInterest = await loanInterestPaid(id, fy.startDate, fy.endDate, db);
-    const store = await storePatronage(id, fy.year, db);
+    const store = await storePatronageBetween(id, fy.startDate, fy.endDate, db);
     const water = await waterBillsPaid(id, fy.startDate, fy.endDate, db);
     const patronage = patronageOf({ loanInterest, store, water }, basis);
     if (asm > 0n || patronage > 0n) out.push({ memberId: id, asm, loanInterest, store, water, patronage });
@@ -80,8 +80,8 @@ const FUND_KEYS = [
 ] as const;
 
 const reference = (year: number) => `NSA-${year}`;
-/** A fraction ("0.5") in basis points (5000). */
-const bps = (fraction: string) => new Decimal(fraction).mul(10000).toDecimalPlaces(0, Decimal.ROUND_HALF_UP).toNumber();
+/** Payout fractions (adding up to 1) in basis points adding up to exactly 10000. */
+const toBps = (fractions: string[]): number[] => allocate(10000n, weightsOf(fractions)).map((b) => Number(b));
 
 /** One allocation workflow step per fiscal year at a time. */
 const lockYear = (tx: Tx, year: number) => tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`surplus:${year}`}))`);
@@ -111,13 +111,14 @@ export async function draftAllocation(tx: Tx, input: { year: number; percents?: 
   const [existing] = await tx.select().from(surplusAllocations).where(eq(surplusAllocations.fiscalYear, year)).for("update");
   if (existing && existing.status !== "DRAFT") throw new SurplusError(`Fiscal year ${year}'s allocation is already ${statusWord(existing.status)}`);
 
+  // Percentages not given: the draft's own (as the GA approved them), or the settings for a first draft.
   const percents: SurplusPercents = {
-    reserve: input.percents?.reserve ?? (await getSetting("surplus.reserve_pct", tx)),
-    etf: input.percents?.etf ?? (await getSetting("surplus.etf_pct", tx)),
-    cdf: input.percents?.cdf ?? (await getSetting("surplus.cdf_pct", tx)),
-    optional: input.percents?.optional ?? (await getSetting("surplus.optional_pct", tx)),
-    iscShare: input.percents?.iscShare ?? (await getSetting("surplus.isc_share_of_remaining", tx)),
-    prShare: input.percents?.prShare ?? (await getSetting("surplus.pr_share_of_remaining", tx)),
+    reserve: input.percents?.reserve ?? existing?.reservePct ?? (await getSetting("surplus.reserve_pct", tx)),
+    etf: input.percents?.etf ?? existing?.etfPct ?? (await getSetting("surplus.etf_pct", tx)),
+    cdf: input.percents?.cdf ?? existing?.cdfPct ?? (await getSetting("surplus.cdf_pct", tx)),
+    optional: input.percents?.optional ?? existing?.optionalPct ?? (await getSetting("surplus.optional_pct", tx)),
+    iscShare: input.percents?.iscShare ?? existing?.iscShare ?? (await getSetting("surplus.isc_share_of_remaining", tx)),
+    prShare: input.percents?.prShare ?? existing?.prShare ?? (await getSetting("surplus.pr_share_of_remaining", tx)),
   };
   const split = splitSurplus(closing.netSurplus, percents);
   const basis = await getSetting("surplus.pr_basis", tx);
@@ -153,7 +154,7 @@ export async function draftAllocation(tx: Tx, input: { year: number; percents?: 
       kept.set(l.memberId, { electSavings: l.electSavings, electCapitalize: l.electCapitalize, electCash: l.electCash });
     }
     await tx.delete(surplusMemberLines).where(eq(surplusMemberLines.allocationId, existing.id));
-    await tx.update(surplusAllocations).set(values).where(eq(surplusAllocations.id, existing.id));
+    await tx.update(surplusAllocations).set({ ...values, revision: existing.revision + 1 }).where(eq(surplusAllocations.id, existing.id));
     id = existing.id;
   } else {
     const [a] = await tx
@@ -164,7 +165,8 @@ export async function draftAllocation(tx: Tx, input: { year: number; percents?: 
     id = a.id;
   }
   const payout = await getSetting("surplus.default_payout", tx);
-  const byDefault = { electSavings: bps(payout.savings), electCapitalize: bps(payout.capitalize), electCash: bps(payout.cash) };
+  const [dSavings = 10000, dCapital = 0, dCash = 0] = toBps([payout.savings, payout.capitalize, payout.cash]);
+  const byDefault = { electSavings: dSavings, electCapitalize: dCapital, electCash: dCash };
   if (shares.lines.length) {
     await tx.insert(surplusMemberLines).values(
       shares.lines.map((l) => ({
@@ -194,13 +196,24 @@ export async function draftAllocation(tx: Tx, input: { year: number; percents?: 
   return { id };
 }
 
-/** The manager approves a draft (never the one who prepared it). */
-export async function approveAllocation(tx: Tx, input: { allocationId: string }, managerId: string) {
+/** The manager approves a draft (never the one who prepared it); with `revision`, only the figures they looked at. */
+export async function approveAllocation(tx: Tx, input: { allocationId: string; revision?: number }, managerId: string) {
   const a = await lockAllocation(tx, input.allocationId);
   if (a.status !== "DRAFT") throw new SurplusError(`Fiscal year ${a.fiscalYear}'s allocation is already ${statusWord(a.status)}`);
   if (a.preparedBy === managerId) throw new SurplusError("The one who prepared the allocation can't approve it");
+  if (input.revision !== undefined && input.revision !== a.revision) throw new SurplusError("The draft was recomputed after you opened it; look at the new figures and approve again");
   await tx.update(surplusAllocations).set({ status: "APPROVED", approvedBy: managerId, approvedAt: sql`now()` }).where(eq(surplusAllocations.id, a.id));
   await audit(tx, { action: "surplus.approve", entity: "surplus_allocation", entityId: a.id, after: { year: a.fiscalYear }, userId: managerId });
+}
+
+/** The manager sends an approved allocation back to draft (e.g. the GA changed the percentages), with a reason. */
+export async function returnToDraft(tx: Tx, input: { allocationId: string; reason: string }, managerId: string) {
+  const reason = input.reason.trim();
+  if (!reason) throw new SurplusError("Enter why the allocation goes back to draft");
+  const a = await lockAllocation(tx, input.allocationId);
+  if (a.status !== "APPROVED") throw new SurplusError(a.status === "DRAFT" ? `Fiscal year ${a.fiscalYear}'s allocation is a draft` : `Fiscal year ${a.fiscalYear}'s allocation is already ${statusWord(a.status)}`);
+  await tx.update(surplusAllocations).set({ status: "DRAFT", approvedBy: null, approvedAt: null }).where(eq(surplusAllocations.id, a.id));
+  await audit(tx, { action: "surplus.return_to_draft", entity: "surplus_allocation", entityId: a.id, before: { status: "APPROVED", approvedBy: a.approvedBy }, after: { status: "DRAFT", reason }, userId: managerId });
 }
 
 /**
@@ -213,6 +226,11 @@ export async function postAllocation(tx: Tx, input: { allocationId: string; gaRe
   const a = await lockAllocation(tx, input.allocationId);
   if (a.status === "DRAFT") throw new SurplusError(`Fiscal year ${a.fiscalYear}'s allocation isn't approved yet`);
   if (a.status !== "APPROVED") throw new SurplusError(`Fiscal year ${a.fiscalYear}'s allocation is already ${statusWord(a.status)}`);
+  const [sums] = await tx
+    .select({ isc: sql<string>`coalesce(sum(${surplusMemberLines.isc}), 0)::text`, pr: sql<string>`coalesce(sum(${surplusMemberLines.pr}), 0)::text` })
+    .from(surplusMemberLines)
+    .where(eq(surplusMemberLines.allocationId, a.id));
+  if (BigInt(sums?.isc ?? "0") !== a.iscPool || BigInt(sums?.pr ?? "0") !== a.prPool) throw new SurplusError("The members' ISC and PR don't add up to the pools; send it back to draft and recompute");
   const lines: LineInput[] = [{ accountId: await accountIdFor("undivided_net_surplus", tx), debit: a.netSurplus, memo: `Net surplus ${a.fiscalYear}` }];
   for (const [field, key] of FUND_KEYS) if (a[field] > 0n) lines.push({ accountId: await accountIdFor(key, tx), credit: a[field], memo: `Net surplus ${a.fiscalYear}` });
   const je = await postJournal(
@@ -229,9 +247,12 @@ export async function postAllocation(tx: Tx, input: { allocationId: string; gaRe
 export async function setElection(tx: Tx, input: { lineId: string; savings: number; capitalize: number; cash: number }, actorId: string) {
   const parts = [input.savings, input.capitalize, input.cash];
   if (parts.some((p) => !Number.isSafeInteger(p) || p < 0) || parts.reduce((s, p) => s + p, 0) !== 10000) throw new SurplusError("The payout parts add up to 100%");
+  // The allocation first, then the line: the same order as recomputing and distributing.
+  const [found] = await tx.select({ allocationId: surplusMemberLines.allocationId }).from(surplusMemberLines).where(eq(surplusMemberLines.id, input.lineId));
+  if (!found) throw new SurplusError("Member line not found");
+  const a = await lockAllocation(tx, found.allocationId);
   const [line] = await tx.select().from(surplusMemberLines).where(eq(surplusMemberLines.id, input.lineId)).for("update");
   if (!line) throw new SurplusError("Member line not found");
-  const a = await lockAllocation(tx, line.allocationId);
   if (a.status === "DISTRIBUTED" || line.distributedAt) throw new SurplusError("This member's ISC and patronage refund were already paid out");
   await tx.update(surplusMemberLines).set({ electSavings: input.savings, electCapitalize: input.capitalize, electCash: input.cash }).where(eq(surplusMemberLines.id, line.id));
   await audit(tx, { action: "surplus.election", entity: "surplus_member_line", entityId: line.id, before: { savings: line.electSavings, capitalize: line.electCapitalize, cash: line.electCash }, after: { savings: input.savings, capitalize: input.capitalize, cash: input.cash }, userId: actorId });
@@ -291,6 +312,8 @@ export async function distributeAllocation(tx: Tx, input: { allocationId: string
   const [iscPayable, prPayable, wtaxPayable] = [await accountIdFor("isc_payable", tx), await accountIdFor("patronage_refund_payable", tx), await accountIdFor("withholding_tax_payable", tx)];
   let paid = 0;
   for (const { line, memberNo, lastName, firstName } of rows) {
+    // The member first (as at the teller and on loan releases), then their loans, savings and capital.
+    await tx.select({ id: members.id }).from(members).where(eq(members.id, line.memberId)).for("update");
     const name = `${firstName} ${lastName}`;
     const memo = `ISC/PR ${a.fiscalYear} · ${memberNo}`;
     const sources: Source[] = [

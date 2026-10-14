@@ -63,7 +63,7 @@ export function validatePercents(p: SurplusPercents): string[] {
 }
 
 /** Fractions as whole-number weights on a common scale ("0.1", "0.03" → 10n, 3n). */
-function weightsOf(fractions: string[]): bigint[] {
+export function weightsOf(fractions: string[]): bigint[] {
   const scale = Math.max(0, ...fractions.map((f) => (f.split(".")[1] ?? "").length));
   return fractions.map((f) => {
     const [i = "0", frac = ""] = f.split(".");
@@ -73,7 +73,7 @@ function weightsOf(fractions: string[]): bigint[] {
 
 /** Splits `parts` of a whole by fractions; the last part takes 1 − Σ fractions (allocate keeps it exact). */
 function splitByFractions(total: Money, fractions: string[]): Money[] {
-  const rest = new Decimal(1).minus(fractions.reduce((s, f) => s.plus(f), new Decimal(0))).toString();
+  const rest = new Decimal(1).minus(fractions.reduce((s, f) => s.plus(f), new Decimal(0))).toFixed();
   const weights = weightsOf([...fractions, rest]);
   if (weights.every((w) => w === 0n)) return weights.map(() => 0n);
   return allocate(total, weights);

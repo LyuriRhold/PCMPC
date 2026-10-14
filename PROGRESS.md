@@ -23,7 +23,7 @@
 | 12 | [Store: Inventory & Purchasing](docs/phases/PHASE-12-store-inventory.md) | ✅ | phase-12-store-inventory · tag `phase-12` | rldejoya (reviewer agent: stock-move order fixed; follow-ups) · 2026-10-13 |
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ✅ | phase-13-store-pos · tag `phase-13` | rldejoya (reviewer agent: charge-sale refunds fixed; follow-ups) · 2026-10-14 |
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ✅ | phase-14-fs-close · tag `phase-14` | rldejoya (reviewer agent: next fiscal year and asset register fixed; follow-ups) · 2026-10-14 |
-| 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | 🔨 | phase-15-surplus-allocation | |
+| 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | 🟡 awaiting review | phase-15-surplus-allocation | |
 | 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ⬜ | | |
 | 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | ⬜ | | |
 | 18 | [Hardening, Vercel Deployment, Backups, UAT & Go-Live](docs/phases/PHASE-18-golive.md) | ⬜ | | |
@@ -205,7 +205,7 @@
 - [x] T15.5 CETF payable report + remittance via DV
 - [x] T15.6 UI + reports (allocation summary, per-member list for GA, Excel export)
 - [x] Acceptance tests written first (tests/acceptance/phase-15.test.ts)
-- [ ] Exit checks passed
+- [x] Exit checks passed
 
 ### Phase 16 — Reports: CDA, Management Dashboard & Member Statements
 - [ ] T16.1 Officers/committees/trainings module
@@ -1631,3 +1631,61 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - `npm run build` green.
   - E2E on a production build green: phase-14, now 2 tests (the new one adds an asset brought forward and voids a wrong one), and ui-shell. The full E2E: 24 of 24 (phases 00–14).
   - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (migrations 0040–0041).
+
+### Phase 15 summary
+**Built**
+- **Schema (T15.1):**
+  - `surplus_allocations`: one per fiscal year, with the percentages applied, the split, the ISC and PR rates, the GA resolution, who prepared, approved, posted and distributed it, and the entry.
+  - `surplus_member_lines`: per member, the ASM, ISC, patronage (loan interest, store, water), PR, gross, the payout choice, and once paid the withholding, arrears offset, net, payouts, the entry and the DV.
+  - `cetf_remittances`.
+  - Triggers: a posted allocation only gets its distribution recorded; member amounts change only on a draft; a paid line never changes; nothing is deleted.
+- **Engine (T15.2):** the law's floors and ceilings, each with its own message; every split uses `allocate`.
+- **Per member (T15.3):** ISC by ASM (`averageShareMonth`); PR by patronage: loan interest paid (new `loanInterestPaid`), net store purchases (`storePatronage`) and, when the basis says so, water bills paid (new `waterBillsPaid`). Active and inactive members share.
+- **Workflow (T15.4):**
+  - **Draft:** from the closed year's net surplus, with the settings or the GA's percentages. A re-draft recomputes and keeps members' choices.
+  - **Approve:** by the manager, never the preparer.
+  - **Post:** with the GA resolution: Dr Undivided Net Surplus / Cr the funds, CETF payable, ISC payable, PR payable.
+  - **Payout choices:** savings / share capital / cash, per member.
+  - **Distribute:** withholding, then arrears offset as a loan payment, then savings, ISC/PR capitalized (share ledger) and cash by DV.
+- **CETF (T15.5):** the report (allocated, remitted, pending, left) and the remittance by DV.
+- **Screens and export (T15.6):**
+  - Net surplus allocation: the percentages in force, drafting, the allocations, the CETF to remit.
+  - The allocation page: summary, next step, payout choices, distribution, CETF.
+  - The Excel workbook (summary + per-member list for the GA).
+  - Navigation live.
+
+**Decisions** (see Questions Q-15.1–Q-15.5)
+- Eligibility, the patronage basis, the payout default, withholding, arrears, dates and the CETF payee are defaults to confirm.
+
+**Deviations from spec (with reason)**
+- **Data model:** more columns than the spec lists:
+  - the percentages, basis, withholding rate and offset flag the allocation used (so a posted year doesn't change when the settings do);
+  - who and when for each step;
+  - the water patronage, the payout choice in basis points, and the savings account, entry and DV of each line;
+  - a `cetf_remittances` table (tracking per year).
+- **New setting `surplus.default_payout`** (the spec says the default comes from settings; DOMAIN has no key), CONFIRM.
+- **New permissions:** `surplus.prepare` (bookkeeper), `surplus.approve` (manager).
+- **The law's limits are constants** (RA 9520 Art. 86; the PR floor is CDA guidance); the settings registry already bounds them the same way. The percentages themselves come from the settings or the GA.
+- **Other modules gained small helpers:**
+  - share: `cbuLines` takes a purpose; `capitalizeIscPr` records ISC_CAPITALIZED / PR_CAPITALIZED;
+  - loans: `loanInterestPaid`, `pastDueLoans`;
+  - water: `waterBillsPaid`.
+- **The acceptance fixture** raises the minimum paid-up (outside the 10% holding cap) while its three members pay up, then restores it, so no filler shareholders are needed. It marks January–November closed directly (their checklists are Phase 14's).
+- **Navigation:** the "coming soon" example moved to CDA reports (Phase 16).
+- **E2E:** covers the Net surplus allocation page (the E2E database has no closed year). The allocation page is covered by the build and the integration tests of its actions.
+
+**Follow-ups**
+- Answer Q-15.1–Q-15.5; send the by-laws' allocation article and the CETF recipient.
+- Backlog: a printable ISC/PR notice per member and taking payout choices in bulk; ASM and store patronage over a fiscal year that doesn't start in January.
+
+**Exit checks / counts:**
+- `npm run gate` is green: 683 tests (55 files), scan clean. Phase 15 adds:
+  - 10 acceptance tests (A15.1–A15.10);
+  - 9 integration tests (schema and triggers; each member's ASM and patronage, water; the workflow, distribution with withholding/arrears/savings/capital/cash and the DVs released, arrears larger than the refund; the CETF; the workbook);
+  - 4 engine unit tests.
+- A first gate run broke midway: Postgres was stopped by a console Ctrl+C event (its log: a backend "terminated by exception 0xC000013A"). After `npm run db:up` it ran green.
+- `npm run build` is green (`/year-end/surplus`, `/year-end/surplus/[id]`, `/api/reports/surplus/[id]`).
+- `npm run e2e -- phase-15` is green: the bookkeeper opens Net surplus allocation (the percentages in force, the CETF to remit).
+- The full E2E against a production build passed 24 of 25: the dashboard test still expected the old "coming soon" example. Fixed, then ui-shell and phase-15 re-ran green.
+- Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.
+- Databases set up earlier need `npm run db:migrate && npm run db:seed` (migrations 0042–0043, the surplus permissions and the default-payout setting).

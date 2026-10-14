@@ -198,7 +198,7 @@
 - [x] Exit checks passed
 
 ### Phase 15 — Net Surplus Allocation, Interest on Share Capital & Patronage Refund
-- [ ] T15.1 Schema + migrations
+- [x] T15.1 Schema + migrations
 - [ ] T15.2 Allocation engine (pure) + validation
 - [ ] T15.3 Per-member ISC/PR computation using `averageShareMonth`, loan interest paid, `storePatronage`
 - [ ] T15.4 Workflow: draft → approve → post (GL) → distribute (savings/share/cash/offset)

@@ -24,6 +24,19 @@ const int = (min: number, max = 1_000_000) =>
 const text = z.string().max(500);
 const numberFormat = z.string().regex(/\{0+\}/, "format needs a {000…} counter");
 
+/** Adds non-negative decimal strings exactly ("0.5" + "0.25" + "0.25" → "1"). */
+function addRates(...values: string[]): string {
+  const scale = Math.max(...values.map((v) => (v.split(".")[1] ?? "").length));
+  const total = values.reduce((sum, v) => {
+    const [i = "0", f = ""] = v.split(".");
+    return sum + BigInt(i + f.padEnd(scale, "0"));
+  }, 0n);
+  const digits = total.toString().padStart(scale + 1, "0");
+  const intPart = digits.slice(0, digits.length - scale);
+  const frac = digits.slice(digits.length - scale).replace(/0+$/, "");
+  return frac ? `${intPart}.${frac}` : intPart;
+}
+
 /** Compares two non-negative decimal strings exactly. */
 function cmp(a: string, b: string): number {
   const [ai = "0", af = ""] = a.split(".");
@@ -144,6 +157,15 @@ export const SETTINGS = {
   "surplus.pr_share_of_remaining": def({ group: "Net surplus", label: "PR share of the remainder", kind: "rate", schema: rateBetween("0.30", "1"), default: "0.30", confirm: true, note: "must be ≥ 30%" }),
   "surplus.pr_basis": def({ group: "Net surplus", label: "Patronage refund basis", kind: "json", schema: z.object({ loanInterestPaid: z.boolean(), netStorePurchases: z.boolean(), waterBillsPaidByMembers: z.boolean() }), default: { loanInterestPaid: true, netStorePurchases: true, waterBillsPaidByMembers: false }, confirm: true, note: "non-members never get PR" }),
   "surplus.offset_arrears_first": def({ group: "Net surplus", label: "Offset arrears before paying ISC/PR", kind: "bool", schema: z.boolean(), default: true, confirm: true }),
+  "surplus.default_payout": def({
+    group: "Net surplus",
+    label: "Default payout of ISC/PR",
+    kind: "json",
+    schema: z.object({ savings: rate, capitalize: rate, cash: rate }).refine((v) => !RATE_RE.test(v.savings) || !RATE_RE.test(v.capitalize) || !RATE_RE.test(v.cash) || addRates(v.savings, v.capitalize, v.cash) === "1", "the three parts add up to 100%"),
+    default: { savings: "1", capitalize: "0", cash: "0" },
+    confirm: true,
+    note: "a member's own election overrides it",
+  }),
   "surplus.isc_pr_wtax_rate": def({ group: "Net surplus", label: "Withholding tax on ISC/PR", kind: "rate", schema: rateBetween("0", "1"), default: "0", confirm: true }),
 
   // Cashiering

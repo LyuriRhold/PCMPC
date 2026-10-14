@@ -307,6 +307,18 @@ export const PRESENTATION: Record<SettingKey, Presentation> = {
     help: "Whether a member's overdue amounts are deducted first.",
     spec: { type: "yesno", yes: "Deduct them first", no: "Pay in full" },
   },
+  "surplus.default_payout": {
+    label: "ISC and patronage refund are paid",
+    help: "How a member's interest on share capital and patronage refund is paid unless they choose otherwise. The three parts add up to 100%.",
+    spec: {
+      type: "form",
+      fields: [
+        { key: "savings", label: "Credited to savings", spec: { type: "percent" } },
+        { key: "capitalize", label: "Added to share capital", spec: { type: "percent" } },
+        { key: "cash", label: "Paid in cash", spec: { type: "percent" } },
+      ],
+    },
+  },
   "surplus.isc_pr_wtax_rate": { label: "Withholding tax on ISC and patronage refund", help: "Leave at 0% if exempt.", spec: { type: "percent" } },
 
   // ── Cashiering ──

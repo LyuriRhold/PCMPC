@@ -3,12 +3,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import "@/modules/plugins";
 import { getDb, getPool, withTx } from "@/db/client";
 import { setClock } from "@/lib/dates";
-import { accountSegments, assetClasses, fsLineAccounts, fsLines } from "@/modules/accounting/schema";
+import { registerAssetAction, runDepreciationAction } from "@/modules/accounting/actions";
+import { depreciationOf, monthlyDepreciation } from "@/modules/accounting/assets";
+import { accountSegments, assetClasses, depreciationRuns, fixedAssets, fsLineAccounts, fsLines } from "@/modules/accounting/schema";
 import { seedFs } from "@/modules/accounting/seed";
 import { cashFlows, changesInEquity, financialCondition, operations, unmappedAccounts } from "@/modules/accounting/statements";
-import { accounts } from "@/modules/ledger/schema";
+import { ForbiddenError, runAs } from "@/lib/auth-guard";
+import { ensureFiscalYear } from "@/modules/ledger/periods";
+import { accounts, journalEntries, journalLines } from "@/modules/ledger/schema";
+import { accountIdFor, trialBalance } from "@/modules/ledger/service";
 import { P } from "../helpers/phase03";
-import { fsPeople, postFixture, setupFs } from "../helpers/phase14";
+import { fsPeople, on, postFixture, setupFs } from "../helpers/phase14";
 
 beforeEach(async () => {
   await setupFs();
@@ -118,5 +123,66 @@ describe("T14.2 the statements", () => {
     const [soo] = await getDb().select().from(fsLines).where(eq(fsLines.code, "OTHER_INCOME"));
     await getDb().insert(fsLineAccounts).values({ fsLineId: soo!.id, accountId: acct!.id });
     await expect(financialCondition("2026-12-31")).rejects.toThrow(/11190 Petty Cash Fund/);
+  });
+});
+
+describe("T14.3 fixed assets and depreciation", () => {
+  const register = (o: Partial<Parameters<typeof registerAssetAction>[0]> = {}) =>
+    runAs(fsPeople().bookkeeper, () => registerAssetAction({ tag: "FA-1", description: "Water pump", classCode: "WATER_SYSTEM", acquisitionDate: "2026-10-05", cost: "10,000.00", salvage: "1,000.00", lifeMonths: 7, ...o }));
+  const run = (period: string) => runAs(fsPeople().bookkeeper, () => runDepreciationAction({ period }));
+
+  it("straight-line monthly, HALF-UP; the last month takes the residue so the asset ends at its salvage value", () => {
+    const asset = { acquisitionDate: "2026-10-05", cost: P(10000), salvage: P(1000), lifeMonths: 7, accumulated: 0n };
+    expect(monthlyDepreciation(asset, "2026-09")).toBe(0n);
+    expect(monthlyDepreciation(asset, "2026-10")).toBe(P(1285, 71)); // 9,000 ÷ 7 = 1,285.714…
+    expect(monthlyDepreciation({ ...asset, accumulated: P(1285, 71) * 6n }, "2027-04")).toBe(P(1285, 74));
+    expect(monthlyDepreciation({ ...asset, accumulated: P(9000) }, "2027-05")).toBe(0n);
+  });
+
+  it("the register: tag, class, cost, salvage and life are checked; terms never change", async () => {
+    expect(await register({ cost: "0.00" })).toEqual({ ok: false, error: "The cost must be more than zero" });
+    expect(await register({ salvage: "10,000.00" })).toEqual({ ok: false, error: "The salvage value is 0 or more and less than the cost" });
+    expect(await register({ lifeMonths: 0 })).toEqual({ ok: false, error: "The useful life is 1 to 600 months" });
+    expect(await register({ classCode: "SHIPS" })).toEqual({ ok: false, error: "Choose an asset class" });
+    expect(await register({ acquisitionDate: "2026-12-16" })).toEqual({ ok: false, error: "The acquisition date can't be in the future" });
+    await expect(runAs(fsPeople().teller, () => registerAssetAction({ tag: "X", description: "x", classCode: "WATER_SYSTEM", acquisitionDate: "2026-10-05", cost: "1.00", salvage: "0", lifeMonths: 1 }))).rejects.toBeInstanceOf(ForbiddenError);
+    const a = await register({ tag: "fa-1" });
+    if (!a.ok) throw new Error(a.error);
+    expect(await register()).toEqual({ ok: false, error: "Asset tag FA-1 is already used" });
+    await expect(getPool().query("UPDATE fixed_assets SET cost = 1 WHERE id = $1", [a.data.id])).rejects.toThrow(/don't change/);
+    await expect(getPool().query("DELETE FROM fixed_assets WHERE id = $1", [a.data.id])).rejects.toThrow(/can't be deleted/);
+  });
+
+  it("runs go month by month, one entry per month (Dr Depreciation / Cr Accumulated Depreciation per class), until the asset is fully depreciated", async () => {
+    const pump = await register();
+    const pc = await register({ tag: "FA-2", description: "Computer", classCode: "OFFICE_EQUIPMENT", acquisitionDate: "2026-12-01", cost: "36,000.00", salvage: "0.00", lifeMonths: 36 });
+    if (!pump.ok || !pc.ok) throw new Error("register");
+    expect(await run("2026-11")).toEqual({ ok: false, error: "Run the depreciation for 2026-10 first" });
+    expect(await run("2027-01")).toEqual({ ok: false, error: "2027-01 hasn't started yet" });
+    expect(await run("2026-10")).toEqual({ ok: true, data: { total: "₱1,285.71", assets: 1 } });
+    expect(await run("2026-11")).toEqual({ ok: true, data: { total: "₱1,285.71", assets: 1 } });
+    const dec = await run("2026-12");
+    expect(dec).toEqual({ ok: true, data: { total: "₱2,285.71", assets: 2 } });
+    const [runRow] = await getDb().select().from(depreciationRuns).where(eq(depreciationRuns.period, "2026-12"));
+    const lines = await getDb().select().from(journalLines).where(eq(journalLines.jeId, runRow!.jeId!));
+    const [exp, water, office] = [await accountIdFor("depreciation_expense"), await accountIdFor("accumulated_depreciation_WATER_SYSTEM"), await accountIdFor("accumulated_depreciation_OFFICE_EQUIPMENT")];
+    expect(lines.map((l) => [l.accountId, l.debit, l.credit])).toEqual([
+      [exp, P(2285, 71), 0n],
+      [office, 0n, P(1000)],
+      [water, 0n, P(1285, 71)],
+    ]);
+    const [je] = await getDb().select().from(journalEntries).where(eq(journalEntries.id, runRow!.jeId!));
+    expect(je?.entryDate).toBe("2026-12-31");
+    // The pump through its seventh month (April 2027): ₱9,000.00 in all, then nothing.
+    for (const p of ["2027-01", "2027-02", "2027-03", "2027-04", "2027-05"]) {
+      on(`${p}-28`);
+      await withTx((tx) => ensureFiscalYear(tx, 2027));
+      expect((await run(p)).ok).toBe(true);
+    }
+    expect(await depreciationOf(pump.data.id, "2027-04")).toBe(P(1285, 74));
+    expect(await depreciationOf(pump.data.id, "2027-05")).toBe(0n);
+    const [done] = await getDb().select().from(fixedAssets).where(eq(fixedAssets.id, pump.data.id));
+    expect(done).toMatchObject({ accumulated: P(9000), status: "FULLY_DEPRECIATED" });
+    expect((await trialBalance("2027-12-31")).balanced).toBe(true);
   });
 });

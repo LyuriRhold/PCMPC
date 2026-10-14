@@ -190,7 +190,7 @@
 ### Phase 14 — Financial Statements, Period Close & Fixed Assets
 - [x] T14.1 Schema + migrations + FS line seed (PFRF-for-Coops layout; mark it CONFIRM)
 - [x] T14.2 FS engine (all 4 statements + comparatives) + mapping completeness check
-- [ ] T14.3 Fixed assets + depreciation run
+- [x] T14.3 Fixed assets + depreciation run
 - [ ] T14.4 Bank reconciliation
 - [ ] T14.5 Month close checklist + lock/reopen; year-end close + new FY opening
 - [ ] T14.6 UI + Excel (exceljs) and PDF exports

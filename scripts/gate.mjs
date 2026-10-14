@@ -16,7 +16,9 @@ try { state = JSON.parse(readFileSync(STATE, "utf8")); } catch {}
 
 let ok = true, out = "";
 try {
-  out = execSync("npm run gate --silent", { encoding: "utf8", stdio: "pipe", timeout: 14 * 60 * 1000 });
+  // 30 min: on this PC the test workers follow free memory (vitest.config.mts); with 1 worker the
+  // suite alone takes ~20 min. A slow run must not count as red.
+  out = execSync("npm run gate --silent", { encoding: "utf8", stdio: "pipe", timeout: 30 * 60 * 1000 });
 } catch (e) {
   ok = false;
   out = `${e.stdout ?? ""}\n${e.stderr ?? ""}`;

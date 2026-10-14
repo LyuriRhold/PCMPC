@@ -10,7 +10,7 @@
   },
   "hooks": {
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "node scripts/gate.mjs", "timeout": 900 } ] }
+      { "hooks": [ { "type": "command", "command": "node scripts/gate.mjs", "timeout": 1900 } ] }
     ]
   }
 }

@@ -379,6 +379,7 @@
 - 2026-10-14 · phase 14 · Financial-statement lines and segments are data (`fs_lines`, `fs_line_accounts`, `account_segments`) edited from Financial statements › Account mapping, and every postable account must be mapped before the statements run · config over code; a new account can't silently drop off the FS
 - 2026-10-14 · phase 15 · The bookkeeper prepares, posts and distributes the allocation; the manager approves it (new permissions surplus.prepare / surplus.approve); posting needs the GA resolution no. · separation of duties per the spec, on the roles that already do the books
 - 2026-10-14 · phase 15 · Every split of the allocation (funds, ETF local/CETF, ISC/PR pools, each member's share) uses money.allocate, so the parts always add up; each payout is drawn from ISC payable first, then PR payable · DOMAIN §3 (pool splits); a fixed, auditable order
+- 2026-10-14 · phase 15 · The Stop-hook gate may run up to 30 min (scripts/gate.mjs, .claude/settings.json; was 14/15 min); DB tests restore the seeded reference data from a per-worker snapshot instead of re-seeding (~0.35 s a test); ESLint uses its cache · with little free memory this PC runs 1–2 test workers and the full gate took 16–19 min, so a green run was cut off as red. Nothing the gate checks changed
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)
@@ -1687,5 +1688,10 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - `npm run build` is green (`/year-end/surplus`, `/year-end/surplus/[id]`, `/api/reports/surplus/[id]`).
 - `npm run e2e -- phase-15` is green: the bookkeeper opens Net surplus allocation (the percentages in force, the CETF to remit).
 - The full E2E against a production build passed 24 of 25: the dashboard test still expected the old "coming soon" example. Fixed, then ui-shell and phase-15 re-ran green.
+- The Stop-hook gate was cut off at 14 minutes. With 1.2–1.7 GB free, vitest runs 1–2 workers and the full gate takes 16–19 minutes. Fixes:
+  - the gate may now run 30 minutes;
+  - DB tests restore the seeded reference data from a snapshot (`tests/helpers/phase01.ts`);
+  - ESLint uses its cache.
+  - Then: `npm run gate` green in 19 minutes on 1 worker (683 tests; vitest 1,037 s, versus 815 s on 2 workers before).
 - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK.
 - Databases set up earlier need `npm run db:migrate && npm run db:seed` (migrations 0042–0043, the surplus permissions and the default-payout setting).

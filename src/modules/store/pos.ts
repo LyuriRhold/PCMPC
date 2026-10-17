@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { assertNotSameUser } from "@/lib/auth-guard";
-import { businessToday } from "@/lib/dates";
+import { businessToday, type BusinessDate } from "@/lib/dates";
 import { divide, format, type Money } from "@/lib/money";
 import { next as nextNumber } from "@/lib/numbering";
 import { users } from "@/modules/auth/schema";
@@ -275,8 +275,11 @@ export async function shiftSales(shiftId: string, db: Db | Tx = getDb()) {
  * purchases, cash and charge, less what they returned in the year.
  */
 export async function storePatronage(memberId: string, year: number, db: Db | Tx = getDb()): Promise<Money> {
-  const from = `${year}-01-01`;
-  const to = `${year}-12-31`;
+  return storePatronageBetween(memberId, `${year}-01-01`, `${year}-12-31`, db);
+}
+
+/** A member's net store purchases between two dates (a fiscal year that may not start in January). */
+export async function storePatronageBetween(memberId: string, from: BusinessDate, to: BusinessDate, db: Db | Tx = getDb()): Promise<Money> {
   const [bought] = await db
     .select({ s: sql<string>`coalesce(sum(${sales.total}), 0)::text` })
     .from(sales)

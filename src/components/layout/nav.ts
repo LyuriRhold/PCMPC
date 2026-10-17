@@ -417,7 +417,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/accounting/close", label: "Period close", icon: CalendarCheck, status: "live", permission: ["gl.read", "gl.close", "gl.reopen"], phase: "14", summary: "Month-end and year-end close checklist." },
       { href: "/accounting/fixed-assets", label: "Fixed assets", icon: Building2, status: "live", permission: "gl.read", phase: "14", summary: "Asset register and depreciation runs." },
       { href: "/accounting/bank", label: "Bank reconciliation", icon: Landmark, status: "live", permission: "gl.read", phase: "14", summary: "Monthly reconciliation of each bank account." },
-      { href: "/year-end/surplus", label: "Net surplus allocation", icon: Percent, status: "soon", phase: "15", summary: "Statutory funds, interest on share capital and patronage refund." },
+      { href: "/year-end/surplus", label: "Net surplus allocation", icon: Percent, status: "live", permission: "gl.read", phase: "15", summary: "Statutory funds, interest on share capital and patronage refund." },
     ],
   },
   {

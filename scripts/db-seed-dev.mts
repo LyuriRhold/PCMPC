@@ -20,7 +20,7 @@ if (process.env.APP_ENV === "production" || !["localhost", "127.0.0.1", "::1", "
   process.exit(1);
 }
 
-const adminName = (process.env.SEED_ADMIN_USERNAME ?? "admin").toLowerCase();
+const adminName = (process.env.SEED_ADMIN_USERNAME || "admin").toLowerCase();
 let created = 0;
 let skipped = 0;
 await withTx(async (tx) => {

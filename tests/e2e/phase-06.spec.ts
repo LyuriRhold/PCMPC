@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { extractText, getDocumentProxy } from "unpdf";
 
-const adminUser = process.env.SEED_ADMIN_USERNAME ?? "admin";
-const adminPass = process.env.SEED_ADMIN_PASSWORD ?? "";
+const adminUser = process.env.SEED_ADMIN_USERNAME || "admin";
+const adminPass = process.env.SEED_ADMIN_PASSWORD || "Pass123456";
 
 async function signIn(page: Page, username: string, password: string) {
   await page.goto("/login");

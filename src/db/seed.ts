@@ -30,17 +30,21 @@ export const SEED_STEPS: SeedStep[] = [
   { name: "loan products REG, EMR, PRD and their deductions (DOMAIN samples, CONFIRM)", run: seedLoanProducts },
 ];
 
-/** The first admin, from SEED_ADMIN_USERNAME / SEED_ADMIN_PASSWORD. */
+/**
+ * The first admin when SEED_ADMIN_USERNAME / SEED_ADMIN_PASSWORD aren't set (Rhold's choice,
+ * 2026-10-17): change the password after the first sign-in (Admin › Users).
+ */
+export const DEFAULT_ADMIN = { username: "admin", password: "Pass123456" } as const;
+
+/** The first admin, from SEED_ADMIN_USERNAME / SEED_ADMIN_PASSWORD, or DEFAULT_ADMIN. Never replaces an existing one. */
 export const ADMIN_STEP: SeedStep = {
   name: "first admin user",
   run: async (tx) => {
-    const username = process.env.SEED_ADMIN_USERNAME;
-    const password = process.env.SEED_ADMIN_PASSWORD;
-    if (!username || !password) {
-      throw new Error("Set SEED_ADMIN_USERNAME and SEED_ADMIN_PASSWORD (at least 10 characters) in .env before seeding");
-    }
+    const username = process.env.SEED_ADMIN_USERNAME || DEFAULT_ADMIN.username;
+    const fromEnv = !!process.env.SEED_ADMIN_PASSWORD;
+    const password = process.env.SEED_ADMIN_PASSWORD || DEFAULT_ADMIN.password;
     const result = await seedAdmin(tx, { username, password, fullName: "System Administrator" });
-    console.log(`  admin "${username}": ${result}`);
+    console.log(`  admin "${username}": ${result}${result === "created" && !fromEnv ? " with the default password; change it after the first sign-in" : ""}`);
   },
 };
 

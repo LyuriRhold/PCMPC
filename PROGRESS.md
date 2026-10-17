@@ -380,6 +380,7 @@
 - 2026-10-14 · phase 15 · The bookkeeper prepares, posts and distributes the allocation; the manager approves it (new permissions surplus.prepare / surplus.approve); posting needs the GA resolution no. · separation of duties per the spec, on the roles that already do the books
 - 2026-10-14 · phase 15 · Every split of the allocation (funds, ETF local/CETF, ISC/PR pools, each member's share) uses money.allocate, so the parts always add up; each payout is drawn from ISC payable first, then PR payable · DOMAIN §3 (pool splits); a fixed, auditable order
 - 2026-10-14 · phase 15 · The Stop-hook gate may run up to 30 min (scripts/gate.mjs, .claude/settings.json; was 14/15 min); DB tests restore the seeded reference data from a per-worker snapshot instead of re-seeding (~0.35 s a test); ESLint uses its cache · with little free memory this PC runs 1–2 test workers and the full gate took 16–19 min, so a green run was cut off as red. Nothing the gate checks changed
+- 2026-10-17 · admin seed · Without SEED_ADMIN_USERNAME / SEED_ADMIN_PASSWORD the seed creates the first admin as admin / Pass123456 (src/db/seed.ts DEFAULT_ADMIN; the E2E specs use the same default); the env vars still win when set, and an existing admin is never replaced · Rhold's choice, so .env needs no admin password. Change it after the first sign-in (Admin › Users), and before any deployment: the default is in the repository
 - (pending) · early water pilot after Phase 07? (see PLAN §6)
 
 ## Backlog (out-of-scope ideas found while building)

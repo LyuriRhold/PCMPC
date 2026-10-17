@@ -1,7 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 
-export const adminUser = process.env.SEED_ADMIN_USERNAME ?? "admin";
-export const adminPass = process.env.SEED_ADMIN_PASSWORD ?? "";
+export const adminUser = process.env.SEED_ADMIN_USERNAME || "admin";
+export const adminPass = process.env.SEED_ADMIN_PASSWORD || "Pass123456";
 
 export async function signIn(page: Page, username: string, password: string) {
   await page.goto("/login");

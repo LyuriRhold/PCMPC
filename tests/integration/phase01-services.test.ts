@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb, withTx } from "@/db/client";
-import { runSeedSteps } from "@/db/seed";
+import { DEFAULT_ADMIN, runSeedSteps } from "@/db/seed";
 import { getAuth } from "@/lib/auth";
 import { getCurrentUser, requirePermission, runAs, UnauthenticatedError } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
@@ -42,13 +42,26 @@ describe("T1.3 seed", () => {
     expect(adminPerms.map((p) => p.permissionCode)).toContain("admin.users");
   });
 
-  it("refuses to seed an admin without SEED_ADMIN_* env", async () => {
-    const saved = process.env.SEED_ADMIN_PASSWORD;
+  it("without SEED_ADMIN_* env, seeds the default admin (admin, the default password); never replaces an existing admin", async () => {
+    const saved = { username: process.env.SEED_ADMIN_USERNAME, password: process.env.SEED_ADMIN_PASSWORD };
+    delete process.env.SEED_ADMIN_USERNAME;
     delete process.env.SEED_ADMIN_PASSWORD;
     try {
-      await expect(withTx((tx) => runSeedSteps(tx, { includeAdmin: true }))).rejects.toThrow(/SEED_ADMIN_PASSWORD/);
+      await withTx((tx) => runSeedSteps(tx, { includeAdmin: true }));
+      const admin = await loadUser(DEFAULT_ADMIN.username);
+      expect(admin).toMatchObject({ roleCode: "ADMIN", isActive: true });
+      expect((await signIn({ username: DEFAULT_ADMIN.username, password: DEFAULT_ADMIN.password })).user?.id).toBe(admin.id);
+      // Seeding again with other env values leaves that admin and its password alone.
+      process.env.SEED_ADMIN_PASSWORD = "Another-Password-1";
+      await withTx((tx) => runSeedSteps(tx, { includeAdmin: true }));
+      expect((await signIn({ username: DEFAULT_ADMIN.username, password: DEFAULT_ADMIN.password })).user?.id).toBe(admin.id);
     } finally {
-      if (saved !== undefined) process.env.SEED_ADMIN_PASSWORD = saved;
+      const restore = (key: "SEED_ADMIN_USERNAME" | "SEED_ADMIN_PASSWORD", value: string | undefined) => {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      };
+      restore("SEED_ADMIN_USERNAME", saved.username);
+      restore("SEED_ADMIN_PASSWORD", saved.password);
     }
   });
 });

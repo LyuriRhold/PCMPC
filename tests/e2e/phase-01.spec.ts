@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-const username = process.env.SEED_ADMIN_USERNAME ?? "admin";
-const password = process.env.SEED_ADMIN_PASSWORD ?? "";
+const username = process.env.SEED_ADMIN_USERNAME || "admin";
+const password = process.env.SEED_ADMIN_PASSWORD || "Pass123456";
 
 test("A1.10 login as admin → dashboard → Users → logout; protected URL redirects to login", async ({ page }) => {
   expect(password, "SEED_ADMIN_PASSWORD must be set for E2E").not.toBe("");

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-const username = process.env.SEED_ADMIN_USERNAME ?? "admin";
-const password = process.env.SEED_ADMIN_PASSWORD ?? "";
+const username = process.env.SEED_ADMIN_USERNAME || "admin";
+const password = process.env.SEED_ADMIN_PASSWORD || "Pass123456";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/login");

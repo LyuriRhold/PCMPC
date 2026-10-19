@@ -93,19 +93,30 @@ export async function performanceFixture() {
     [await acct("cash_in_bank"), await acct("cash_on_hand")],
     [await acct("salaries_wages"), await acct("cash_in_bank")],
   ];
-  await pool.query(
-    `INSERT INTO journal_entries (id, je_no, book, entry_date, particulars, status, source_module, posted_at, created_by)
-     SELECT md5('perf-je-' || g)::uuid, 'GJ-PERF-' || g, 'GJ', DATE '2026-01-01' + (g % 365), 'Performance fixture ' || g, 'POSTED', 'perf_fixture', now(), $1
-     FROM generate_series(1, 25000) g`,
-    [by],
-  );
-  for (const [i, [dr, cr]] of pairs.entries()) {
-    await pool.query(
-      `INSERT INTO journal_lines (je_id, line_no, account_id, debit, credit, created_by)
-       SELECT md5('perf-je-' || g)::uuid, 1, $1, 1000 + (g % 997) * 100, 0, $3 FROM generate_series(1, 25000) g WHERE g % 4 = $4
-       UNION ALL
-       SELECT md5('perf-je-' || g)::uuid, 2, $2, 0, 1000 + (g % 997) * 100, $3 FROM generate_series(1, 25000) g WHERE g % 4 = $4`,
-      [dr, cr, by, i],
+  // Entries and their lines in one transaction: each entry must balance when it commits.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO journal_entries (id, je_no, book, entry_date, particulars, status, source_module, posted_at, created_by)
+       SELECT md5('perf-je-' || g)::uuid, 'GJ-PERF-' || g, 'GJ', DATE '2026-01-01' + (g % 365), 'Performance fixture ' || g, 'POSTED', 'perf_fixture', now(), $1
+       FROM generate_series(1, 25000) g`,
+      [by],
     );
+    for (const [i, [dr, cr]] of pairs.entries()) {
+      await client.query(
+        `INSERT INTO journal_lines (je_id, line_no, account_id, debit, credit, created_by)
+         SELECT md5('perf-je-' || g)::uuid, 1, $1::uuid, 1000 + (g % 997) * 100, 0, $3::uuid FROM generate_series(1, 25000) g WHERE g % 4 = $4::int
+         UNION ALL
+         SELECT md5('perf-je-' || g)::uuid, 2, $2::uuid, 0, 1000 + (g % 997) * 100, $3::uuid FROM generate_series(1, 25000) g WHERE g % 4 = $4::int`,
+        [dr, cr, by, i],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
   }
 }

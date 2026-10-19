@@ -16,6 +16,9 @@ import { runReportAction } from "@/modules/reports/actions";
 import { reportWorkbook } from "@/modules/reports/export";
 import { dashboardKpis, efficiencyPercent, loanCollectionEfficiency } from "@/modules/reports/kpis";
 import { runReport } from "@/modules/reports/operational";
+import { memberSoa } from "@/modules/reports/soa";
+import { soaPdf } from "@/modules/reports/soa-pdf";
+import { accountIdFor, postJournal } from "@/modules/ledger/service";
 import type { CdaTemplate } from "@/modules/reports/cda-templates";
 import { recentRuns, recordRun } from "@/modules/reports/service";
 import { updateSetting } from "@/modules/settings/service";
@@ -180,7 +183,7 @@ describe("T16.4 operational reports and their Excel export", () => {
     const manager = await runAs(f.manager, () => runReportAction({ key: "delinquency", params: { asOf: "2026-12-15" } }));
     if (!manager.ok) throw new Error(manager.error);
     expect(manager.data.rows.map((r) => [r.memberNo, r.mobile, r.daysPastDue])).toEqual([["M-000001", "09171234567", 10]]);
-    expect(manager.data.reconciliation.map((r) => r.difference)).toEqual([0n]);
+    expect(manager.data.reconciliation.map((r) => [r.difference, r.agrees])).toEqual([["₱0.00", true]]);
     const masked = await runAs(board, () => runReportAction({ key: "delinquency", params: { asOf: "2026-12-15" } }));
     if (!masked.ok) throw new Error(masked.error);
     expect(masked.data.rows[0]?.mobile).toBe("•••••••4567");
@@ -190,7 +193,8 @@ describe("T16.4 operational reports and their Excel export", () => {
     expect(store.reconciliation.map((r) => [r.gl, r.difference])).toEqual([[P(350), 0n]]);
     // The Excel export carries the rows, the totals and the reconciliation.
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load((await reportWorkbook(masked.data, "PCMPC", "As of Dec 15, 2026")) as unknown as ArrayBuffer);
+    const result = await runReport("delinquency", { asOf: "2026-12-15" }, { canSeeSensitive: false });
+    await wb.xlsx.load((await reportWorkbook(result, "PCMPC", "As of Dec 15, 2026")) as unknown as ArrayBuffer);
     const ws = wb.worksheets[0]!;
     const values: unknown[][] = [];
     ws.eachRow((r) => values.push((r.values as unknown[]).slice(1)));
@@ -199,5 +203,24 @@ describe("T16.4 operational reports and their Excel export", () => {
     expect(values[3]?.slice(0, 4)).toEqual(["Loan no.", "Member no.", "Borrower", "Mobile"]);
     expect(values[4]?.slice(1, 5)).toEqual(["M-000001", masked.data.rows[0]?.name, "•••••••4567", 10]);
     expect(values.at(-1)?.[0]).toBe("Loans receivable: whole portfolio (GL)");
+  });
+});
+
+describe("T16.5 the member statement of account", () => {
+  it("loans with arrears, the PDF; an entry posted to the member's savings without a passbook entry shows as a difference", async () => {
+    const f = await soaFixture();
+    const soa = await memberSoa(f.memberId);
+    expect(soa.loans).toEqual([expect.objectContaining({ loanNo: f.loanNo, product: "Regular Loan", outstandingPrincipal: P(10000), arrears: 0n, daysPastDue: 0 })]);
+    expect(soa.savings).toEqual([expect.objectContaining({ product: "Regular Savings", balance: P(1500) })]);
+    const pdf = await soaPdf(soa, "PCMPC");
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    // Dec 15: the first two installments are past due.
+    on("2026-12-15");
+    const late = (await memberSoa(f.memberId)).loans[0]!;
+    expect(late.daysPastDue).toBe(40);
+    expect(late.arrears > 0n).toBe(true);
+    const [cash, savings] = [await accountIdFor("cash_on_hand"), await accountIdFor("savings_deposits")];
+    await withTx((tx) => postJournal(tx, { date: "2026-12-15", book: "GJ", particulars: "Manual entry", lines: [{ accountId: cash, debit: P(100) }, { accountId: savings, credit: P(100), memberId: f.memberId }] }, f.book));
+    expect((await memberSoa(f.memberId)).reconciliation.find((r) => r.label === "Savings deposits")).toEqual({ label: "Savings deposits", gl: P(1600), subsidiary: P(1500), difference: P(100) });
   });
 });

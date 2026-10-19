@@ -32,7 +32,7 @@ test("the dashboard lists live and coming-soon modules; unknown paths are 404", 
 test("the super admin views the system as another role, then as the administrator again", async ({ page }) => {
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: /Coop settings/ })).toBeVisible();
-  await page.getByLabel("View as role").selectOption("TELLER");
+  await page.getByLabel("View the system as").selectOption("TELLER");
   await expect(page.getByRole("status").filter({ hasText: "viewing the system as" })).toContainText("Cashier / Teller");
   await expect(nav.getByRole("link", { name: /Coop settings/ })).toHaveCount(0);
   await page.goto("/admin/settings");

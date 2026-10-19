@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { formatDate, isBusinessDate } from "@/lib/dates";
 import type { Money } from "@/lib/money";
-import type { Cell, ReportResult } from "./operational";
+import { displayCell, type Cell, type ColumnKind, type ReportResult } from "./operational";
 
 /**
  * Excel export of an operational report (PHASE-16 T16.4): the same rows, totals and reconciliation
@@ -17,11 +17,11 @@ function pesos(m: Money): number {
   return neg ? -value : value;
 }
 
-const cellValue = (v: Cell | undefined, kind: string): string | number | null => {
+const cellValue = (v: Cell | undefined, kind: ColumnKind): string | number | null => {
   if (v === null || v === undefined) return null;
   if (typeof v === "bigint") return pesos(v);
   if (kind === "date" && typeof v === "string" && isBusinessDate(v)) return formatDate(v);
-  return v;
+  return displayCell(v, kind);
 };
 
 export async function reportWorkbook(result: ReportResult, coop: string, subtitle: string): Promise<Buffer> {

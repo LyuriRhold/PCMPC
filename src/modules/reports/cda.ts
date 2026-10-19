@@ -1,16 +1,15 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import ExcelJS from "exceljs";
-import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
-import { formatDate, formatDateTime, now, type BusinessDate } from "@/lib/dates";
+import { addDays, addMonths, formatDate, formatDateTime, monthEnd, now, type BusinessDate } from "@/lib/dates";
 import type { Money } from "@/lib/money";
 import { financialCondition, operations } from "@/modules/accounting/statements";
 import { listOfficers, officerTrainingHours } from "@/modules/governance/service";
 import { accountMappings, fiscalYears, journalEntries, journalLines } from "@/modules/ledger/schema";
 import { members, memberStatusHistory } from "@/modules/members/schema";
 import { getSetting } from "@/modules/settings/service";
-import { cetfReport } from "@/modules/surplus/service";
 import { CDA_TEMPLATES, type CdaTemplate } from "./cda-templates";
 import { membershipMovement } from "./membership";
 
@@ -36,7 +35,23 @@ function pesos(m: Money): number {
 
 async function fiscalYear(year: number, db: Db | Tx) {
   const [fy] = await db.select().from(fiscalYears).where(eq(fiscalYears.year, year));
-  return { start: fy?.startDate ?? `${year}-01-01`, end: fy?.endDate ?? `${year}-12-31` };
+  if (fy) return { start: fy.startDate, end: fy.endDate };
+  const start = `${year}-${String(await getSetting("fiscal.year_start_month", db)).padStart(2, "0")}-01`;
+  return { start, end: monthEnd(addMonths(start, 11)) };
+}
+
+/**
+ * What was taken out of an account in the year: the debits of entries posted in the window that
+ * stand (not reversed, and not themselves reversals). E.g. CETF remitted, CDF used (Q-16.6).
+ */
+async function usedInYear(key: string, from: BusinessDate, to: BusinessDate, db: Db | Tx): Promise<Money> {
+  const [r] = await db
+    .select({ s: sql<string>`coalesce(sum(${journalLines.debit}), 0)::text` })
+    .from(journalLines)
+    .innerJoin(journalEntries, eq(journalEntries.id, journalLines.jeId))
+    .innerJoin(accountMappings, eq(accountMappings.accountId, journalLines.accountId))
+    .where(and(eq(accountMappings.key, key), eq(journalEntries.status, "POSTED"), isNull(journalEntries.reversalOfId), gte(journalEntries.entryDate, from), lte(journalEntries.entryDate, to)));
+  return BigInt(r?.s ?? "0");
 }
 
 /** Balance (debit − credit) of the accounts mapped to a key as of a date; with `from`, only the movement since. */
@@ -121,10 +136,9 @@ export async function caprData(year: number, db: Db | Tx = getDb()): Promise<Cap
   add("Statutory funds", "funds.etf_local", "Education and training fund (local)", -(await glBalance("education_training_fund", end, db)), true);
   add("Statutory funds", "funds.cdf", "Community development fund", -(await glBalance("community_development_fund", end, db)), true);
   add("Statutory funds", "funds.optional", "Optional fund", -(await glBalance("optional_fund", end, db)), true);
-  add("Statutory funds", "funds.cdf_utilized", "CDF used in the year", await glBalance("community_development_fund", end, db, start, "debit"), true);
+  add("Statutory funds", "funds.cdf_utilized", "CDF used in the year", await usedInYear("community_development_fund", start, end, db), true);
   add("Statutory funds", "funds.cetf_payable", "CETF payable at year end", -(await glBalance("cetf_payable", end, db)), true);
-  const cetf = (await cetfReport(db)).filter((c) => c.fiscalYear === year - 1 || c.fiscalYear === year);
-  add("Statutory funds", "funds.cetf_remitted", "CETF remitted (allocations of the year and the year before)", cetf.reduce((s, c) => s + c.remitted, 0n));
+  add("Statutory funds", "funds.cetf_remitted", "CETF remitted in the year", await usedInYear("cetf_payable", start, end, db), true);
 
   const officers = await listOfficers(end, db);
   add("Officers and trainings", "officers.count", "Officers serving at year end", officers.length);
@@ -175,7 +189,9 @@ export async function caprWorkbook(year: number, db: Db | Tx = getDb(), opts: { 
   }
   wb.creator = "PCMPC MIS";
 
-  const cover = wb.addWorksheet("Cover");
+  // The MIS's own sheets never clash with a template's sheet names.
+  const sheetName = (name: string) => (wb.getWorksheet(name) ? `${name} (MIS)` : name);
+  const cover = wb.addWorksheet(sheetName("Cover"));
   cover.getColumn(1).width = 34;
   cover.getColumn(2).width = 60;
   cover.addRow([String(byKey.get("coop.name")?.value ?? "")]).font = { bold: true, size: 13 };
@@ -185,10 +201,11 @@ export async function caprWorkbook(year: number, db: Db | Tx = getDb(), opts: { 
     const f = byKey.get(key);
     if (f) cover.addRow([f.label, typeof f.value === "bigint" ? pesos(f.value) : f.value]);
   }
-  cover.addRow(["Due to the CDA", `120 days after the fiscal year ends`]);
+  const { end: fyEnd } = await fiscalYear(year, db);
+  cover.addRow(["Due to the CDA", `${formatDate(addDays(fyEnd, 120))} (120 days after the fiscal year ends)`]);
   cover.addRow(["Generated", formatDateTime(now())]);
 
-  const sheet = wb.addWorksheet("CAPR data");
+  const sheet = wb.addWorksheet(sheetName("CAPR data"));
   sheet.getColumn(1).width = 26;
   sheet.getColumn(2).width = 52;
   sheet.getColumn(3).width = 20;
@@ -202,7 +219,7 @@ export async function caprWorkbook(year: number, db: Db | Tx = getDb(), opts: { 
   const { end, start } = await fiscalYear(year, db);
   const officers = await listOfficers(end, db);
   const hours = await officerTrainingHours(start, end, db);
-  const os = wb.addWorksheet("Officers and trainings");
+  const os = wb.addWorksheet(sheetName("Officers and trainings"));
   os.columns = [{ width: 34 }, { width: 22 }, { width: 12 }, { width: 34 }, { width: 8 }, { width: 26 }, { width: 14 }, { width: 12 }].map((c) => ({ ...c }));
   os.addRow(["Board or committee", "Position", "Member no.", "Name", "Sex", "Term", "Training hours", "Trainings"]).font = { bold: true };
   for (const o of officers) {
@@ -210,7 +227,7 @@ export async function caprWorkbook(year: number, db: Db | Tx = getDb(), opts: { 
     os.addRow([o.committeeName, o.position, o.memberNo ?? "", o.name, o.sex === "FEMALE" ? "F" : "M", `${formatDate(o.termStart)} to ${o.termEnd ? formatDate(o.termEnd) : "present"}`, h ? Number(h.hours) : 0, h?.trainings ?? 0]);
   }
 
-  const un = wb.addWorksheet("Unmapped fields");
+  const un = wb.addWorksheet(sheetName("Unmapped fields"));
   un.columns = [{ width: 40 }, { width: 16 }, { width: 8 }, { width: 30 }, { width: 80 }];
   un.addRow(["Template", "Sheet", "Cell", "Field", "Why"]).font = { bold: true };
   for (const u of unmapped) un.addRow(u);

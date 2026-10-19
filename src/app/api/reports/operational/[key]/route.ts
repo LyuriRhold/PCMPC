@@ -6,7 +6,7 @@ import { reportDef, runReport } from "@/modules/reports/operational";
 import { recordRun } from "@/modules/reports/service";
 import { getSetting } from "@/modules/settings/service";
 
-/** GET /api/reports/operational/{key}?from=&to=&asOf= → the report as .xlsx (needs reports.read; contacts masked unless members.read_sensitive). */
+/** GET /api/reports/operational/{key}?from=&to=&asOf= → the report as .xlsx (needs reports.read; contacts masked unless reports.contacts). */
 export async function GET(request: Request, ctx: RouteContext<"/api/reports/operational/[key]">) {
   let user;
   try {
@@ -26,7 +26,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/reports/oper
   };
   const params = { from: date("from"), to: date("to"), asOf: date("asOf") };
   if (params.from && params.to && params.from > params.to) return new Response("The period starts on or before it ends", { status: 400 });
-  const result = await runReport(key, params, { canSeeSensitive: can(user, "members.read_sensitive") });
+  const result = await runReport(key, params, { canSeeSensitive: can(user, "reports.contacts") });
   const subtitle = def.params === "range" ? `${formatDate(params.from ?? "")} to ${formatDate(params.to ?? "")}` : def.params === "asOf" ? `As of ${formatDate(params.asOf ?? "")}` : "";
   const body = await reportWorkbook(result, await getSetting("coop.name"), params.from || params.asOf ? subtitle : "");
   await recordRun(getDb(), { report: key, params: { ...params }, userId: user.id });
@@ -34,6 +34,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/reports/oper
     headers: {
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "content-disposition": `attachment; filename="${key}.xlsx"`,
+      "cache-control": "private, no-store",
     },
   });
 }

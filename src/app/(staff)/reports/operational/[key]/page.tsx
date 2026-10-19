@@ -10,17 +10,17 @@ import { can } from "@/lib/auth-guard";
 import { businessToday, formatDate, isBusinessDate } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPage } from "@/lib/page-guard";
-import { reportDef, runReport, type Cell, type ColumnKind } from "@/modules/reports/operational";
+import { displayCell, reportDef, runReport, type Cell, type ColumnKind } from "@/modules/reports/operational";
 
 export const metadata: Metadata = { title: "Report · PCMPC MIS" };
 
 const one = z.preprocess((v) => (Array.isArray(v) ? v[0] : v), z.string().optional());
 
 function show(v: Cell | undefined, kind: ColumnKind): string {
-  if (v === null || v === undefined) return "";
-  if (typeof v === "bigint") return format(v);
-  if (kind === "date" && typeof v === "string" && isBusinessDate(v)) return formatDate(v);
-  return String(v);
+  if (v === undefined) return "";
+  const d = displayCell(v, kind);
+  if (kind === "date" && typeof d === "string" && isBusinessDate(d)) return formatDate(d);
+  return d === null ? "" : String(d);
 }
 
 async function ReportContent(props: PageProps<"/reports/operational/[key]">) {
@@ -35,7 +35,7 @@ async function ReportContent(props: PageProps<"/reports/operational/[key]">) {
   const to = pick(sp.to, today);
   const from = pick(sp.from, `${today.slice(0, 7)}-01`);
   const params = { from: from <= to ? from : to, to, asOf: pick(sp.asOf, today) };
-  const result = await runReport(key, params, { canSeeSensitive: can(access.user, "members.read_sensitive") });
+  const result = await runReport(key, params, { canSeeSensitive: can(access.user, "reports.contacts") });
   const query = new URLSearchParams(def.params === "range" ? { from: params.from, to: params.to } : def.params === "asOf" ? { asOf: params.asOf } : {}).toString();
   const right = (kind: ColumnKind) => (kind === "money" || kind === "count" ? "text-right tabular-nums" : "");
   return (

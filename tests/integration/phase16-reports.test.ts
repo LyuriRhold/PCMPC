@@ -18,13 +18,14 @@ import { dashboardKpis, efficiencyPercent, loanCollectionEfficiency } from "@/mo
 import { runReport } from "@/modules/reports/operational";
 import { memberSoa } from "@/modules/reports/soa";
 import { soaPdf } from "@/modules/reports/soa-pdf";
-import { accountIdFor, postJournal, trialBalance } from "@/modules/ledger/service";
+import { accountIdFor, postJournal, reverseJournal, trialBalance } from "@/modules/ledger/service";
+import { placeTimeDeposit, productByCode } from "@/modules/savings/service";
 import { cashFlows, changesInEquity, financialCondition, operations } from "@/modules/accounting/statements";
 import type { CdaTemplate } from "@/modules/reports/cda-templates";
 import { recentRuns, recordRun } from "@/modules/reports/service";
 import { updateSetting } from "@/modules/settings/service";
 import { makeUser } from "../helpers/phase01";
-import { P } from "../helpers/phase03";
+import { P, seedLedger } from "../helpers/phase03";
 import { payLoan } from "../helpers/phase11";
 import { membersFixture, on, performanceFixture, soaFixture } from "../helpers/phase16";
 
@@ -248,4 +249,58 @@ describe("T16.6 the performance fixture: 1,000 members, 50,000 journal lines", (
     const capr = await timed("CAPR data", () => caprData(2026));
     expect(capr.find((f) => f.key === "members.total")?.value).toBe(1000);
   }, 180_000);
+});
+
+describe("Phase 16 review follow-ups", () => {
+  it("a time deposit counts once in the deposits reconciliation; TD maturities show the rate as a percentage; an overdue TD stays on the alert", async () => {
+    const f = await soaFixture();
+    const td = await productByCode("TD");
+    if (!td) throw new Error("TD not seeded");
+    await withTx((tx) => placeTimeDeposit(tx, { memberId: f.memberId, productId: td.id, fromAccountId: f.savingsAccountId, principal: P(1000), termDays: 90 }, f.manager));
+    const k = await dashboardKpis();
+    expect(k.deposits).toBe(P(1500));
+    expect(k.reconciliation.every((r) => r.difference === 0n)).toBe(true);
+    const view = await runAs(f.manager, () => runReportAction({ key: "td-maturities", params: { from: "2026-10-01", to: "2027-12-31" } }));
+    if (!view.ok) throw new Error(view.error);
+    expect(view.data.rows).toHaveLength(1);
+    expect(view.data.rows[0]).toMatchObject({ memberNo: "M-000001", principal: "₱1,000.00" });
+    expect(String(view.data.rows[0]?.ratePa)).toMatch(/^\d+\.\d{2}%$/);
+    // Matured Jan 3, 2027 and not yet processed: still on the alert on Jan 5.
+    on("2027-01-05");
+    expect((await dashboardKpis()).alerts.maturingTimeDeposits.map((t) => t.memberNo)).toEqual(["M-000001"]);
+  });
+
+  it("the auditor and the board see masked contacts; a past date without that day's aging shows no reconciliation", async () => {
+    await soaFixture();
+    on("2026-12-15");
+    const auditor = (await makeUser("AUDITOR", "auditor1")).id;
+    const r = await runAs(auditor, () => runReportAction({ key: "delinquency", params: { asOf: "2026-12-15" } }));
+    if (!r.ok) throw new Error(r.error);
+    expect(r.data.rows[0]?.mobile).toBe("•••••••4567");
+    const past = await runReport("delinquency", { asOf: "2026-12-01" }, { canSeeSensitive: false });
+    expect([past.rows, past.reconciliation]).toEqual([[], []]);
+  });
+
+  it("CAPR: the CETF remitted and the CDF used in the year count the entries that stand (a reversed one doesn't)", async () => {
+    await seedLedger();
+    const book = (await makeUser("BOOKKEEPER", "book16")).id;
+    const [cash, cdf, cetf] = [await accountIdFor("cash_on_hand"), await accountIdFor("community_development_fund"), await accountIdFor("cetf_payable")];
+    const post = (date: string, account: string, amount: bigint) => withTx((tx) => postJournal(tx, { date, book: "GJ", particulars: "Fund use", lines: [{ accountId: account, debit: amount }, { accountId: cash, credit: amount }] }, book));
+    await post("2026-06-01", cdf, P(500));
+    const wrong = await post("2026-06-02", cdf, P(200));
+    await withTx((tx) => reverseJournal(tx, wrong.id, "2026-06-03", "Wrong fund", book));
+    await post("2026-07-01", cetf, P(300));
+    const data = await caprData(2026);
+    const v = (key: string) => data.find((d) => d.key === key)?.value;
+    expect([v("funds.cdf_utilized"), v("funds.cetf_remitted")]).toEqual([P(500), P(300)]);
+    expect(v("report.period")).toBe("Jan 01, 2026 to Dec 31, 2026");
+  });
+
+  it("an officer can't hold the same position twice in one term; a training needs its date", async () => {
+    const { manager } = await membersFixture();
+    const add = (termStart: string) => runAs(manager, () => addOfficerAction({ memberNo: "M-000001", position: "Chairperson", committee: "BOARD", termStart, termEnd: null, electedAtGa: null }));
+    expect((await add("2026-01-01")).ok).toBe(true);
+    expect(await add("2026-03-01")).toEqual({ ok: false, error: "M-000001 already holds that position for part of that term" });
+    expect(await runAs(manager, () => addTrainingAction({ title: "T", provider: "P", heldOn: "", hours: "8", memberNos: "M-000001" }))).toEqual({ ok: false, error: "Enter the training date" });
+  });
 });

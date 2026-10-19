@@ -24,7 +24,7 @@
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ✅ | phase-13-store-pos · tag `phase-13` | rldejoya (reviewer agent: charge-sale refunds fixed; follow-ups) · 2026-10-14 |
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ✅ | phase-14-fs-close · tag `phase-14` | rldejoya (reviewer agent: next fiscal year and asset register fixed; follow-ups) · 2026-10-14 |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ✅ | phase-15-surplus-allocation · tag `phase-15` | rldejoya (reviewer agent: fiscal-year windows fixed; follow-ups) · 2026-10-17 |
-| 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | 🟡 awaiting review | phase-16-reports | |
+| 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | 🟡 reviewed (reviewer agent: deposits, delinquency footer, CAPR funds, auditor masking fixed); awaiting merge | phase-16-reports | |
 | 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | ⬜ | | |
 | 18 | [Hardening, Vercel Deployment, Backups, UAT & Go-Live](docs/phases/PHASE-18-golive.md) | ⬜ | | |
 
@@ -357,9 +357,10 @@
 - [ ] Q-15.5 (phase 15) Posting dates and the CETF. | default used: the allocation entry is dated the day it is posted after the GA (in the new year), not the year-end; each member's payout entry is dated the distribution day; the CETF is remitted to the federation/union named on the DV (cash or check), tracked per year. Which federation/union receives PCMPC's CETF? | answer:
 - [ ] Q-16.1 (phase 16) The CDA templates. | default used: none was provided, so the CAPR workbook holds the MIS's own data sheets (cover with the CDA reg. no. and year, every CAPR figure by key, officers and trainings) and an Unmapped fields sheet that says the template is missing. Please save the current CAPR and annex templates (Excel) in docs/cda-templates/ (capr.xlsx); their cells are then mapped to the figures in src/modules/reports/cda-templates.ts, and template fields with no MIS data are listed | answer:
 - [ ] Q-16.2 (phase 16) Officers and committees. | default used: the Board, Audit, Election, Mediation and Conciliation, Ethics, Credit, Education and Training, and Gender and Development committees plus Management; positions are typed (Chairperson, Secretary, …); attendees of a training are entered by member no. Please send the current list of officers, committee members and their terms, and the trainings attended | answer:
-- [ ] Q-16.3 (phase 16) Who sees members' contact numbers in reports. | default used: masked for anyone without members.read_sensitive, e.g. the Board; the Auditor role holds members.read_sensitive in the role matrix (Q-01.x), so the Auditor sees them (the spec says BOARD/AUDITOR masked). Should the Auditor see masked contacts too? | answer:
+- [ ] Q-16.3 (phase 16) Who sees members' contact numbers in reports. | default used: a new permission reports.contacts (the manager; the super admin has every permission); the Board and the Auditor see them masked, as the spec says, even though the Auditor holds members.read_sensitive for member profiles. Should loan officers or the credit committee see them too, e.g. for collection calls? | answer:
 - [ ] Q-16.4 (phase 16) Loan collection efficiency. | default used: the principal and interest of the installments due in the month ÷ what was paid on those installments (penalties left out; installments paid ahead don't count for their own month until due). Water keeps its Phase 07 definition (bills due in the month) | answer:
 - [ ] Q-16.5 (phase 16) Membership counts and tax reports. | default used: members = active and inactive (approved, not terminated or deceased); for a past year, as of its last day (membership date, and status history for those who left). ATIR/ABR data isn't built: is PCMPC tax-exempt (CDA certificate of tax exemption)? | answer:
+- [ ] Q-16.6 (phase 16) The CAPR's fund figures. | default used: CETF remitted and CDF used in a year = the debits to CETF payable and to the CDF in entries dated in the fiscal year that stand (not reversed, not reversals); the fund balances are as of the year end. Social Audit and Performance Audit data beyond these figures isn't built yet (backlog). Does the CDA want the CETF remitted per year of allocation instead? | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -1750,7 +1751,7 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - **Officers, committees and trainings (T16.1):**
   - A `governance` module: officers with their board/committee, position, term and electing GA; trainings with their attendees.
   - Who serves on a date; training hours per member.
-  - The manager edits; every change is audited. There is an Officers & trainings page.
+  - Staff with members.write (the manager, loan officers) edit; every change is audited. There is an Officers & trainings page.
   - `report_runs` records generated reports.
 - **CDA reports (T16.2):**
   - Every figure the MIS gives the CAPR, by key:
@@ -1790,7 +1791,8 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - **Extra table:** `training_attendees` (the spec's "attendees → officers/members").
 - **`report_runs.file_url`** stays empty: reports are generated on demand.
 - **Dashboard water figure:** "billed" is the billed amount of the bills due this month, so it equals the Phase 07 collection efficiency report (A16.8).
-- **ATIR/ABR** is not built, pending PCMPC's tax status (Q-16.5).
+- **ATIR/ABR** is not built, pending PCMPC's tax status (Q-16.5). The Social Audit and Performance Audit attachments get only the CAPR figures (membership, funds, CETF/CDF, officers and trainings); the rest is in the backlog (Q-16.6).
+- **The performance figures** cover the GL aggregates (trial balance, statements, CAPR) and the dashboard on a ledger-heavy fixture. The loan-by-loan parts (portfolio, delinquency) weren't load-tested: the fixture has no loans.
 - **Navigation:** new items Operational reports and Officers & trainings. The "coming soon" example is now Data migration (Phase 17).
 - **Printing:** the app shell (sidebar, header) is hidden when printing, for every printable page.
 
@@ -1807,3 +1809,26 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - `npm run e2e -- phase-16` is green. The full E2E against a production build passed 27 of 27, after a fix: the super admin's role picker label ("View as role") also matched the user form's Role field in the E2E helpers, and it is now "View the system as".
 - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (migration 0045; the default admin and the demo manager).
 - Databases set up earlier need `npm run db:migrate && npm run db:seed` (migration 0045).
+
+**Review follow-ups (reviewer agent, 2026-10-19)**
+- **Fixed (must-fix): the dashboard counted an active time deposit twice in the deposits reconciliation** (its own passbook and its principal). Only savings passbooks are summed now, plus the active TDs' principal (test with a TD placed).
+- **Fixed (must-fix): the delinquency footer of a past date compared that day's aging with today's loans.** The rows and the footer now come from the same aging (live for today, the day's snapshot for a past date). Without a snapshot there is no footer.
+- **Fixed (must-fix): the CAPR's "CETF remitted" and "CDF used" had no year window and counted reversals.**
+  - They are now the debits in entries dated in the fiscal year that stand: not reversed, and not reversals.
+  - Logged as Q-16.6; tested with values and a reversed entry.
+- **Fixed (must-fix): the Auditor saw members' contact numbers in reports, against the spec.** A new permission, reports.contacts, is given to the manager (and the super admin). The Board and the Auditor see them masked (test).
+- **Fixed:**
+  - **Fiscal year:** store sales "this year" start at the fiscal year's first day, and the CAPR's period follows the fiscal-year setting when the year isn't set up.
+  - **Maturing time deposits:** a matured TD not yet processed stays on the alert.
+  - **Rates:** shown as percentages on screen, in the action's JSON and in Excel.
+  - **CAPR cover:** shows the CDA deadline date.
+  - **Template sheets:** the MIS's sheets get "(MIS)" if a template already has a sheet with that name.
+  - **Excel downloads:** `private, no-store`.
+  - **Deployment:** the report routes trace the PDF fonts and the CDA templates (next.config).
+  - **Loan accounts:** found by a key prefix match that doesn't treat `_` as a wildcard.
+  - **Officers and trainings:** the same position can't be held twice in one term, and a training needs its date.
+- **Logged:**
+  - Q-16.3 updated (reports.contacts) and Q-16.6 added.
+  - Deviations: the Social and Performance Audit attachments, and the scope of the performance figures.
+- **After the fixes:**
+GATE16_LINE

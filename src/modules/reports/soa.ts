@@ -22,7 +22,7 @@ async function memberGl(memberId: string, keys: { exact?: string[]; prefix?: str
   const mapped = db
     .selectDistinct({ id: accountMappings.accountId })
     .from(accountMappings)
-    .where(keys.prefix ? sql`${accountMappings.key} LIKE ${`${keys.prefix}%`}` : inArray(accountMappings.key, keys.exact ?? []));
+    .where(keys.prefix ? sql`starts_with(${accountMappings.key}, ${keys.prefix})` : inArray(accountMappings.key, keys.exact ?? []));
   const [r] = await db
     .select({ s: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}), 0)::text` })
     .from(journalLines)

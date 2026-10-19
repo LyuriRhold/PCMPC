@@ -78,7 +78,7 @@ async function DashboardContent() {
       </Section>
 
       <Section title="Alerts">
-        <Tile label="Time deposits maturing this week" value={k.alerts.maturingTimeDeposits.length} note={k.alerts.maturingTimeDeposits.map((t) => `${t.memberNo} ${formatDate(t.maturityDate)}`).join(", ") || undefined} />
+        <Tile label="Time deposits matured or maturing this week" value={k.alerts.maturingTimeDeposits.length} note={k.alerts.maturingTimeDeposits.map((t) => `${t.memberNo} ${formatDate(t.maturityDate)}`).join(", ") || undefined} />
         <Tile
           label="Products to reorder"
           value={k.alerts.lowStock}

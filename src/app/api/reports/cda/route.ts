@@ -21,6 +21,7 @@ export async function GET(request: Request) {
     headers: {
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "content-disposition": `attachment; filename="capr-data-${year}.xlsx"`,
+      "cache-control": "private, no-store",
     },
   });
 }

@@ -1,10 +1,11 @@
-import { and, asc, eq, gte, inArray, isNull, like, lte, sql } from "drizzle-orm";
+import Decimal from "decimal.js";
+import { and, asc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { businessToday, type BusinessDate } from "@/lib/dates";
-import type { Money } from "@/lib/money";
+import { format, type Money } from "@/lib/money";
 import { accountMappings, journalEntries, journalLines } from "@/modules/ledger/schema";
 import { loanPayments, loanProducts, loans, loanSchedule } from "@/modules/loans/schema";
-import { delinquencyList, portfolio } from "@/modules/loans/servicing";
+import { agingAsOf, delinquentOf } from "@/modules/loans/servicing";
 import { maskTail } from "@/modules/members/masking";
 import { members } from "@/modules/members/schema";
 import { depositAccounts, depositProducts, depositTransactions, timeDeposits } from "@/modules/savings/schema";
@@ -15,7 +16,7 @@ import type { Reconciliation } from "./kpis";
 /**
  * The operational reports (PHASE-16 T16.4): one registry, shown on screen and exported to Excel.
  * A report's money totals are checked against the GL control account where one applies (the
- * reconciliation footer). Contact numbers are masked for viewers without members.read_sensitive.
+ * reconciliation footer). Contact numbers are masked for viewers without reports.contacts.
  */
 
 export type ColumnKind = "text" | "money" | "count" | "date" | "percent";
@@ -40,7 +41,7 @@ async function glMovement(db: Db | Tx, keys: { exact?: string[]; prefix?: string
   const mapped = db
     .selectDistinct({ id: accountMappings.accountId })
     .from(accountMappings)
-    .where(keys.prefix ? like(accountMappings.key, `${keys.prefix}%`) : inArray(accountMappings.key, keys.exact ?? []));
+    .where(keys.prefix ? sql`starts_with(${accountMappings.key}, ${keys.prefix})` : inArray(accountMappings.key, keys.exact ?? []));
   const [r] = await db
     .select({ s: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}), 0)::text` })
     .from(journalLines)
@@ -101,7 +102,9 @@ export const REPORTS: ReportDef[] = [
     description: "Loans past due, with what is overdue and the borrower's and comakers' contact numbers.",
     params: "asOf",
     run: async (p, v, db) => {
-      const list = await delinquencyList(p.asOf, db);
+      // The rows and the footer come from the same aging: live for today, that day's snapshot for a past date.
+      const aging = await agingAsOf(p.asOf, db);
+      const list = await delinquentOf(aging.rows, db);
       const mobile = (m: string | null) => (v.canSeeSensitive ? m : maskTail(m));
       const rows = list.map((r) => ({
         loanNo: r.loan.loanNo,
@@ -114,12 +117,13 @@ export const REPORTS: ReportDef[] = [
         outstanding: r.outstandingPrincipal,
         comakers: r.comakers.map((c) => `${c.memberNo ?? ""} ${c.name} ${mobile(c.mobile) ?? ""}`.trim()).join("; "),
       }));
-      const all = (await portfolio(p.asOf, db)).reduce((s, r) => s + r.outstandingPrincipal, 0n);
+      const all = aging.rows.reduce((s, r) => s + r.outstandingPrincipal, 0n);
+      const footer = aging.source === "live" || aging.rows.length > 0;
       return {
         columns: [col("loanNo", "Loan no."), col("memberNo", "Member no."), col("name", "Borrower"), col("mobile", "Mobile"), col("daysPastDue", "Days past due", "count"), col("bucket", "Bucket"), col("amountPastDue", "Past due", "money"), col("outstanding", "Outstanding", "money"), col("comakers", "Comakers")],
         rows,
         totals: { name: `${rows.length} loan(s)`, amountPastDue: sumOf(rows, "amountPastDue"), outstanding: sumOf(rows, "outstanding") },
-        reconciliation: [rec("Loans receivable: whole portfolio (GL)", await glMovement(db, { prefix: "loans_receivable_" }, p.asOf), all)],
+        reconciliation: footer ? [rec("Loans receivable: whole portfolio (GL)", await glMovement(db, { prefix: "loans_receivable_" }, aging.asOf), all)] : [],
       };
     },
   },
@@ -266,6 +270,13 @@ export const REPORTS: ReportDef[] = [
     },
   },
 ];
+
+/** A cell as text or a number for showing: amounts as ₱, rates (fractions) as percentages. */
+export function displayCell(v: Cell, kind: ColumnKind): string | number | null {
+  if (typeof v === "bigint") return format(v);
+  if (kind === "percent" && typeof v === "string" && /^\d+(\.\d+)?$/.test(v)) return `${new Decimal(v).mul(100).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toFixed(2)}%`;
+  return v;
+}
 
 export function reportDef(key: string): ReportDef | undefined {
   return REPORTS.find((r) => r.key === key);

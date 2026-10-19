@@ -1,5 +1,6 @@
 import Decimal from "decimal.js";
-import { and, eq, gte, inArray, like, lte, ne, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, ne, or, sql } from "drizzle-orm";
+import { fiscalYearStart } from "@/modules/ledger/periods";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { addDays, businessToday, monthEnd, type BusinessDate } from "@/lib/dates";
 import type { Money } from "@/lib/money";
@@ -7,7 +8,7 @@ import { accountMappings, journalEntries, journalLines } from "@/modules/ledger/
 import { parPercent } from "@/modules/loans/aging";
 import { loans, loanSchedule } from "@/modules/loans/schema";
 import { portfolio } from "@/modules/loans/servicing";
-import { depositAccounts, depositTransactions, timeDeposits } from "@/modules/savings/schema";
+import { depositAccounts, depositProducts, depositTransactions, timeDeposits } from "@/modules/savings/schema";
 import { getSetting } from "@/modules/settings/service";
 import { shareTotals } from "@/modules/share/service";
 import { reorderList } from "@/modules/store/reports";
@@ -34,7 +35,7 @@ export function efficiencyPercent(due: Money, collected: Money): string | null {
 
 /** A GL balance (debit − credit) as of a date for the accounts mapped to the keys (or keys starting with a prefix). */
 async function gl(keys: { exact?: string[]; prefix?: string }, asOf: BusinessDate, db: Db | Tx): Promise<Money> {
-  const keyFilter = or(keys.exact?.length ? inArray(accountMappings.key, keys.exact) : undefined, keys.prefix ? like(accountMappings.key, `${keys.prefix}%`) : undefined);
+  const keyFilter = or(keys.exact?.length ? inArray(accountMappings.key, keys.exact) : undefined, keys.prefix ? sql`starts_with(${accountMappings.key}, ${keys.prefix})` : undefined);
   const [r] = await db
     .select({ s: sql<string>`coalesce(sum(${journalLines.debit} - ${journalLines.credit}), 0)::text` })
     .from(journalLines)
@@ -72,7 +73,6 @@ export type Reconciliation = { label: string; gl: Money; subsidiary: Money; diff
 export async function dashboardKpis(db: Db | Tx = getDb()) {
   const today = businessToday();
   const month = today.slice(0, 7);
-  const year = today.slice(0, 4);
 
   // Capital, deposits and loans from the GL control accounts.
   const subscribed = -(await gl({ exact: ["subscribed_share_capital_common"] }, today, db));
@@ -85,7 +85,13 @@ export async function dashboardKpis(db: Db | Tx = getDb()) {
   const rows = await portfolio(today, db);
   const threshold = await getSetting("loan.par_threshold_days", db);
   const subsidiaryLoans = rows.reduce((s, r) => s + r.outstandingPrincipal, 0n);
-  const [passbooks] = await db.select({ s: sql<string>`coalesce(sum(${depositTransactions.amount}), 0)::text` }).from(depositTransactions);
+  // Savings passbooks only: a time deposit's own passbook holds its principal, counted below.
+  const [passbooks] = await db
+    .select({ s: sql<string>`coalesce(sum(${depositTransactions.amount}), 0)::text` })
+    .from(depositTransactions)
+    .innerJoin(depositAccounts, eq(depositAccounts.id, depositTransactions.accountId))
+    .innerJoin(depositProducts, eq(depositProducts.id, depositAccounts.productId))
+    .where(eq(depositProducts.kind, "SAVINGS"));
   const [placed] = await db.select({ s: sql<string>`coalesce(sum(${timeDeposits.principal}), 0)::text` }).from(timeDeposits).where(eq(timeDeposits.status, "ACTIVE"));
   const subsidiaryDeposits = BigInt(passbooks?.s ?? "0") + BigInt(placed?.s ?? "0");
   const shares = await shareTotals(db);
@@ -95,7 +101,7 @@ export async function dashboardKpis(db: Db | Tx = getDb()) {
   const waterNrw = await nrw(month, db);
 
   const mtd = (await salesReport(`${month}-01`, today, db)).total;
-  const ytd = (await salesReport(`${year}-01-01`, today, db)).total;
+  const ytd = (await salesReport(await fiscalYearStart(today, db), today, db)).total;
 
   const weekEnd = addDays(today, 6);
   const [dueThisWeek] = await db
@@ -111,7 +117,7 @@ export async function dashboardKpis(db: Db | Tx = getDb()) {
     .from(timeDeposits)
     .innerJoin(depositAccounts, eq(depositAccounts.id, timeDeposits.accountId))
     .innerJoin(members, eq(members.id, depositAccounts.memberId))
-    .where(and(eq(timeDeposits.status, "ACTIVE"), gte(timeDeposits.maturityDate, today), lte(timeDeposits.maturityDate, weekEnd)));
+    .where(and(eq(timeDeposits.status, "ACTIVE"), lte(timeDeposits.maturityDate, weekEnd)));
   const lowStock = await reorderList(db);
 
   const reconciliation: Reconciliation[] = [

@@ -61,6 +61,19 @@ export async function addOfficer(tx: Tx, input: OfficerInput, actorId: string) {
   if (input.electedAtGa && input.electedAtGa > businessToday()) throw new GovernanceError("The General Assembly date can't be in the future");
   const [m] = await membersByNo(tx, [input.memberNo]);
   if (!m) throw new GovernanceError("Enter the member no.");
+  const [same] = await tx
+    .select({ id: officers.id })
+    .from(officers)
+    .where(
+      and(
+        eq(officers.memberId, m.id),
+        eq(officers.committee, input.committee as Committee),
+        sql`lower(${officers.position}) = lower(${position})`,
+        or(isNull(officers.termEnd), gte(officers.termEnd, input.termStart)),
+        input.termEnd ? lte(officers.termStart, input.termEnd) : undefined,
+      ),
+    );
+  if (same) throw new GovernanceError(`${m.memberNo} already holds that position for part of that term`);
   const [o] = await tx
     .insert(officers)
     .values({ memberId: m.id, position, committee: input.committee as Committee, termStart: input.termStart, termEnd: input.termEnd, electedAtGa: input.electedAtGa, createdBy: actorId })
@@ -98,6 +111,7 @@ export async function addTraining(tx: Tx, input: TrainingInput, actorId: string)
   const title = input.title.trim();
   const provider = input.provider.trim();
   if (!title || !provider) throw new GovernanceError("Enter the title and the provider");
+  if (!input.heldOn) throw new GovernanceError("Enter the training date");
   assertDate(input.heldOn, "training date");
   if (input.heldOn > businessToday()) throw new GovernanceError("The training date can't be in the future");
   let hours: Decimal;

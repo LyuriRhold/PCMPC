@@ -11,10 +11,12 @@ export function ViewAsSelect({ current, roles }: { current: string; roles: Array
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   return (
-    <label className="hidden items-center gap-1 text-sm lg:flex">
-      <span className="text-muted-foreground">View as</span>
+    <div className="hidden items-center gap-1 text-sm lg:flex">
+      <span className="text-muted-foreground" aria-hidden>
+        View as
+      </span>
       <select
-        aria-label="View as role"
+        aria-label="View the system as"
         className="h-8 rounded-md border bg-background px-2 text-sm"
         value={current}
         disabled={pending}
@@ -40,7 +42,7 @@ export function ViewAsSelect({ current, roles }: { current: string; roles: Array
           {error}
         </span>
       ) : null}
-    </label>
+    </div>
   );
 }
 

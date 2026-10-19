@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { closeDb, withTx } from "../src/db/client";
 import { addDays, businessToday } from "../src/lib/dates";
 import { users } from "../src/modules/auth/schema";
+import { createUser } from "../src/modules/auth/service";
 import { and, isNotNull } from "drizzle-orm";
 import { journalEntries } from "../src/modules/ledger/schema";
 import { accountIdFor, postJournal, trialBalance } from "../src/modules/ledger/service";
@@ -46,6 +47,23 @@ await withTx(async (tx) => {
   }
 });
 console.log(`dev members: ${created} created, ${skipped} already present`);
+
+// Demo accounts (local databases only, like everything here): the general manager for client demos.
+// Password: SEED_DEMO_PASSWORD, or this default (change it in Admin › Users after the demo).
+const DEMO_USERS = [{ username: "manager", fullName: "General Manager (demo)", roleCode: "MANAGER" }] as const;
+const demoPassword = process.env.SEED_DEMO_PASSWORD || "GmDemo-2026";
+await withTx(async (tx) => {
+  const [admin] = await tx.select({ id: users.id }).from(users).where(eq(users.username, adminName));
+  for (const u of DEMO_USERS) {
+    const [exists] = await tx.select({ id: users.id }).from(users).where(eq(users.username, u.username));
+    if (exists) {
+      console.log(`demo user "${u.username}": already present`);
+      continue;
+    }
+    await createUser(tx, { username: u.username, fullName: u.fullName, roleCode: u.roleCode, password: demoPassword, email: null }, admin?.id ?? null);
+    console.log(`demo user "${u.username}" (${u.roleCode}): created`);
+  }
+});
 
 // Sample postings (once). Members are the approved samples, in member-number order.
 const posted = await withTx(async (tx) => {

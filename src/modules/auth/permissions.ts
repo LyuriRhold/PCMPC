@@ -91,7 +91,8 @@ const READ_ALL: Permission[] = [
 ];
 
 export const ROLE_PERMISSIONS: Record<RoleCode, Permission[]> = {
-  ADMIN: ["admin.users", "admin.settings", "gl.reopen", "audit.read", "reports.read", "water.rates"],
+  // The super admin: every permission (Rhold, 2026-10-19). Each document's preparer ≠ approver rule still applies to them.
+  ADMIN: [...PERMISSIONS],
   MANAGER: [
     ...READ_ALL,
     "members.write",
@@ -154,4 +155,12 @@ export function isPermission(value: string): value is Permission {
 
 export function isRoleCode(value: string): value is RoleCode {
   return ROLES.some((r) => r.code === value);
+}
+
+/**
+ * The role in effect: the super admin (ADMIN) may view the system as any other role, with exactly
+ * that role's screens and permissions; anyone else always has their own role (no way up).
+ */
+export function effectiveRole(realRole: string, viewAs: string | null | undefined): string {
+  return realRole === "ADMIN" && viewAs && viewAs !== "ADMIN" && isRoleCode(viewAs) ? viewAs : realRole;
 }

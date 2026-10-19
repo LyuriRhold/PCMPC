@@ -4,6 +4,8 @@ import { AppShell } from "@/components/layout/app-shell";
 import { BusinessDateLabel } from "@/components/layout/business-date";
 import { visibleHrefs } from "@/components/layout/nav";
 import { UserMenu } from "@/components/layout/user-menu";
+import { ViewAsBanner } from "@/components/layout/view-as";
+import { ROLES } from "@/modules/auth/permissions";
 import { getCurrentUser } from "@/lib/auth-guard";
 
 /** Server-side session check for every staff page: no active user → /login. */
@@ -20,6 +22,7 @@ async function SignedInShell({ children }: { children: ReactNode }) {
         </>
       }
     >
+      {user.actingAs ? <ViewAsBanner roleName={ROLES.find((r) => r.code === user.actingAs)?.name ?? user.actingAs} /> : null}
       {children}
     </AppShell>
   );

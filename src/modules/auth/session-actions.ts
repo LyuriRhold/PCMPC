@@ -1,12 +1,14 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getDb } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { getAuth } from "@/lib/auth";
-import { getCurrentUser } from "@/lib/auth-guard";
+import { failFrom, ok, type ActionResult } from "@/lib/action-result";
+import { ForbiddenError, getCurrentUser, UnauthenticatedError, VIEW_AS_COOKIE } from "@/lib/auth-guard";
+import { isRoleCode } from "./permissions";
 import { AuthError, signIn } from "./service";
 
 export type LoginState = { error: string | null };
@@ -39,10 +41,39 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   redirect(safeNext(parsed.data.next));
 }
 
+const viewAsSchema = z.object({ role: z.string().trim().max(40).nullable() });
+
+/**
+ * The super admin views the system as another role (its screens and permissions), or, with null
+ * or ADMIN, as the administrator again. Only a user whose own role is ADMIN may do it; each switch
+ * is audited. A document's preparer ≠ approver rule still applies: it is the same person.
+ */
+export async function viewAsRoleAction(input: z.input<typeof viewAsSchema>): Promise<ActionResult<null>> {
+  const user = await getCurrentUser();
+  if (!user) throw new UnauthenticatedError();
+  if (user.realRoleCode !== "ADMIN") {
+    await audit(getDb(), { action: "auth.denied", entity: "permission", entityId: "view_as", after: { roleCode: user.realRoleCode }, userId: user.id });
+    throw new ForbiddenError("view_as");
+  }
+  try {
+    const { role } = viewAsSchema.parse(input);
+    const target = role && role !== "ADMIN" ? role : null;
+    if (target && !isRoleCode(target)) return { ok: false, error: "Choose a role" };
+    const jar = await cookies();
+    if (target) jar.set(VIEW_AS_COOKIE, target, { httpOnly: true, sameSite: "lax", path: "/", secure: process.env.NODE_ENV === "production" });
+    else jar.delete(VIEW_AS_COOKIE);
+    await audit(getDb(), { action: "auth.view_as", entity: "user", entityId: user.id, before: { role: user.actingAs ?? "ADMIN" }, after: { role: target ?? "ADMIN" }, userId: user.id });
+    return ok(null);
+  } catch (e) {
+    return failFrom(e, []);
+  }
+}
+
 /** Ends the session and returns to the login page. */
 export async function logoutAction(): Promise<void> {
   const user = await getCurrentUser();
   const h = await headers();
+  (await cookies()).delete(VIEW_AS_COOKIE);
   await getAuth().api.signOut({ headers: h });
   if (user) await audit(getDb(), { action: "auth.logout", entity: "user", entityId: user.id, userId: user.id });
   redirect("/login");

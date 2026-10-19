@@ -3,7 +3,7 @@ import { getDb } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { getAuth } from "@/lib/auth";
 import { getActorContext, runAs } from "@/lib/request-context";
-import type { Permission } from "@/modules/auth/permissions";
+import { effectiveRole, type Permission } from "@/modules/auth/permissions";
 import { getUser, permissionsOfRole } from "@/modules/auth/service";
 
 export { runAs };
@@ -40,9 +40,30 @@ export type CurrentUser = {
   id: string;
   username: string;
   name: string;
+  /** The role in effect: the user's own, or the one the super admin is viewing as. */
   roleCode: string;
   permissions: ReadonlySet<string>;
+  /** The user's own role. */
+  realRoleCode: string;
+  /** Set while the super admin views the system as another role. */
+  actingAs: string | null;
 };
+
+/** Cookie with the role the super admin views the system as (honored only for ADMIN users). */
+export const VIEW_AS_COOKIE = "pcmpc_view_as";
+
+/** The view-as cookie of the request (none under runAs: tests and scripts). */
+async function viewAsCookie(): Promise<string | null> {
+  if (getActorContext()) return null;
+  try {
+    const { cookies } = await import("next/headers");
+    return (await cookies()).get(VIEW_AS_COOKIE)?.value ?? null;
+  } catch (e) {
+    const { unstable_rethrow } = await import("next/navigation");
+    unstable_rethrow(e);
+    return null;
+  }
+}
 
 async function sessionUserId(): Promise<string | null> {
   const actor = getActorContext();
@@ -69,12 +90,15 @@ async function loadCurrentUser(): Promise<CurrentUser | null> {
   if (!userId) return null;
   const user = await getUser(userId);
   if (!user || !user.isActive) return null;
+  const roleCode = user.roleCode === "ADMIN" ? effectiveRole(user.roleCode, await viewAsCookie()) : user.roleCode;
   return {
     id: user.id,
     username: user.username,
     name: user.name,
-    roleCode: user.roleCode,
-    permissions: await permissionsOfRole(user.roleCode),
+    roleCode,
+    permissions: await permissionsOfRole(roleCode),
+    realRoleCode: user.roleCode,
+    actingAs: roleCode === user.roleCode ? null : roleCode,
   };
 }
 

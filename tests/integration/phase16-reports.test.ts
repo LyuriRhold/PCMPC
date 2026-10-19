@@ -1,9 +1,18 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import ExcelJS from "exceljs";
 import { afterEach, describe, expect, it } from "vitest";
 import "@/modules/plugins";
+import { getDb, withTx } from "@/db/client";
 import { ForbiddenError, runAs } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
 import { addOfficerAction, addTrainingAction, endOfficerTermAction } from "@/modules/governance/actions";
 import { listOfficers, listTrainings, officerTrainingHours } from "@/modules/governance/service";
+import { caprData, caprWorkbook } from "@/modules/reports/cda";
+import type { CdaTemplate } from "@/modules/reports/cda-templates";
+import { recentRuns, recordRun } from "@/modules/reports/service";
+import { updateSetting } from "@/modules/settings/service";
 import { makeUser } from "../helpers/phase01";
 import { membersFixture } from "../helpers/phase16";
 
@@ -54,5 +63,63 @@ describe("T16.1 officers, committees and trainings", () => {
       ["8.00", 1],
       ["8.00", 1],
     ]);
+  });
+});
+
+describe("T16.2 the CDA (CAPR) data and workbook", () => {
+  const sheetRows = (ws: ExcelJS.Worksheet) => {
+    const out: unknown[][] = [];
+    ws.eachRow((r) => out.push((r.values as unknown[]).slice(1)));
+    return out;
+  };
+
+  it("the CAPR figures by key: membership by type and sex, capital, the statements, funds, officers", async () => {
+    const { manager } = await membersFixture();
+    await withTx((tx) => updateSetting(tx, "coop.cda_reg_no", "9520-04012345", manager));
+    expect((await runAs(manager, () => addOfficerAction({ memberNo: "M-000001", position: "Chairperson", committee: "BOARD", termStart: "2026-01-01", termEnd: null, electedAtGa: null }))).ok).toBe(true);
+    const data = await caprData(2026);
+    const v = (key: string) => data.find((d) => d.key === key)?.value;
+    expect([v("coop.cda_reg_no"), v("report.year"), v("report.period")]).toEqual(["9520-04012345", 2026, "Jan 01, 2026 to Dec 31, 2026"]);
+    expect([v("members.regular.male"), v("members.regular.female"), v("members.associate.female"), v("members.total"), v("members.new")]).toEqual([3, 2, 1, 6, 6]);
+    expect([v("capital.paid_up"), v("fs.total_assets"), v("fs.net_surplus"), v("funds.reserve")]).toEqual([0n, 0n, 0n, 0n]);
+    expect(v("officers.count")).toBe(1);
+    expect(data.filter((d) => d.section === "Revenue by business line").map((d) => d.key)).toEqual(["revenue.water", "revenue.credit", "revenue.consumer", "revenue.general"]);
+  });
+
+  it("without the CDA template: a cover, the data sheets and the Unmapped fields note; with one: its mapped cells filled and the rest listed", async () => {
+    const { manager } = await membersFixture();
+    await withTx((tx) => updateSetting(tx, "coop.cda_reg_no", "9520-04012345", manager));
+    const plain = new ExcelJS.Workbook();
+    await plain.xlsx.load((await caprWorkbook(2026)) as unknown as ArrayBuffer);
+    expect(plain.worksheets.map((w) => w.name)).toEqual(["Cover", "CAPR data", "Officers and trainings", "Unmapped fields"]);
+    expect(sheetRows(plain.getWorksheet("Unmapped fields")!)[1]).toEqual(["Cooperative Annual Progress Report (CAPR)", "", "", "(whole template)", "docs/cda-templates/capr.xlsx hasn't been provided yet; the data sheets below hold every figure the MIS can give"]);
+    // A template with one sheet: two mapped cells and one field the MIS has no data for.
+    const dir = mkdtempSync(path.join(tmpdir(), "cda-"));
+    const t = new ExcelJS.Workbook();
+    t.addWorksheet("Part I").getCell("A2").value = "CDA Reg. No.";
+    await t.xlsx.writeFile(path.join(dir, "capr.xlsx"));
+    const templates: CdaTemplate[] = [
+      {
+        key: "CAPR",
+        title: "CAPR (test)",
+        file: "capr.xlsx",
+        fields: [
+          { sheet: "Part I", cell: "B2", label: "CDA Reg. No.", source: "coop.cda_reg_no" },
+          { sheet: "Part I", cell: "B3", label: "Total members", source: "members.total" },
+          { sheet: "Part I", cell: "B4", label: "Members who are persons with disability", source: null },
+        ],
+      },
+    ];
+    const filled = new ExcelJS.Workbook();
+    await filled.xlsx.load((await caprWorkbook(2026, undefined, { templates, dir })) as unknown as ArrayBuffer);
+    expect(filled.worksheets.map((w) => w.name)).toEqual(["Part I", "Cover", "CAPR data", "Officers and trainings", "Unmapped fields"]);
+    expect([filled.getWorksheet("Part I")!.getCell("B2").value, filled.getWorksheet("Part I")!.getCell("B3").value]).toEqual(["9520-04012345", 6]);
+    expect(sheetRows(filled.getWorksheet("Unmapped fields")!).slice(1)).toEqual([["CAPR (test)", "Part I", "B4", "Members who are persons with disability", "No source in the MIS"]]);
+  });
+
+  it("each generation is recorded", async () => {
+    const { manager } = await membersFixture();
+    await recordRun(getDb(), { report: "CAPR", params: { year: 2026 }, userId: manager });
+    expect((await recentRuns("CAPR")).map((r) => [r.params, r.username])).toEqual([[{ year: 2026 }, "mgr1"]]);
   });
 });

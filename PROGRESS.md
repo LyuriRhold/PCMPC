@@ -24,7 +24,7 @@
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ✅ | phase-13-store-pos · tag `phase-13` | rldejoya (reviewer agent: charge-sale refunds fixed; follow-ups) · 2026-10-14 |
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ✅ | phase-14-fs-close · tag `phase-14` | rldejoya (reviewer agent: next fiscal year and asset register fixed; follow-ups) · 2026-10-14 |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ✅ | phase-15-surplus-allocation · tag `phase-15` | rldejoya (reviewer agent: fiscal-year windows fixed; follow-ups) · 2026-10-17 |
-| 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ⬜ | | |
+| 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | 🔨 | phase-16-reports | |
 | 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | ⬜ | | |
 | 18 | [Hardening, Vercel Deployment, Backups, UAT & Go-Live](docs/phases/PHASE-18-golive.md) | ⬜ | | |
 
@@ -214,7 +214,7 @@
 - [ ] T16.4 Operational reports + Excel export
 - [ ] T16.5 Member SOA (print CSS + PDF)
 - [ ] T16.6 Performance fixture (50,000 journal lines, 1,000 members) + query tuning/indexes
-- [ ] Acceptance tests written first (tests/acceptance/phase-16.test.ts)
+- [x] Acceptance tests written first (tests/acceptance/phase-16.test.ts)
 - [ ] Exit checks passed
 
 ### Phase 17 — Data Migration & Opening Balances

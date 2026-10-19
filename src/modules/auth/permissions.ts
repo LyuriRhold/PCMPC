@@ -158,7 +158,7 @@ export function isRoleCode(value: string): value is RoleCode {
 }
 
 /**
- * The role in effect: the super admin (ADMIN) may view the system as any other role, with exactly
+ * The role in effect: the super admin (ADMIN) may view the system in another role's place, with exactly
  * that role's screens and permissions; anyone else always has their own role (no way up).
  */
 export function effectiveRole(realRole: string, viewAs: string | null | undefined): string {

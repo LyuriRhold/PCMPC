@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { viewAsRoleAction } from "@/modules/auth/session-actions";
 
-/** The super admin's role picker: view the system as any role, or as the administrator. */
+/** The super admin's role picker: view the system in another role's place, or as the administrator. */
 export function ViewAsSelect({ current, roles }: { current: string; roles: Array<{ code: string; name: string }> }) {
   const router = useRouter();
   const [pending, start] = useTransition();

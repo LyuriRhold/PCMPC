@@ -18,14 +18,15 @@ import { dashboardKpis, efficiencyPercent, loanCollectionEfficiency } from "@/mo
 import { runReport } from "@/modules/reports/operational";
 import { memberSoa } from "@/modules/reports/soa";
 import { soaPdf } from "@/modules/reports/soa-pdf";
-import { accountIdFor, postJournal } from "@/modules/ledger/service";
+import { accountIdFor, postJournal, trialBalance } from "@/modules/ledger/service";
+import { cashFlows, changesInEquity, financialCondition, operations } from "@/modules/accounting/statements";
 import type { CdaTemplate } from "@/modules/reports/cda-templates";
 import { recentRuns, recordRun } from "@/modules/reports/service";
 import { updateSetting } from "@/modules/settings/service";
 import { makeUser } from "../helpers/phase01";
 import { P } from "../helpers/phase03";
 import { payLoan } from "../helpers/phase11";
-import { membersFixture, on, soaFixture } from "../helpers/phase16";
+import { membersFixture, on, performanceFixture, soaFixture } from "../helpers/phase16";
 
 afterEach(() => setClock(null));
 
@@ -223,4 +224,28 @@ describe("T16.5 the member statement of account", () => {
     await withTx((tx) => postJournal(tx, { date: "2026-12-15", book: "GJ", particulars: "Manual entry", lines: [{ accountId: cash, debit: P(100) }, { accountId: savings, credit: P(100), memberId: f.memberId }] }, f.book));
     expect((await memberSoa(f.memberId)).reconciliation.find((r) => r.label === "Savings deposits")).toEqual({ label: "Savings deposits", gl: P(1600), subsidiary: P(1500), difference: P(100) });
   });
+});
+
+describe("T16.6 the performance fixture: 1,000 members, 50,000 journal lines", () => {
+  it("the trial balance, the four statements, the dashboard and the CAPR data each answer in under 5 s", async () => {
+    await performanceFixture();
+    const timed = async <T>(label: string, fn: () => Promise<T>) => {
+      const started = performance.now();
+      const value = await fn();
+      const ms = performance.now() - started;
+      expect(ms, `${label} took ${Math.round(ms)} ms`).toBeLessThan(5000);
+      return value;
+    };
+    const tb = await timed("trial balance", () => trialBalance("2026-12-31"));
+    expect(tb.balanced).toBe(true);
+    const sfc = await timed("financial condition", () => financialCondition("2026-12-31"));
+    expect(sfc.totals.balanced).toBe(true);
+    await timed("operations", () => operations("2026-01-01", "2026-12-31"));
+    await timed("changes in equity", () => changesInEquity("2026-01-01", "2026-12-31"));
+    await timed("cash flows", () => cashFlows("2026-01-01", "2026-12-31"));
+    const k = await timed("dashboard", () => dashboardKpis());
+    expect(k.members.total).toBe(1000);
+    const capr = await timed("CAPR data", () => caprData(2026));
+    expect(capr.find((f) => f.key === "members.total")?.value).toBe(1000);
+  }, 180_000);
 });

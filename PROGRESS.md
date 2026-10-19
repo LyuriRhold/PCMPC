@@ -213,7 +213,7 @@
 - [x] T16.3 Dashboard (server-rendered KPIs; charts kept simple)
 - [x] T16.4 Operational reports + Excel export
 - [x] T16.5 Member SOA (print CSS + PDF)
-- [ ] T16.6 Performance fixture (50,000 journal lines, 1,000 members) + query tuning/indexes
+- [x] T16.6 Performance fixture (50,000 journal lines, 1,000 members) + query tuning/indexes
 - [x] Acceptance tests written first (tests/acceptance/phase-16.test.ts)
 - [ ] Exit checks passed
 

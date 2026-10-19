@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 16
+**Current phase:** 17
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -24,7 +24,7 @@
 | 13 | [Store: POS, Charge-to-Member & Store Patronage](docs/phases/PHASE-13-store-pos.md) | ✅ | phase-13-store-pos · tag `phase-13` | rldejoya (reviewer agent: charge-sale refunds fixed; follow-ups) · 2026-10-14 |
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ✅ | phase-14-fs-close · tag `phase-14` | rldejoya (reviewer agent: next fiscal year and asset register fixed; follow-ups) · 2026-10-14 |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ✅ | phase-15-surplus-allocation · tag `phase-15` | rldejoya (reviewer agent: fiscal-year windows fixed; follow-ups) · 2026-10-17 |
-| 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | 🟡 reviewed (reviewer agent: deposits, delinquency footer, CAPR funds, auditor masking fixed); awaiting merge | phase-16-reports | |
+| 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ✅ | phase-16-reports · tag `phase-16` | rldejoya (reviewer agent: deposits, delinquency footer, CAPR funds, auditor masking fixed; follow-ups) · 2026-10-19 |
 | 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | ⬜ | | |
 | 18 | [Hardening, Vercel Deployment, Backups, UAT & Go-Live](docs/phases/PHASE-18-golive.md) | ⬜ | | |
 
@@ -421,6 +421,11 @@
 - Correcting a GA resolution no. after posting; re-issuing a cancelled ISC/PR cash DV from the allocation; distributing member by member (resumable) for a large membership (Phase 15 review)
 - ATIR/ABR data if PCMPC is tax-exempt; Social Audit and Performance Audit figures beyond what the CAPR data gives (Q-16.5)
 - Charts on the management dashboard (Phase 16 kept tiles and tables)
+- Member statement: arrears that are past due shown apart from the installment due today; closed savings accounts left out (Phase 16 review)
+- Water on the dashboards: one definition of the month's "billed" for the home page and the management dashboard; the NRW when a bulk meter reading is missing (Phase 16 review)
+- A governance permission (the manager and the secretary) instead of members.write for officers and trainings (Phase 16 review)
+- A load test of the loan-by-loan figures (portfolio, PAR, delinquency) with thousands of loans (Phase 16 review)
+- Once the CDA template is in docs/cda-templates/: check that its logos and images survive the ExcelJS round trip; client-side filters on the operational reports through runReportAction (the pages render on the server today) (Phase 16 review)
 - Importing the bank statement (CSV) instead of ticking entries by hand (Phase 14)
 - The monthly allowance (provision) entry per aging bucket (`loan.allowance_rates`): the Phase 11 follow-up expected it at the period close, but the Phase 14 spec doesn't include it
 - A pre-closing trial balance (or an option to list zero rows) for the auditor; locking the statement mapping of closed years (Phase 14 review)
@@ -1827,8 +1832,13 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - **Deployment:** the report routes trace the PDF fonts and the CDA templates (next.config).
   - **Loan accounts:** found by a key prefix match that doesn't treat `_` as a wildcard.
   - **Officers and trainings:** the same position can't be held twice in one term, and a training needs its date.
+  - **Build:** the CDA template paths are marked for Turbopack not to trace (the templates are already included through next.config), so the build no longer warns that it traces the whole project.
 - **Logged:**
   - Q-16.3 updated (reports.contacts) and Q-16.6 added.
   - Deviations: the Social and Performance Audit attachments, and the scope of the performance figures.
+  - Backlog: the statement's arrears and closed accounts, the water figures on the two dashboards, a governance permission, a load test with many loans, and the template images.
 - **After the fixes:**
-GATE16_LINE
+  - `npm run gate` green: 707 tests, 58 files, scan clean (18 min, 2 workers).
+  - `npm run build` green, no warnings.
+  - E2E on a production build green: phase-16 and ui-shell, with SEED_ADMIN_* unset (the default admin).
+  - Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (migration 0045; the default admin and the demo manager are created).

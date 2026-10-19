@@ -146,12 +146,13 @@ export async function caprData(year: number, db: Db | Tx = getDb()): Promise<Cap
   return out;
 }
 
-const TEMPLATE_DIR = path.join(process.cwd(), "docs", "cda-templates");
-const templatePath = (t: CdaTemplate, dir = TEMPLATE_DIR) => path.join(dir, t.file);
+// The templates are bundled through outputFileTracingIncludes (next.config), so the build doesn't trace these paths.
+const TEMPLATE_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), "docs", "cda-templates");
+const templatePath = (t: CdaTemplate, dir = TEMPLATE_DIR) => path.join(/*turbopackIgnore: true*/ dir, t.file);
 
 /** Whether each CDA template is in docs/cda-templates/ (the CDA reports page). */
 export function templateStatus() {
-  return CDA_TEMPLATES.map((t) => ({ key: t.key, title: t.title, file: `docs/cda-templates/${t.file}`, found: existsSync(templatePath(t)), mapped: t.fields.filter((f) => f.source).length, unmapped: t.fields.filter((f) => !f.source).length }));
+  return CDA_TEMPLATES.map((t) => ({ key: t.key, title: t.title, file: `docs/cda-templates/${t.file}`, found: existsSync(/*turbopackIgnore: true*/ templatePath(t)), mapped: t.fields.filter((f) => f.source).length, unmapped: t.fields.filter((f) => !f.source).length }));
 }
 
 const PESO = '"₱"#,##0.00;[Red]-"₱"#,##0.00';
@@ -169,8 +170,8 @@ export async function caprWorkbook(year: number, db: Db | Tx = getDb(), opts: { 
   const file = templatePath(template, opts.dir);
   const wb = new ExcelJS.Workbook();
   const unmapped: Array<[string, string, string, string, string]> = [];
-  if (existsSync(file)) {
-    await wb.xlsx.readFile(file);
+  if (existsSync(/*turbopackIgnore: true*/ file)) {
+    await wb.xlsx.readFile(/*turbopackIgnore: true*/ file);
     for (const f of template.fields) {
       const value = f.source ? byKey.get(f.source) : undefined;
       if (!value) {

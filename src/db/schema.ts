@@ -14,3 +14,5 @@ export * from "@/modules/loans/schema";
 export * from "@/modules/store/schema";
 export * from "@/modules/accounting/schema";
 export * from "@/modules/surplus/schema";
+export * from "@/modules/governance/schema";
+export * from "@/modules/reports/schema";

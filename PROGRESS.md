@@ -208,7 +208,7 @@
 - [x] Exit checks passed
 
 ### Phase 16 — Reports: CDA, Management Dashboard & Member Statements
-- [ ] T16.1 Officers/committees/trainings module
+- [x] T16.1 Officers/committees/trainings module
 - [ ] T16.2 CDA template filler (exceljs) with field-mapping config per template + "Unmapped fields" sheet
 - [ ] T16.3 Dashboard (server-rendered KPIs; charts kept simple)
 - [ ] T16.4 Operational reports + Excel export

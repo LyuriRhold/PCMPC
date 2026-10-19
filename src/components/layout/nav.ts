@@ -427,6 +427,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/reports/cda", label: "CDA reports", icon: FileSpreadsheet, status: "soon", phase: "16", summary: "CAPR and annex extracts in the CDA templates." },
       { href: "/reports/management", label: "Management dashboard", icon: ChartColumn, status: "soon", phase: "16", summary: "KPIs across water, credit, store and cash." },
       { href: "/reports/statements", label: "Member statements", icon: FileText, status: "soon", phase: "16", summary: "Statement of account per member." },
+      { href: "/reports/governance", label: "Officers & trainings", icon: Users, status: "live", permission: ["reports.read", "members.read"], phase: "16", summary: "The board, committees and management, their terms, and trainings attended." },
     ],
   },
   {

@@ -9,12 +9,17 @@ import { ForbiddenError, runAs } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
 import { addOfficerAction, addTrainingAction, endOfficerTermAction } from "@/modules/governance/actions";
 import { listOfficers, listTrainings, officerTrainingHours } from "@/modules/governance/service";
+import { format } from "@/lib/money";
+import { getLoan } from "@/modules/loans/servicing";
 import { caprData, caprWorkbook } from "@/modules/reports/cda";
+import { dashboardKpis, efficiencyPercent, loanCollectionEfficiency } from "@/modules/reports/kpis";
 import type { CdaTemplate } from "@/modules/reports/cda-templates";
 import { recentRuns, recordRun } from "@/modules/reports/service";
 import { updateSetting } from "@/modules/settings/service";
 import { makeUser } from "../helpers/phase01";
-import { membersFixture } from "../helpers/phase16";
+import { P } from "../helpers/phase03";
+import { payLoan } from "../helpers/phase11";
+import { membersFixture, on, soaFixture } from "../helpers/phase16";
 
 afterEach(() => setClock(null));
 
@@ -121,5 +126,30 @@ describe("T16.2 the CDA (CAPR) data and workbook", () => {
     const { manager } = await membersFixture();
     await recordRun(getDb(), { report: "CAPR", params: { year: 2026 }, userId: manager });
     expect((await recentRuns("CAPR")).map((r) => [r.params, r.username])).toEqual([[{ year: 2026 }, "mgr1"]]);
+  });
+});
+
+describe("T16.3 the management dashboard", () => {
+  it("balances from the GL agree with the member records; loans due this week; loan collection efficiency of the month", async () => {
+    const f = await soaFixture();
+    on("2026-11-01");
+    const k = await dashboardKpis();
+    expect([k.loanPortfolio, k.deposits, k.paidUp]).toEqual([P(10000), P(1500), P(2700)]);
+    expect(k.reconciliation.map((r) => [r.label, r.difference])).toEqual([
+      ["Loans receivable (loan schedules)", 0n],
+      ["Deposits (savings passbooks and time deposits)", 0n],
+      ["Paid-up share capital (share registry)", 0n],
+    ]);
+    const first = (await getLoan(f.loanId))!.schedule[0]!;
+    const installment = first.principalDue + first.interestDue;
+    expect(k.alerts.loansDueThisWeek).toEqual({ loans: 1, amount: installment });
+    expect(k.loanEfficiency).toMatchObject({ month: "2026-11", due: installment, collected: 0n, percent: "0.00%" });
+    expect(k.members).toMatchObject({ total: 2, newThisMonth: 0 });
+    // Paid on its due date: the month is fully collected.
+    on("2026-11-05");
+    const paid = await payLoan(f.memberId, f.loanId, format(installment).replace("₱", ""));
+    if (!paid.ok) throw new Error(paid.error);
+    expect(await loanCollectionEfficiency("2026-11")).toMatchObject({ due: installment, collected: installment, percent: "100.00%" });
+    expect(efficiencyPercent(0n, 0n)).toBeNull();
   });
 });

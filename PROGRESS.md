@@ -211,7 +211,7 @@
 - [x] T16.1 Officers/committees/trainings module
 - [x] T16.2 CDA template filler (exceljs) with field-mapping config per template + "Unmapped fields" sheet
 - [x] T16.3 Dashboard (server-rendered KPIs; charts kept simple)
-- [ ] T16.4 Operational reports + Excel export
+- [x] T16.4 Operational reports + Excel export
 - [ ] T16.5 Member SOA (print CSS + PDF)
 - [ ] T16.6 Performance fixture (50,000 journal lines, 1,000 members) + query tuning/indexes
 - [x] Acceptance tests written first (tests/acceptance/phase-16.test.ts)

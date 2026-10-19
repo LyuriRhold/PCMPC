@@ -12,7 +12,10 @@ import { listOfficers, listTrainings, officerTrainingHours } from "@/modules/gov
 import { format } from "@/lib/money";
 import { getLoan } from "@/modules/loans/servicing";
 import { caprData, caprWorkbook } from "@/modules/reports/cda";
+import { runReportAction } from "@/modules/reports/actions";
+import { reportWorkbook } from "@/modules/reports/export";
 import { dashboardKpis, efficiencyPercent, loanCollectionEfficiency } from "@/modules/reports/kpis";
+import { runReport } from "@/modules/reports/operational";
 import type { CdaTemplate } from "@/modules/reports/cda-templates";
 import { recentRuns, recordRun } from "@/modules/reports/service";
 import { updateSetting } from "@/modules/settings/service";
@@ -151,5 +154,50 @@ describe("T16.3 the management dashboard", () => {
     if (!paid.ok) throw new Error(paid.error);
     expect(await loanCollectionEfficiency("2026-11")).toMatchObject({ due: installment, collected: installment, percent: "100.00%" });
     expect(efficiencyPercent(0n, 0n)).toBeNull();
+  });
+});
+
+describe("T16.4 operational reports and their Excel export", () => {
+  it("delinquency: contacts shown to the manager, masked for the board; releases, collections and store sales agree with the books; the workbook", async () => {
+    const f = await soaFixture();
+    const board = (await makeUser("BOARD", "board1")).id;
+    const teller = (await makeUser("TELLER", "teller16")).id;
+    await expect(runAs(teller, () => runReportAction({ key: "delinquency", params: {} }))).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await runAs(board, () => runReportAction({ key: "no-such-report", params: {} }))).toEqual({ ok: false, error: "Choose a report" });
+    expect(await runAs(board, () => runReportAction({ key: "loan-releases", params: { from: "2026-11-01", to: "2026-10-01" } }))).toEqual({ ok: false, error: "The period starts on or before it ends" });
+    const releases = await runReport("loan-releases", { from: "2026-10-01", to: "2026-10-31" }, { canSeeSensitive: false });
+    expect(releases.rows.map((r) => [r.loanNo, r.memberNo, r.principal])).toEqual([[f.loanNo, "M-000001", P(10000)]]);
+    // Nov 5: the first installment is paid; Dec 15: nothing more is paid, the second (Dec 5) is past due.
+    on("2026-11-05");
+    const first = (await getLoan(f.loanId))!.schedule[0]!;
+    const paid = await payLoan(f.memberId, f.loanId, format(first.principalDue + first.interestDue).replace("₱", ""));
+    if (!paid.ok) throw new Error(paid.error);
+    on("2026-12-15");
+    const collections = await runReport("loan-collections", { from: "2026-11-01", to: "2026-11-30" }, { canSeeSensitive: false });
+    expect(collections.rows).toHaveLength(1);
+    expect(collections.totals).toMatchObject({ interest: first.interestDue, principal: first.principalDue });
+    expect(collections.reconciliation.map((r) => r.difference)).toEqual([0n]);
+    const manager = await runAs(f.manager, () => runReportAction({ key: "delinquency", params: { asOf: "2026-12-15" } }));
+    if (!manager.ok) throw new Error(manager.error);
+    expect(manager.data.rows.map((r) => [r.memberNo, r.mobile, r.daysPastDue])).toEqual([["M-000001", "09171234567", 10]]);
+    expect(manager.data.reconciliation.map((r) => r.difference)).toEqual([0n]);
+    const masked = await runAs(board, () => runReportAction({ key: "delinquency", params: { asOf: "2026-12-15" } }));
+    if (!masked.ok) throw new Error(masked.error);
+    expect(masked.data.rows[0]?.mobile).toBe("•••••••4567");
+    expect(String(masked.data.rows[0]?.comakers)).not.toContain("0917");
+    const store = await runReport("store-sales", { from: "2026-10-01", to: "2026-10-31" }, { canSeeSensitive: false });
+    expect(store.totals).toMatchObject({ net: P(350) });
+    expect(store.reconciliation.map((r) => [r.gl, r.difference])).toEqual([[P(350), 0n]]);
+    // The Excel export carries the rows, the totals and the reconciliation.
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await reportWorkbook(masked.data, "PCMPC", "As of Dec 15, 2026")) as unknown as ArrayBuffer);
+    const ws = wb.worksheets[0]!;
+    const values: unknown[][] = [];
+    ws.eachRow((r) => values.push((r.values as unknown[]).slice(1)));
+    expect(values[1]).toEqual(["Delinquency"]);
+    // (eachRow skips the blank row under the subtitle.)
+    expect(values[3]?.slice(0, 4)).toEqual(["Loan no.", "Member no.", "Borrower", "Mobile"]);
+    expect(values[4]?.slice(1, 5)).toEqual(["M-000001", masked.data.rows[0]?.name, "•••••••4567", 10]);
+    expect(values.at(-1)?.[0]).toBe("Loans receivable: whole portfolio (GL)");
   });
 });

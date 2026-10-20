@@ -10,13 +10,12 @@ import { adminPass, adminUser, signIn } from "./water-setup";
 
 const CUTOFF = "2026-09-30";
 
+/** Rolls back every open file, newest first (files others refer to go first), one at a time. */
 async function rollBackAll(page: Page) {
-  page.on("dialog", (d) => void d.accept());
-  for (let i = 0; i < 20; i++) {
-    const button = page.getByRole("button", { name: /^Roll back/ }).first();
-    if (!(await button.isVisible().catch(() => false))) return;
-    await button.click();
-    await expect(page.getByText(/rolled back/i).first()).toBeVisible();
+  const buttons = page.getByRole("button", { name: /^Roll back/ });
+  for (let open = await buttons.count(); open > 0; open--) {
+    await buttons.first().click();
+    await expect(buttons).toHaveCount(open - 1);
   }
 }
 
@@ -42,6 +41,7 @@ async function uploadFile(page: Page, name: string, buffer: Buffer) {
 test("the administrator downloads a template, dry-runs a file with an error, stages a clean file, sees the reconciliation and rolls back", async ({ page }) => {
   test.setTimeout(180_000);
   const run = Date.now().toString(36).toUpperCase();
+  page.on("dialog", (d) => void d.accept());
   await signIn(page, adminUser, adminPass);
   await page.goto("/admin/migration");
   await expect(page.getByRole("heading", { name: "Data migration" })).toBeVisible();

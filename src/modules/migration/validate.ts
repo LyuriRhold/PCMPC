@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import { and, eq, notInArray } from "drizzle-orm";
 import type { Tx } from "@/db/client";
-import { addDays, businessToday, formatDate, isBusinessDate, type BusinessDate } from "@/lib/dates";
+import { addDays, businessToday, formatDate, isBusinessDate, monthEnd, type BusinessDate } from "@/lib/dates";
 import { format, parse, type Money } from "@/lib/money";
 import { nameKey } from "@/lib/names";
 import { accounts } from "@/modules/ledger/schema";
@@ -10,6 +10,7 @@ import { loanProducts, loans } from "@/modules/loans/schema";
 import { MEMBER_TYPES, members } from "@/modules/members/schema";
 import { CIVIL_STATUSES, memberInputSchema, SEXES } from "@/modules/members/validation";
 import { depositAccounts, depositProducts, timeDeposits } from "@/modules/savings/schema";
+import { timeDepositProduct } from "@/modules/savings/service";
 import { getSetting } from "@/modules/settings/service";
 import { shareTransactions } from "@/modules/share/schema";
 import { products, suppliers } from "@/modules/store/schema";
@@ -30,14 +31,16 @@ export type Validated = { [E in MigrationEntity]: { entity: E; rows: StgInsert<E
 
 const REQUIRED = "Required";
 const DATE_MSG = "Not a valid date (use YYYY-MM-DD)";
+const INT_MAX = 2_147_483_647;
 
 /** Amount text → centavos; Excel's float noise (1180.4999999999998) is read as the 2-decimal amount it stands for. */
 function toMoney(text: string): Money | undefined {
   let t = text.replace(/\s/g, "");
   if (/^-?\d+\.\d{3,}$/.test(t)) {
-    const n = Number(t);
-    if (Math.abs(n * 100 - Math.round(n * 100)) > 1e-6) return undefined;
-    t = n.toFixed(2);
+    const d = new Decimal(t);
+    const cents = d.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+    if (d.minus(cents).abs().gt("0.000001")) return undefined;
+    t = cents.toFixed(2);
   }
   try {
     return parse(t);
@@ -103,6 +106,8 @@ class Cells {
     if (!/^-?\d+$/.test(v)) return this.fail(h, "Not a whole number");
     const n = Number(v);
     if (n < min || (max !== undefined && n > max)) return this.fail(h, max === undefined ? `At least ${min}` : `From ${min} to ${max}`);
+    // The staging and live columns are 32-bit integers.
+    if (n > INT_MAX) return this.fail(h, `At most ${INT_MAX.toLocaleString("en-US")}`);
     return n;
   }
 
@@ -407,7 +412,7 @@ export async function savingsAccountsFor(tx: Tx, cutoff: BusinessDate) {
 
 async function vTimeDeposits(ctx: Ctx, rows: Cells[]): Promise<StgInsert<"time_deposits">[]> {
   const refs = await memberRefs(ctx);
-  const [tdProduct] = await ctx.tx.select().from(depositProducts).where(and(eq(depositProducts.kind, "TIME"), eq(depositProducts.active, true))).limit(1);
+  const tdProduct = await timeDepositProduct(ctx.tx);
   const accountsOf = await savingsAccountsFor(ctx.tx, ctx.cutoff);
   const liveCerts = new Set((await ctx.tx.select({ no: timeDeposits.certificateNo }).from(timeDeposits)).map((t) => t.no.toUpperCase()));
   const seen = new Map<string, number>();
@@ -756,10 +761,8 @@ export async function validateRows(tx: Tx, entity: MigrationEntity, raw: RawRow[
 
 /** The cut-off rules: a month end, already over. */
 export function cutoffProblem(cutoff: string): string | null {
-  if (!isBusinessDate(cutoff)) return "Enter the cut-off date (YYYY-MM-DD)";
-  const [y, m] = cutoff.split("-").map(Number);
-  const last = new Date(Date.UTC(y!, m!, 0)).getUTCDate();
-  if (Number(cutoff.slice(8)) !== last) return "The cut-off must be the last day of a month (a period end)";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoff) || !isBusinessDate(cutoff)) return "Enter the cut-off date (YYYY-MM-DD)";
+  if (monthEnd(cutoff) !== cutoff) return "The cut-off must be the last day of a month (a period end)";
   if (cutoff >= businessToday()) return "The cut-off must be a day that is over (go-live is the day after)";
   return null;
 }

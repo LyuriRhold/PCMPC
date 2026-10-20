@@ -25,7 +25,7 @@
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ✅ | phase-14-fs-close · tag `phase-14` | rldejoya (reviewer agent: next fiscal year and asset register fixed; follow-ups) · 2026-10-14 |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ✅ | phase-15-surplus-allocation · tag `phase-15` | rldejoya (reviewer agent: fiscal-year windows fixed; follow-ups) · 2026-10-17 |
 | 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ✅ | phase-16-reports · tag `phase-16` | rldejoya (reviewer agent: deposits, delinquency footer, CAPR funds, auditor masking fixed; follow-ups) · 2026-10-19 |
-| 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | 🟡 awaiting review | phase-17-migration | |
+| 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | 🟡 reviewed (reviewer agent: upload size limit, checklist, validation and UI fixes); awaiting merge | phase-17-migration | |
 | 18 | [Hardening, Vercel Deployment, Backups, UAT & Go-Live](docs/phases/PHASE-18-golive.md) | ⬜ | | |
 
 ## Checklists
@@ -225,8 +225,8 @@
 - [x] T17.5 Post: opening JE + subledger creation per module + migrated water accounts/bills, loans and TDs
 - [x] T17.6 Rollback + audit
 - [x] T17.7 Cut-over runbook in `docs/CUTOVER.md` (steps, owners, timing, freeze, sign-off)
-- [ ] Acceptance tests written first (tests/acceptance/phase-17.test.ts)
-- [ ] Exit checks passed
+- [x] Acceptance tests written first (tests/acceptance/phase-17.test.ts)
+- [x] Exit checks passed
 
 ### Phase 18 — Hardening, Vercel Deployment, Backups, UAT & Go-Live
 - [ ] T18.1 Authorization sweep test (every action calls requirePermission)
@@ -367,6 +367,8 @@
 - [ ] Q-17.4 (phase 17) Migrated water bills. | default used: the unpaid amount includes any penalty the old system charged (Penalty Assessed = YES, and the MIS won't charge it again); for a bill marked NO, the MIS charges its 10% once it is past due. A disconnected account gets a disconnection record at the cut-off (reconnection needs the arrears paid and the fee). Advances are kept on the GL (Customers' Advances) and applied to the next bills | answer:
 - [ ] Q-17.5 (phase 17) Who imports and who posts. | default used: the bookkeeper uploads, stages and rolls back (migration.import); the general manager posts (migration.post); the super admin can do both. The Audit Committee signs the paper sign-off (docs/CUTOVER.md §9). Should posting also need the Audit Committee chair in the MIS? | answer:
 - [ ] Q-17.6 (phase 17) Savings interest at the cut-off. | default used: the migrated balances include the interest the old system credited; the quarter that ends on or before the cut-off is marked as run in the MIS. With a cut-off that isn't a quarter end, the first quarter's interest in the MIS counts only the days from the cut-off | answer:
+- [ ] Q-17.7 (phase 17) Data privacy consent of migrated members and water customers. | default used: not recorded (privacy_consent_at empty, the member page shows it as not yet given), since the members template has no consent column. Does PCMPC hold signed consent forms in the old files? If so, add a "Consent on file" column (date) in a later phase, or record consent on the member page | answer:
+- [ ] Q-17.8 (phase 17) Acknowledge the change to acceptance test A17.5 after its first commit. | What happened: the test expected the payment allocations as bigints, but the loans module keeps them as decimal strings (PaymentAllocation, jsonb). In the T17.5 commit (3289fd9) the expectation was changed to the same values as strings, a bigint check of the plan totals (interest ₱126.82) was added, and an unused import was removed. No golden value changed. CLAUDE.md says to leave such a test failing and ask here first; this was done the other way round. Please confirm the change | answer:
 
 ## Decisions log
 <!-- Format: - 2026-10-07 · phase XX · decision · reason -->
@@ -434,6 +436,9 @@
 - Encoding the manual receipts of the freeze days with their own dates (the counter today records the day it encodes) (Phase 17)
 - Aging for migrated balances that have no dates: store charges and supplier balances come in as one amount each (AP aging shows them as not yet due) (Phase 17)
 - Migrating transaction history line by line, and a member's old passbook/ledger as an attachment (out of scope per the spec) (Phase 17)
+- Retention of the imported files and staged rows (unmasked member data kept with the posted batches): purge or archive after the sign-off (Phase 17 review → Phase 18)
+- Fixed assets: an asset register template, so the PPE and accumulated depreciation balances come with their assets and depreciation schedules (today they arrive as GL balances only) (Phase 17 review)
+- Posting a large migration in one transaction from a server action: check it against the hosting time limit before go-live, and the 4 MB file limit against the host's request limit (Phase 17 review → Phase 18)
 - Member statement: arrears that are past due shown apart from the installment due today; closed savings accounts left out (Phase 16 review)
 - Water on the dashboards: one definition of the month's "billed" for the home page and the management dashboard; the NRW when a bulk meter reading is missing (Phase 16 review)
 - A governance permission (the manager and the secretary) instead of members.write for officers and trainings (Phase 16 review)
@@ -1917,7 +1922,7 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - `--files-only` is for a hands-on demo. A test runs the whole demo migration.
 
 **Decisions** (see Questions Q-17.1–Q-17.6 and the Decisions log)
-- One cut-off at a time; the opening entry must be the ledger's first entry; one open file per kind of record (a new upload replaces an unstaged one).
+- One cut-off at a time; the opening entry must be the first entry dated up to the cut-off (later-dated entries don't change the cut-off TB); one open file per kind of record (a new upload replaces an unstaged one).
 - Migrated records are marked in their own modules rather than in one migration table, so every screen and report treats them as ordinary records.
 - Penalties: water bills already penalised are flagged; loans get a zero accrual at the cut-off, so the daily job charges only the days after it.
 
@@ -1951,3 +1956,27 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - The local dev database now holds this demo.
 - `docs/CUTOVER.md` is written.
 - Databases set up earlier need `npm run db:migrate && npm run db:seed` (migrations 0046 and 0047).
+
+**Review follow-ups (reviewer agent, 2026-10-20)**
+- **Fixed (must-fix):**
+  - **Upload size:** `next.config.ts` sets the server-action body limit to 5 MB (the 4 MB file limit plus the form). It was 1 MB, so files over 1 MB failed before the import's own check.
+  - **Checklist:** the Phase 17 checklist boxes are ticked.
+  - **A17.5:** the change to the test after its first commit is logged as Q-17.8 for Rhold to confirm (the golden values are unchanged).
+- **Fixed:**
+  - **Amounts:** Excel's float noise is now cleaned with Decimal, not floating-point arithmetic.
+  - **Whole numbers:** at most 2,147,483,647 (the integer columns), so a typo is a row error, not a server error at staging.
+  - **Cut-off:** the post action checks it is a real date; the month-end rule uses `monthEnd`.
+  - **Time deposits:** the product is one shared rule (`timeDepositProduct`: the first active TIME product by code), and the savings account found at posting is the one the dry run found (savings kind, not closed).
+  - **Upload and staging messages:** they say what happened. An upload with problems and a staging that found new problems no longer show green.
+  - **Templates and error lists:** the links show only to staff who can import (the manager, who only posts, got a 403).
+  - **E2E:** on a database that went live through a migration, it checks the posted view (every control account ₱0.00, no upload or post button) instead of only the heading; its header states the precondition.
+  - **Tests:** the loan, water customer and water account series continue after the migrated numbers; posting at a fiscal year end closes that year and leaves the next open.
+  - **Runbook:** manual receipt numbers go in the BIR receipt no. field. The opening entry must be the first entry dated up to the cut-off (later-dated entries don't hold it up). At a fiscal year end the closing year's allocation stays in the old books. Accounts Receivable – Members takes only the store charges.
+  - **Demo seed:** it checks for a fresh database before adding the zones.
+- **Logged:**
+  - Q-17.7: privacy consent of migrated records.
+  - Q-17.8: the A17.5 test change.
+  - Backlog: retention of the imported files and staged rows; a fixed-asset register template; the posting time and the file limit against the host's limits.
+  - Uploader ≠ poster is already Q-17.5.
+- **After the fixes:**
+GATE17R_LINE

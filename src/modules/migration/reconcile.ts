@@ -6,6 +6,7 @@ import { fiscalYearStart } from "@/modules/ledger/periods";
 import { accountMappings, accounts, journalEntries } from "@/modules/ledger/schema";
 import { loanProducts } from "@/modules/loans/schema";
 import { depositProducts } from "@/modules/savings/schema";
+import { timeDepositProduct } from "@/modules/savings/service";
 import { costOf } from "@/modules/store/stock";
 import {
   importBatches,
@@ -69,7 +70,7 @@ export async function subledgerByKey(data: StagedData, db: Db | Tx = getDb()): P
   const totals = new Map<string, Money>();
   const add = (key: string, amount: Money) => totals.set(key, (totals.get(key) ?? 0n) + amount);
   const deposit = new Map((await db.select({ code: depositProducts.code, kind: depositProducts.kind, key: depositProducts.depositGlKey }).from(depositProducts)).map((p) => [p.code.toUpperCase(), p]));
-  const tdKey = [...deposit.values()].find((p) => p.kind === "TIME")?.key ?? "time_deposits";
+  const tdKey = (await timeDepositProduct(db))?.depositGlKey ?? "time_deposits";
   const loanKey = new Map((await db.select({ code: loanProducts.code, key: loanProducts.receivableGlKey }).from(loanProducts)).map((p) => [p.code.toUpperCase(), p.key]));
   for (const s of data.share) {
     add("subscribed_share_capital_common", s.subscribed);

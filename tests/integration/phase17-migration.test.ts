@@ -7,7 +7,7 @@ import { runAs } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
 import { hasRun } from "@/lib/jobs";
 import { next as nextNumber } from "@/lib/numbering";
-import { journalEntries, periods } from "@/modules/ledger/schema";
+import { fiscalYears, journalEntries, periods } from "@/modules/ledger/schema";
 import { accruePenalties, getLoan } from "@/modules/loans/servicing";
 import { members } from "@/modules/members/schema";
 import { dashboardKpis } from "@/modules/reports/kpis";
@@ -30,7 +30,7 @@ import { accountIdFor, postJournal, trialBalance } from "@/modules/ledger/servic
 import { MIGRATION_ENTITIES, TEMPLATES, templateFileName, templateWorkbook } from "@/modules/migration/templates";
 import { makeUser } from "../helpers/phase01";
 import { P, seedLedger } from "../helpers/phase03";
-import { CUTOFF, type Cells, filled, MEMBERS, memberIdOf, migratedLoanId, migrationUsers, on, setupMigration, upload, uploadAndStage } from "../helpers/phase17";
+import { CUTOFF, type Cells, filled, MEMBERS, memberIdOf, migratedLoanId, migrationPeople, migrationUsers, on, setupMigration, upload, uploadAndStage } from "../helpers/phase17";
 
 async function bookkeeperOnly() {
   await seedLedger();
@@ -359,6 +359,9 @@ describe("T17.5 posting the opening balances", () => {
     expect([m104?.status, m104?.membershipDate]).toEqual(["INACTIVE", "2018-11-05"]);
     expect(await isGoodStanding(m102)).toBe(true);
     expect(await withTx((tx) => nextNumber("MEMBER", tx))).toBe("M-000105");
+    // The other series too: the loan without a number got the one after LN-2026-00042; customers and accounts continue.
+    expect((await getLoan(await migratedLoanId("M-000102")))?.loan.loanNo).toBe("LN-2026-00043");
+    expect(await withTx(async (tx) => [await nextNumber("LN", tx, "2026-10-01"), await nextNumber("WC", tx), await nextNumber("WA", tx)])).toEqual(["LN-2026-00044", "WC-000503", "WA-000503"]);
 
     // Savings: the passbook opens with the migrated balance; the interest through Sep 30 is marked as done.
     const savings = await getDb().select().from(depositAccounts).orderBy(depositAccounts.accountNo);
@@ -432,6 +435,24 @@ describe("T17.5 posting the opening balances", () => {
       { "Account Code": "41110", Credit: 1000 },
     ], "2025-12-31");
     expect((await reconciliation("2025-12-31")).blockers).toEqual([expect.stringMatching(/^Dec 31, 2025 is a fiscal year end: stage the post-closing trial balance/)]);
+
+    // With the post-closing trial balance it posts; fiscal year 2025 is closed and 2026 open.
+    const [tb] = await listBatches();
+    await withTx((tx) => rollbackBatch(tx, tb!.id, migrationPeople().bookkeeper));
+    await uploadAndStage("trial_balance", [
+      { "Account Code": "11110", Debit: 1000 },
+      { "Account Code": "32100", Credit: 1000 },
+    ], "2025-12-31");
+    const posted = await withTx((tx) => postMigration(tx, { cutoffDate: "2025-12-31" }, migrationPeople().manager));
+    expect(posted.jeNo).toBe("GJ-2025-00001");
+    const years = await getDb().select().from(fiscalYears).orderBy(fiscalYears.year);
+    expect(years.map((y) => [y.year, y.status])).toEqual([
+      [2025, "CLOSED"],
+      [2026, "OPEN"],
+    ]);
+    const months = await getDb().select().from(periods).orderBy(periods.year, periods.month);
+    expect(months.filter((m) => m.year === 2025).every((m) => m.status === "CLOSED")).toBe(true);
+    expect(months.filter((m) => m.year === 2026).every((m) => m.status === "OPEN")).toBe(true);
   });
 });
 

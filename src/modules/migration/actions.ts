@@ -4,6 +4,7 @@ import { z } from "zod";
 import { withTx } from "@/db/client";
 import { failFrom, ok, type ActionResult } from "@/lib/action-result";
 import { requirePermission } from "@/lib/auth-guard";
+import { isBusinessDate } from "@/lib/dates";
 import { NumberingError } from "@/lib/numbering";
 import { LedgerError } from "@/modules/ledger/service";
 import { LoanError } from "@/modules/loans/service";
@@ -63,7 +64,7 @@ export async function rollbackBatchAction(input: z.input<typeof batchSchema>): P
   }
 }
 
-const postSchema = z.object({ cutoffDate: z.string().trim().max(10) });
+const postSchema = z.object({ cutoffDate: z.string().trim().refine((v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && isBusinessDate(v), "Enter the cut-off date (YYYY-MM-DD)") });
 
 /** General manager: posts the opening balances once the reconciliation agrees (one opening entry; the months up to the cut-off close). */
 export async function postMigrationAction(input: z.input<typeof postSchema>): Promise<ActionResult<{ jeNo: string }>> {

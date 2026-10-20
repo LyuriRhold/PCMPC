@@ -21,7 +21,7 @@ How PCMPC moves from its old records (Excel / old system) to the MIS: what is fr
 
 - **A month end**, already over (the MIS refuses anything else), e.g. cut-off **Sep 30**. Go-live is the day the opening balances are posted. Aim for 1–2 working days after the cut-off; a weekend helps.
 - **Prefer a quarter end** (Mar 31, Jun 30, Sep 30, Dec 31). The old system credits savings interest for the quarter, and the MIS starts the next quarter cleanly. With another month end, the first quarter's interest in the MIS counts only the days from the cut-off.
-- **At a fiscal year end** (Dec 31), the trial balance must be the **post-closing** one (revenues and expenses closed into Undivided Net Surplus); the MIS blocks a pre-closing one. The fiscal year is then closed in the MIS.
+- **At a fiscal year end** (Dec 31), the trial balance must be the **post-closing** one (revenues and expenses closed into Undivided Net Surplus); the MIS blocks a pre-closing one. The fiscal year is then closed in the MIS. The closing year's net surplus allocation (interest on share capital, patronage refund) is done in the old books: the MIS has none of that year's transactions, and a year closed by the migration has no year-end close record to allocate from.
 - **Water:** the old system bills the cut-off month as usual. Those bills are migrated as unpaid. The first MIS billing period is the month after the cut-off.
 
 ## 3. Timeline
@@ -36,10 +36,10 @@ How PCMPC moves from its old records (Excel / old system) to the MIS: what is fr
 | T−1 | Remind members: last payments in the old system on the cut-off day | GM |
 | **T0 (cut-off day)** | Close the day in the old system; cash count; meter readings / last bills; stock count; print the cut-off reports (section 5) | Teller, Billing clerk, Store clerk, Bookkeeper |
 | T+1 to T+2 | Fill and upload the files from the cut-off reports; stage; reconcile; Audit Committee reviews. The counter takes payments on **pre-numbered manual receipts** (no withdrawals or loan releases) | Bookkeeper, Billing clerk, Loan officer, Store clerk, Teller |
-| T+2 (go-live) | **Backup**, then the GM **posts the opening balances**; spot checks; sign-off. From then on every transaction is in the MIS; the manual receipts are encoded the same day, with their numbers in the remarks | Project lead, GM, Audit Committee, Teller |
+| T+2 (go-live) | **Backup**, then the GM **posts the opening balances**; spot checks; sign-off. From then on every transaction is in the MIS; the manual receipts are encoded the same day, each with its manual receipt no. in the BIR receipt no. field | Project lead, GM, Audit Committee, Teller |
 | T+5 | Old system read-only; archive its files and the migration files with the sign-off | Project lead |
 
-> The members, accounts and loans exist in the MIS only once the opening balances are posted, so member transactions wait for the posting (hence the manual receipts in between). Nothing may be posted on or before the cut-off date in the MIS: the opening entry must be the first.
+> The members, accounts and loans exist in the MIS only once the opening balances are posted, so member transactions wait for the posting (hence the manual receipts in between). Nothing may be posted on or before the cut-off date in the MIS: the opening entry must be the first entry dated up to the cut-off. Entries dated after it (e.g. a sale or a fee on go-live day) don't change the cut-off trial balance and don't hold up posting.
 
 ## 4. The freeze
 
@@ -68,6 +68,8 @@ From the close of the cut-off day until the opening balances are posted (go-live
 | Members' unpaid store charges | Store charges file |
 
 Each subsidiary report's total must equal its control account in the trial balance. Settle any difference in the old books **before** filling the files.
+
+Control accounts take their balance only from the files: Accounts Receivable – Members is the store charges (from the Store charges file), so any other receivable from members kept on that account must be moved to its own account (or settled) before the cut-off, or posting stays blocked.
 
 ## 6. Importing (Admin › Data migration)
 

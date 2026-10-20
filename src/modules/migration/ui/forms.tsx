@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,21 +16,30 @@ function Err({ error }: { error: string | null }) {
   ) : null;
 }
 
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
 function Done({ done }: { done: string | null }) {
   return done ? <p className="text-sm text-green-700 dark:text-green-400">{done}</p> : null;
 }
 
 /** Uploads a filled template for the cut-off and shows the dry-run result. */
 export function UploadForm({ entities, cutoff, cutoffFixed }: { entities: Array<{ value: string; title: string }>; cutoff: string; cutoffFixed: boolean }) {
-  const { pending, error, done, run } = useAction();
+  const { pending, error, run } = useAction();
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   return (
     <form
       className="grid gap-3 sm:grid-cols-4"
-      action={(fd) =>
+      action={(fd) => {
+        setResult(null);
         run(() => uploadBatchAction(fd), {
-          success: "Uploaded and checked.",
-        })
-      }
+          onSuccess: (d) =>
+            setResult(
+              d.errorCount
+                ? { ok: false, text: `Uploaded, but ${plural(d.errorCount, "problem")} found: fix the file and upload it again (the list is below).` }
+                : { ok: true, text: `Uploaded and checked: ${plural(d.rowCount, "row")}, no errors. Stage it next.` },
+            ),
+        });
+      }}
     >
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="entity">Records</Label>
@@ -55,8 +65,8 @@ export function UploadForm({ entities, cutoff, cutoffFixed }: { entities: Array<
         </Button>
       </div>
       <div className="sm:col-span-4">
-        <Err error={error} />
-        <Done done={done} />
+        <Err error={error ?? (result && !result.ok ? result.text : null)} />
+        <Done done={result?.ok ? result.text : null} />
       </div>
     </form>
   );
@@ -66,6 +76,7 @@ export function UploadForm({ entities, cutoff, cutoffFixed }: { entities: Array<
 export function BatchButtons({ batchId, fileName, canStage, canRollBack }: { batchId: string; fileName: string; canStage: boolean; canRollBack: boolean }) {
   const stage = useAction();
   const rollback = useAction();
+  const [staged, setStaged] = useState<string | null>(null);
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex gap-2">
@@ -77,6 +88,7 @@ export function BatchButtons({ batchId, fileName, canStage, canRollBack }: { bat
             disabled={stage.pending}
             onClick={() =>
               stage.run(() => stageBatchAction({ batchId }), {
+                onSuccess: (d) => setStaged(d.staged ? null : `Not staged: the check found ${plural(d.errorCount, "problem")} (other files changed since); see the list`),
                 success: "Staged.",
               })
             }
@@ -101,8 +113,8 @@ export function BatchButtons({ batchId, fileName, canStage, canRollBack }: { bat
           </Button>
         ) : null}
       </div>
-      <Err error={stage.error ?? rollback.error} />
-      <Done done={stage.done ?? rollback.done} />
+      <Err error={stage.error ?? staged ?? rollback.error} />
+      <Done done={staged ? null : (stage.done ?? rollback.done)} />
     </div>
   );
 }

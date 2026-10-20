@@ -869,3 +869,9 @@ export async function markInterestMigratedThrough(tx: Tx, productId: string, qua
   if (await hasRun(tx, "savings-interest", `${product.code}:${quarterEnd}`)) return;
   await runOnce(tx, "savings-interest", `${product.code}:${quarterEnd}`, actorId, async () => ({ migrated: true, note: "Interest through this quarter is in the balances migrated from the old system" }));
 }
+
+/** The time-deposit product placements use: the first active TIME product by code (DOMAIN seeds one, "TD"). */
+export async function timeDepositProduct(db: Db | Tx = getDb()): Promise<DepositProduct | null> {
+  const [p] = await db.select().from(depositProducts).where(and(eq(depositProducts.kind, "TIME"), eq(depositProducts.active, true))).orderBy(asc(depositProducts.code)).limit(1);
+  return p ?? null;
+}

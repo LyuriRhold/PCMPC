@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { formatDate, monthEnd, now, type BusinessDate } from "@/lib/dates";
@@ -12,7 +12,7 @@ import { migrateLoan } from "@/modules/loans/servicing";
 import { members, type MemberType } from "@/modules/members/schema";
 import { createMigratedMember } from "@/modules/members/service";
 import { depositAccounts, depositProducts } from "@/modules/savings/schema";
-import { markInterestMigratedThrough, migrateTimeDeposit, openMigratedAccount } from "@/modules/savings/service";
+import { markInterestMigratedThrough, migrateTimeDeposit, openMigratedAccount, timeDepositProduct } from "@/modules/savings/service";
 import { migrateShareCapital, recordMigratedMembershipFee } from "@/modules/share/service";
 import { setChargeLimit } from "@/modules/store/pos";
 import { createSupplier, migrateStockItem } from "@/modules/store/service";
@@ -130,7 +130,7 @@ export async function postMigration(tx: Tx, input: { cutoffDate: BusinessDate },
 
   // 2. The opening entry.
   const depositByCode = new Map((await tx.select().from(depositProducts)).map((p) => [p.code.toUpperCase(), p]));
-  const tdProduct = [...depositByCode.values()].find((p) => p.kind === "TIME" && p.active);
+  const tdProduct = await timeDepositProduct(tx);
   const loanByCode = new Map((await tx.select().from(loanProducts)).map((p) => [p.code.toUpperCase(), p]));
   const subLines = new Map<string, { key: string; side: "debit" | "credit"; tag: Tag; amount: Money }>();
   const add = (key: string, side: "debit" | "credit", tag: Tag, amount: Money) => {
@@ -206,7 +206,8 @@ export async function postMigration(tx: Tx, input: { cutoffDate: BusinessDate },
         .select({ id: depositAccounts.id, accountNo: depositAccounts.accountNo })
         .from(depositAccounts)
         .innerJoin(depositProducts, eq(depositProducts.id, depositAccounts.productId))
-        .where(eq(depositAccounts.memberId, id));
+        // The same accounts the dry run counted: the member's savings accounts that aren't closed.
+        .where(and(eq(depositAccounts.memberId, id), eq(depositProducts.kind, "SAVINGS"), ne(depositAccounts.status, "CLOSED")));
       own = [...own, ...live.filter((a) => !own.some((o) => o.id === a.id))];
     }
     const savings = t.savingsAccountNo ? own.find((a) => a.accountNo.toUpperCase() === t.savingsAccountNo) : own.length === 1 ? own[0] : undefined;

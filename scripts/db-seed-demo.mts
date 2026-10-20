@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import ExcelJS from "exceljs";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { eq, isNotNull } from "drizzle-orm";
 import { closeDb, getDb, withTx } from "../src/db/client";
 import { addDays, businessToday, formatDate } from "../src/lib/dates";
 import { format } from "../src/lib/money";
@@ -37,6 +37,18 @@ const [admin] = await getDb().select({ id: users.id }).from(users).where(eq(user
 if (!admin) {
   console.error(`Run npm run db:seed first (admin "${adminName}" not found)`);
   process.exit(1);
+}
+
+// A full run needs a fresh database: check before changing anything.
+if (!filesOnly) {
+  const [someMember] = await getDb().select({ id: members.id }).from(members).where(isNotNull(members.memberNo)).limit(1);
+  const [someBatch] = await getDb().select({ id: importBatches.id }).from(importBatches).where(eq(importBatches.status, "POSTED")).limit(1);
+  if (someMember || someBatch) {
+    console.error("This database already has members or a posted migration. The demo migration needs a fresh one:");
+    console.error("  npm run db:reset && npm run db:migrate && npm run db:seed && npm run db:seed:demo");
+    await closeDb();
+    process.exit(1);
+  }
 }
 
 // 1. The puroks as water zones, one reading route each.
@@ -85,14 +97,6 @@ if (filesOnly) {
 }
 
 // 3. The import, as the bookkeeper would do it on Admin › Data migration (here as the administrator).
-const [someMember] = await getDb().select({ id: members.id }).from(members).where(isNotNull(members.memberNo)).limit(1);
-const [someBatch] = await getDb().select({ id: importBatches.id }).from(importBatches).where(and(eq(importBatches.status, "POSTED"))).limit(1);
-if (someMember || someBatch) {
-  console.error("This database already has members or a posted migration. The demo migration needs a fresh one:");
-  console.error("  npm run db:reset && npm run db:migrate && npm run db:seed && npm run db:seed:demo");
-  await closeDb();
-  process.exit(1);
-}
 for (const entity of MIGRATION_ENTITIES) {
   const file = files.get(entity);
   if (!file) continue;

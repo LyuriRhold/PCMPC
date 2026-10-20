@@ -56,24 +56,26 @@ async function MigrationContent() {
         </Card>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Templates</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2 text-sm">
-          <p className="text-muted-foreground">Upload them in this order: the members first (the other files refer to them), the trial balance last.</p>
-          <ol className="grid list-decimal gap-1 pl-5 sm:grid-cols-2">
-            {MIGRATION_ENTITIES.map((e) => (
-              <li key={e}>
-                <a className="underline underline-offset-2" href={`/api/migration/templates/${e}`} download>
-                  {TEMPLATES[e].title} template
-                </a>
-                <span className="text-muted-foreground"> · {TEMPLATES[e].purpose.split(". ")[0]}</span>
-              </li>
-            ))}
-          </ol>
-        </CardContent>
-      </Card>
+      {canImport ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Templates</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2 text-sm">
+            <p className="text-muted-foreground">Upload them in this order: the members first (the other files refer to them), the trial balance last.</p>
+            <ol className="grid list-decimal gap-1 pl-5 sm:grid-cols-2">
+              {MIGRATION_ENTITIES.map((e) => (
+                <li key={e}>
+                  <a className="underline underline-offset-2" href={`/api/migration/templates/${e}`} download>
+                    {TEMPLATES[e].title} template
+                  </a>
+                  <span className="text-muted-foreground"> · {TEMPLATES[e].purpose.split(". ")[0]}</span>
+                </li>
+              ))}
+            </ol>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {canImport && !rec?.posted ? (
         <Card>
@@ -122,6 +124,10 @@ async function MigrationContent() {
               <TableCell>
                 {b.errorCount === 0 ? (
                   <span className="text-muted-foreground">No errors</span>
+                ) : !canImport ? (
+                  <span className="text-destructive">
+                    {b.errorCount} error{b.errorCount === 1 ? "" : "s"}
+                  </span>
                 ) : (
                   <a className="text-destructive underline underline-offset-2" href={`/api/migration/batches/${b.id}/errors`} download>
                     {b.errorCount} error{b.errorCount === 1 ? "" : "s"}

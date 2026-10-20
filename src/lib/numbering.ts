@@ -79,7 +79,7 @@ export async function next(code: string, tx: Tx, date: BusinessDate = businessTo
 
 /**
  * Moves series `code` past numbers already in use (records migrated with their old numbers,
- * PHASE-17): any number written in the series' format raises its counter (and, for a yearly series,
+ * PHASE-17). Each number written in the series' format raises its counter (and, for a yearly series,
  * that year's counter) so the next number issued doesn't collide. Other numbers are ignored.
  */
 export async function advancePast(tx: Tx, code: string, numbers: string[]): Promise<void> {

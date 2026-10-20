@@ -1,9 +1,11 @@
+import ExcelJS from "exceljs";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import "@/modules/plugins";
 import { getDb, withTx } from "@/db/client";
 import { setClock } from "@/lib/dates";
 import { importBatches, stgShareCapital } from "@/modules/migration/schema";
+import { MIGRATION_ENTITIES, TEMPLATES, templateFileName, templateWorkbook } from "@/modules/migration/templates";
 import { makeUser } from "../helpers/phase01";
 import { seedLedger } from "../helpers/phase03";
 
@@ -49,5 +51,24 @@ describe("T17.1 migration schema", () => {
     await getDb().insert(importBatches).values(batch("a", "members"));
     expect(await failure(getDb().insert(importBatches).values(batch("a", "savings")))).toMatch(/import_batches_hash_uq/);
     expect(await failure(getDb().insert(importBatches).values(batch("b", "members")))).toMatch(/import_batches_open_entity_uq/);
+  });
+});
+
+describe("T17.2 templates", () => {
+  it("every template has its headers in order, a Read me documenting each column, and downloads under its own name", async () => {
+    for (const entity of MIGRATION_ENTITIES) {
+      const def = TEMPLATES[entity];
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(await templateWorkbook(entity));
+      expect(wb.worksheets.map((w) => w.name)).toEqual([def.sheet, "Read me"]);
+      const headers = (wb.getWorksheet(def.sheet)?.getRow(1).values as unknown[]).slice(1);
+      expect(headers).toEqual(def.columns.map((c) => c.header));
+      const documented: Array<[unknown, unknown]> = [];
+      wb.getWorksheet("Read me")?.eachRow((row) => {
+        if (headers.includes(row.getCell(1).value)) documented.push([row.getCell(1).value, row.getCell(2).value]);
+      });
+      expect(documented).toEqual(def.columns.map((c) => [c.header, c.required ? "Yes" : "No"]));
+      expect(templateFileName(entity)).toBe(`migration-${entity.replaceAll("_", "-")}.xlsx`);
+    }
   });
 });

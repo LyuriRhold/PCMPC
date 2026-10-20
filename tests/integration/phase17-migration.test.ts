@@ -8,11 +8,12 @@ import { setClock } from "@/lib/dates";
 import { members } from "@/modules/members/schema";
 import { uploadBatchAction } from "@/modules/migration/actions";
 import { importBatches, stgShareCapital } from "@/modules/migration/schema";
-import { batchErrors, getBatch, uploadBatch } from "@/modules/migration/service";
+import { batchErrors, getBatch, reconciliation, rollbackBatch, stageBatch, uploadBatch } from "@/modules/migration/service";
+import { accountIdFor, postJournal } from "@/modules/ledger/service";
 import { MIGRATION_ENTITIES, TEMPLATES, templateFileName, templateWorkbook } from "@/modules/migration/templates";
 import { makeUser } from "../helpers/phase01";
-import { seedLedger } from "../helpers/phase03";
-import { CUTOFF, filled, MEMBERS, setupMigration, upload, uploadAndStage } from "../helpers/phase17";
+import { P, seedLedger } from "../helpers/phase03";
+import { CUTOFF, filled, MEMBERS, on, setupMigration, upload, uploadAndStage } from "../helpers/phase17";
 
 async function bookkeeperOnly() {
   await seedLedger();
@@ -186,5 +187,64 @@ describe("T17.3 upload, parser, validators and dry-run report", () => {
       { row: 4, column: "Last Name", message: "Enter the member no., the last and first name, or the business name" },
       { row: 4, column: "Last Reading", message: "Doesn't fit a 4-digit meter" },
     ]);
+  });
+});
+
+describe("T17.4 staging and reconciliation", () => {
+  it("each control account's trial balance amount next to its staged records, and what holds up posting", async () => {
+    const { bookkeeper } = await setupMigration();
+    await uploadAndStage("members", MEMBERS);
+    await uploadAndStage("share_capital", [{ "Member No.": "M-000101", Subscribed: 10000, "Paid-up": 7500 }]);
+    const savings = await upload("savings", [{ "Member No.": "M-000101", "Product Code": "SAV", "Opened On": "2015-03-01", Balance: 500 }]);
+    let rec = await reconciliation(CUTOFF);
+    expect(rec.rows.filter((r) => r.subledger !== 0n || r.tb !== 0n).map((r) => [r.code, r.tb, r.subledger, r.difference])).toEqual([
+      ["11270", 0n, P(2500), -P(2500)],
+      ["31110", 0n, P(10000), -P(10000)],
+    ]);
+    expect(rec.blockers).toEqual([
+      "Stage the trial balance as of the cut-off",
+      "Stage or roll back the Savings file savings.xlsx",
+      "11270 Subscription Receivable - Common: the trial balance has ₱0.00 and the subsidiary records ₱2,500.00 (difference -₱2,500.00)",
+      "31110 Subscribed Share Capital - Common: the trial balance has ₱0.00 and the subsidiary records ₱10,000.00 (difference -₱10,000.00)",
+    ]);
+    expect(rec.canPost).toBe(false);
+
+    await withTx((tx) => rollbackBatch(tx, savings.id, bookkeeper));
+    await uploadAndStage("trial_balance", [
+      { "Account Code": "11110", Debit: 7500 },
+      { "Account Code": "11270", Debit: 2500 },
+      { "Account Code": "31110", Credit: 10000 },
+    ]);
+    rec = await reconciliation(CUTOFF);
+    expect(rec.blockers).toEqual([]);
+    expect(rec.canPost).toBe(true);
+    expect([rec.tbDebit, rec.tbCredit]).toEqual([P(10000), P(10000)]);
+  });
+
+  it("a ledger entry dated on or before the cut-off holds up posting (the opening entry must be the first)", async () => {
+    const { bookkeeper } = await setupMigration();
+    await uploadAndStage("trial_balance", [
+      { "Account Code": "11110", Debit: 100 },
+      { "Account Code": "32100", Credit: 100 },
+    ]);
+    on("2026-09-15");
+    await withTx(async (tx) =>
+      postJournal(tx, { date: "2026-09-15", book: "GJ", particulars: "Earlier entry", lines: [{ accountId: await accountIdFor("cash_on_hand", tx), debit: 100n }, { accountId: await accountIdFor("undivided_net_surplus", tx), credit: 100n }] }, bookkeeper),
+    );
+    on("2026-10-01");
+    expect((await reconciliation(CUTOFF)).blockers).toEqual(["The ledger already has 1 entry dated on or before Sep 30, 2026; the opening balances must be the first entry"]);
+  });
+
+  it("staging re-checks the file, and a file others refer to is rolled back after them", async () => {
+    const { bookkeeper } = await setupMigration();
+    const membersId = await uploadAndStage("members", MEMBERS);
+    const share = await upload("share_capital", [{ "Member No.": "M-000101", Subscribed: 10000, "Paid-up": 10000 }]);
+    await expect(withTx((tx) => rollbackBatch(tx, membersId, bookkeeper))).rejects.toThrow("Roll back the Share capital file(s) first: they refer to the members");
+    expect(await withTx((tx) => stageBatch(tx, share.id, bookkeeper))).toEqual({ staged: true, rowCount: 1, errorCount: 0 });
+    await expect(withTx((tx) => stageBatch(tx, share.id, bookkeeper))).rejects.toThrow("This file is already staged");
+    await withTx((tx) => rollbackBatch(tx, share.id, bookkeeper));
+    await withTx((tx) => rollbackBatch(tx, membersId, bookkeeper));
+    expect((await getBatch(membersId))?.status).toBe("ROLLED_BACK");
+    await expect(withTx((tx) => rollbackBatch(tx, membersId, bookkeeper))).rejects.toThrow("This file is already rolled back");
   });
 });

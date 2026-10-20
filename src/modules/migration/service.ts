@@ -30,6 +30,7 @@ import { TEMPLATES, workbookBytes } from "./templates";
 import { cutoffProblem, validateRows, type Validated } from "./validate";
 
 export { MigrationError } from "./errors";
+export { reconciliation } from "./reconcile";
 
 /**
  * Import batches (PHASE-17 T17.3, T17.6): upload = store the file and dry-run it (problems listed
@@ -280,6 +281,14 @@ export async function errorWorkbook(batchId: string, db: Db | Tx = getDb()): Pro
   for (const e of await batchErrors(batchId, db)) ws.addRow([e.row, e.column, e.message]);
   if (batch) wb.title = `${TEMPLATES[batch.entity].title} · ${batch.fileName}`;
   return workbookBytes(wb);
+}
+
+/** The cut-off being migrated: the posted one, else the one of the open files (null before any upload). */
+export async function migrationCutoff(db: Db | Tx = getDb()): Promise<BusinessDate | null> {
+  const [posted] = await db.select({ cutoff: importBatches.cutoffDate }).from(importBatches).where(eq(importBatches.status, "POSTED")).limit(1);
+  if (posted) return posted.cutoff;
+  const [open] = await db.select({ cutoff: importBatches.cutoffDate }).from(importBatches).where(inArray(importBatches.status, OPEN_STATUSES)).limit(1);
+  return open?.cutoff ?? null;
 }
 
 /** How many rows of a batch are in its staging table. */

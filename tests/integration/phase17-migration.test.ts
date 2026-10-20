@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { eq } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import "@/modules/plugins";
 import { getDb, withTx } from "@/db/client";
@@ -22,7 +22,8 @@ import { advanceBalance } from "@/modules/water/billing";
 import { assessPenalties, billBalances } from "@/modules/water/collections";
 import { readingContext } from "@/modules/water/readings";
 import { waterAccounts, waterCustomers, waterDisconnections } from "@/modules/water/schema";
-import { postMigrationAction, uploadBatchAction } from "@/modules/migration/actions";
+import { auditLog } from "@/modules/audit/schema";
+import { postMigrationAction, rollbackBatchAction, uploadBatchAction } from "@/modules/migration/actions";
 import { importBatches, stgShareCapital } from "@/modules/migration/schema";
 import { batchErrors, getBatch, listBatches, postMigration, reconciliation, rollbackBatch, stageBatch, uploadBatch } from "@/modules/migration/service";
 import { accountIdFor, postJournal, trialBalance } from "@/modules/ledger/service";
@@ -437,3 +438,54 @@ describe("T17.5 posting the opening balances", () => {
 function toCentavos(pesos: number): bigint {
   return BigInt(Math.round(pesos * 100));
 }
+
+describe("T17.6 rollback and audit", () => {
+  it("a file's life is in the audit log (upload, stage, rollback, post), by user", async () => {
+    const { bookkeeper, manager } = await setupMigration();
+    const bad = await upload("members", [{ ...MEMBERS[0]!, Sex: "?" }], "first.xlsx");
+    const membersId = await uploadAndStage("members", MEMBERS);
+    const tb = await uploadAndStage("trial_balance", [
+      { "Account Code": "11110", Debit: 100 },
+      { "Account Code": "32100", Credit: 100 },
+    ]);
+    await withTx((tx) => rollbackBatch(tx, tb, bookkeeper));
+    await uploadAndStage("trial_balance", [
+      { "Account Code": "11110", Debit: 100 },
+      { "Account Code": "32100", Credit: 100 },
+    ]);
+    await withTx((tx) => postMigration(tx, { cutoffDate: CUTOFF }, manager));
+    const log = await getDb()
+      .select({ action: auditLog.action, entityId: auditLog.entityId, userId: auditLog.userId, after: auditLog.after })
+      .from(auditLog)
+      .where(like(auditLog.action, "migration.%"))
+      .orderBy(auditLog.id);
+    expect(log.map((l) => [l.action, l.userId])).toEqual([
+      ["migration.upload", bookkeeper],
+      // The first members file had a problem; the next upload replaced it.
+      ["migration.rollback", bookkeeper],
+      ["migration.upload", bookkeeper],
+      ["migration.stage", bookkeeper],
+      ["migration.upload", bookkeeper],
+      ["migration.stage", bookkeeper],
+      ["migration.rollback", bookkeeper],
+      ["migration.upload", bookkeeper],
+      ["migration.stage", bookkeeper],
+      ["migration.post", manager],
+    ]);
+    expect(log[1]).toMatchObject({ entityId: bad.id, after: { reason: "replaced by a new upload" } });
+    expect(log[3]).toMatchObject({ entityId: membersId, after: { entity: "members", rows: 3 } });
+  });
+
+  it("a rolled-back file keeps its file and error list; the same file can then be uploaded again", async () => {
+    const { bookkeeper } = await setupMigration();
+    const content = await filled("members", [{ ...MEMBERS[0]!, Birthdate: "1980-02-30" }]);
+    const up = () => withTx((tx) => uploadBatch(tx, { entity: "members", fileName: "m.xlsx", content, cutoffDate: CUTOFF }, bookkeeper));
+    const first = await up();
+    await runAs(bookkeeper, () => rollbackBatchAction({ batchId: first.id }));
+    expect((await getBatch(first.id))?.content.byteLength).toBe(content.byteLength);
+    expect(await batchErrors(first.id)).toEqual([{ row: 2, column: "Birthdate", message: "Not a valid date (use YYYY-MM-DD)" }]);
+    expect((await up()).errorCount).toBe(1);
+    const teller = (await makeUser("TELLER", "teller176")).id;
+    await expect(runAs(teller, () => rollbackBatchAction({ batchId: first.id }))).rejects.toThrow(/Forbidden: migration.import/);
+  });
+});

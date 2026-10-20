@@ -56,7 +56,10 @@ test("the administrator downloads a template, dry-runs a file with an error, sta
     // This database went live through a migration: what was posted, and nothing more to import.
     await expect(page.getByText(/The books start from the opening entry GJ-\d{4}-\d{5}/)).toBeVisible();
     await expect(page.getByRole("heading", { name: "Reconciliation" })).toBeVisible();
-    const differences = await page.locator("table").last().locator("tbody tr").evaluateAll((rows) => rows.map((r) => r.lastElementChild?.textContent?.trim()));
+    // The reconciliation table (by role: visible elements only; streaming can leave hidden copies in the DOM).
+    const recon = page.getByRole("table").filter({ has: page.getByRole("columnheader", { name: "Difference" }) });
+    await expect(recon.getByRole("row").nth(1)).toBeVisible();
+    const differences = (await recon.locator("tbody tr td:last-child").allTextContents()).map((d) => d.trim());
     expect(differences.length).toBeGreaterThan(0);
     expect(differences.every((d) => d === "₱0.00")).toBe(true);
     await expect(page.getByRole("button", { name: "Upload and check" })).toHaveCount(0);

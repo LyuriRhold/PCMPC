@@ -3,7 +3,7 @@
 > Claude updates this file (ticks, questions, summaries). Humans set ✅ after review.
 > Legend: ⬜ not started · 🔨 in progress · 🟡 awaiting review · ✅ done (reviewed & merged) · ⛔ blocked
 
-**Current phase:** 17
+**Current phase:** 18
 
 ## Status
 | # | Phase | Status | Branch / tag | Reviewed by / date |
@@ -25,7 +25,7 @@
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ✅ | phase-14-fs-close · tag `phase-14` | rldejoya (reviewer agent: next fiscal year and asset register fixed; follow-ups) · 2026-10-14 |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ✅ | phase-15-surplus-allocation · tag `phase-15` | rldejoya (reviewer agent: fiscal-year windows fixed; follow-ups) · 2026-10-17 |
 | 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ✅ | phase-16-reports · tag `phase-16` | rldejoya (reviewer agent: deposits, delinquency footer, CAPR funds, auditor masking fixed; follow-ups) · 2026-10-19 |
-| 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | 🟡 reviewed (reviewer agent: upload size limit, checklist, validation and UI fixes); awaiting merge | phase-17-migration | |
+| 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | ✅ | phase-17-migration · tag `phase-17` | rldejoya (reviewer agent: upload size limit, checklist, validation and UI fixes; follow-ups) · 2026-10-20 |
 | 18 | [Hardening, Vercel Deployment, Backups, UAT & Go-Live](docs/phases/PHASE-18-golive.md) | ⬜ | | |
 
 ## Checklists
@@ -1979,4 +1979,7 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
   - Backlog: retention of the imported files and staged rows; a fixed-asset register template; the posting time and the file limit against the host's limits.
   - Uploader ≠ poster is already Q-17.5.
 - **After the fixes:**
-GATE17R_LINE
+  - `npm run gate` green: 732 tests, 61 files, scan clean (30 min on 1 worker: only about 1 GB of memory was free).
+  - `npm run build` green, no warnings.
+  - E2E on a production build green: phase-17 (the posted view, on the demo database) and ui-shell. The posted-view check first read a hidden copy of the table that streaming leaves in the page; it now finds the reconciliation table by role.
+  - Postgres had been stopped by a console Ctrl+C from the tooling (0xC000013A), the same as in Phase 15. It was restarted with `npm run db:up`; recovery was clean.

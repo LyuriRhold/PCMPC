@@ -181,7 +181,8 @@ export async function openBills(tx: Db | Tx, accountId: string, pending: Allocat
 /**
  * Assesses the late-payment penalty (water.penalty_pct × the bill's unpaid amount on its due date)
  * on every bill past due on `date` that has none yet: one entry Dr AR–Water (per customer) /
- * Cr Penalty Income–Water. Unique (bill_id) keeps it to once per bill.
+ * Cr Penalty Income–Water. Unique (bill_id) keeps it to once per bill; a migrated bill whose
+ * penalty the old system already charged (penalty_assessed) is skipped (PHASE-17).
  */
 export async function assessPenalties(tx: Tx, date: BusinessDate): Promise<{ penalties: number; total: string }> {
   const pct = await getSetting("water.penalty_pct", tx);
@@ -189,7 +190,7 @@ export async function assessPenalties(tx: Tx, date: BusinessDate): Promise<{ pen
     .select({ id: waterBills.id, dueDate: waterBills.dueDate })
     .from(waterBills)
     .leftJoin(waterPenalties, eq(waterPenalties.billId, waterBills.id))
-    .where(and(sql`${waterBills.dueDate} < ${date}`, sql`${waterBills.status} <> 'CANCELLED'`, sql`${waterPenalties.id} IS NULL`));
+    .where(and(sql`${waterBills.dueDate} < ${date}`, sql`${waterBills.status} <> 'CANCELLED'`, eq(waterBills.penaltyAssessed, false), sql`${waterPenalties.id} IS NULL`));
   const due: Array<{ billId: string; customerId: string; billNo: string; amount: Money }> = [];
   for (const c of candidates) {
     const [b] = await billBalances(tx, { billIds: [c.id], asOf: c.dueDate });

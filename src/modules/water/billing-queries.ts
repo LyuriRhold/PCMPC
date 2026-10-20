@@ -221,10 +221,11 @@ export async function billDetail(billId: string, db: Db | Tx = getDb()) {
     .innerJoin(waterAccounts, eq(waterAccounts.id, waterBills.accountId))
     .innerJoin(waterCustomers, eq(waterCustomers.id, waterBills.customerId))
     .innerJoin(waterBillingPeriods, eq(waterBillingPeriods.id, waterBills.periodId))
-    .innerJoin(waterReadings, eq(waterReadings.id, waterBills.readingId))
+    // A migrated bill (PHASE-17) has no reading in the MIS.
+    .leftJoin(waterReadings, eq(waterReadings.id, waterBills.readingId))
     .innerJoin(waterZones, eq(waterZones.id, waterBillingPeriods.zoneId))
     .innerJoin(waterRoutes, eq(waterRoutes.id, waterAccounts.routeId))
-    .innerJoin(waterMeters, eq(waterMeters.id, waterReadings.meterId))
+    .leftJoin(waterMeters, eq(waterMeters.id, waterReadings.meterId))
     .where(eq(waterBills.id, billId));
   if (!r) return null;
   const lines = await db.select().from(waterBillLines).where(eq(waterBillLines.billId, billId)).orderBy(asc(waterBillLines.lineNo));
@@ -249,7 +250,7 @@ export async function billDetail(billId: string, db: Db | Tx = getDb()) {
     meterSerial: r.meterSerial,
     lines,
     memos: memos.map((m) => ({ ...m, preparedByName: names.find((n) => n.id === m.preparedBy)?.name ?? "", approvedByName: names.find((n) => n.id === m.approvedBy)?.name ?? null })),
-    history: [{ period: r.period.period, consumption: r.reading.consumption, type: r.reading.type }, ...history].slice(0, 6),
+    history: [...(r.reading ? [{ period: r.period.period, consumption: r.reading.consumption, type: r.reading.type }] : []), ...history].slice(0, 6),
   };
 }
 

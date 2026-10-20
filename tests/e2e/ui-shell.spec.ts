@@ -13,15 +13,15 @@ test.beforeEach(async ({ page }) => {
 
 test("planned screens show the under-construction page with their phase", async ({ page }) => {
   const nav = page.getByRole("navigation", { name: "Main" });
-  await nav.getByRole("link", { name: /Data migration/ }).click();
-  await expect(page).toHaveURL(/\/admin\/migration$/);
-  await expect(page.getByRole("heading", { name: "Data migration" })).toBeVisible();
+  await nav.getByRole("link", { name: /Backups/ }).click();
+  await expect(page).toHaveURL(/\/admin\/backups$/);
+  await expect(page.getByRole("heading", { name: "Backups" })).toBeVisible();
   await expect(page.getByText("Coming soon: under construction")).toBeVisible();
-  await expect(page.getByText(/planned for Phase 17: Data Migration & Opening Balances/)).toBeVisible();
+  await expect(page.getByText(/planned for Phase 18: Hardening, Deploy, UAT & Go-Live/)).toBeVisible();
 });
 
 test("the dashboard lists live and coming-soon modules; unknown paths are 404", async ({ page }) => {
-  await expect(page.getByRole("link", { name: /Data migration.*Soon · P17/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Backups.*Soon · P18/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Coop settings.*Live/ })).toBeVisible();
 
   await page.goto("/water/no-such-screen");

@@ -39,6 +39,11 @@ export { StockError };
 
 const clean = (s: string | null | undefined) => (s ?? "").trim();
 
+/** Formats the store accepts (also checked when items and suppliers are imported, PHASE-17). */
+export const SKU_PATTERN = /^[A-Z0-9][A-Z0-9._-]{0,39}$/;
+export const BARCODE_PATTERN = /^[0-9A-Za-z-]{4,40}$/;
+export const TIN_PATTERN = /^\d{3}-?\d{3}-?\d{3}(-?\d{3,5})?$/;
+
 // ── Categories ──
 
 export async function createCategory(tx: Tx, input: { name: string }, actorId: string) {
@@ -88,8 +93,8 @@ async function checkProduct(tx: Tx, input: ProductInput, selfId: string | null) 
   const name = clean(input.name);
   const unit = clean(input.unit);
   if (!sku) throw new StoreError("Enter the SKU");
-  if (!/^[A-Z0-9][A-Z0-9._-]{0,39}$/.test(sku)) throw new StoreError("The SKU uses letters, digits, dot, dash or underscore (up to 40)");
-  if (barcode && !/^[0-9A-Za-z-]{4,40}$/.test(barcode)) throw new StoreError("The barcode uses 4 to 40 letters or digits");
+  if (!SKU_PATTERN.test(sku)) throw new StoreError("The SKU uses letters, digits, dot, dash or underscore (up to 40)");
+  if (barcode && !BARCODE_PATTERN.test(barcode)) throw new StoreError("The barcode uses 4 to 40 letters or digits");
   if (!name) throw new StoreError("Enter the product name");
   if (!unit) throw new StoreError("Enter the unit (pc, pack, sack, kg)");
   if (!Number.isSafeInteger(input.reorderLevel) || input.reorderLevel < 0) throw new StoreError("The reorder level is a whole number, 0 or more");
@@ -190,7 +195,7 @@ async function checkSupplier(tx: Tx, input: SupplierInput, selfId: string | null
   if (!name) throw new StoreError("Enter the supplier name");
   if (!Number.isSafeInteger(input.termsDays) || input.termsDays < 0 || input.termsDays > 365) throw new StoreError("Terms are 0 to 365 days");
   const tin = clean(input.tin) || null;
-  if (tin && !/^\d{3}-?\d{3}-?\d{3}(-?\d{3,5})?$/.test(tin)) throw new StoreError("Enter the TIN as 000-000-000 or 000-000-000-000");
+  if (tin && !TIN_PATTERN.test(tin)) throw new StoreError("Enter the TIN as 000-000-000 or 000-000-000-000");
   const [dup] = await tx.select({ id: suppliers.id }).from(suppliers).where(sql`lower(${suppliers.name}) = lower(${name})`);
   if (dup && dup.id !== selfId) throw new StoreError(`Supplier "${name}" already exists`);
   return { name, contact: clean(input.contact) || null, tin, termsDays: input.termsDays };
@@ -532,4 +537,33 @@ export async function getCount(countId: string, db: Db | Tx = getDb()) {
       varianceValue: line.varianceValue ?? (line.variance === null ? null : varianceValueOf(toBalance(balance), line.variance)),
     })),
   };
+}
+
+// ── Data migration (PHASE-17) ──
+
+/**
+ * An item counted at the cut-off: the product (its category found or created by name) and, when
+ * there is stock, one RECEIVE move at its cost on the opening entry (ref MIGRATION).
+ */
+export async function migrateStockItem(
+  tx: Tx,
+  input: { sku: string; barcode: string | null; name: string; unit: string; category: string | null; sellingPrice: Money; unitCost: string; quantity: number; reorderLevel: number },
+  ctx: { date: string; refId: string; jeId: string },
+  actorId: string,
+): Promise<{ id: string; value: Money }> {
+  let categoryId: string | null = null;
+  const category = clean(input.category);
+  if (category) {
+    const [c] = await tx.select({ id: productCategories.id }).from(productCategories).where(sql`lower(${productCategories.name}) = lower(${category})`);
+    categoryId = c?.id ?? (await createCategory(tx, { name: category }, actorId)).id;
+  }
+  const { id } = await createProduct(
+    tx,
+    { sku: input.sku, barcode: input.barcode, name: input.name, unit: input.unit, categoryId, reorderLevel: input.reorderLevel, vatClass: "VAT_EXEMPT", sellingPrice: input.sellingPrice },
+    actorId,
+  );
+  if (input.quantity <= 0) return { id, value: 0n };
+  const plans = await planStockMoves(tx, [{ productId: id, type: "RECEIVE", qty: input.quantity, cost: costOf(input.quantity, input.unitCost) }]);
+  await recordStockMoves(tx, plans, { date: ctx.date, refType: "MIGRATION", refId: ctx.refId, jeId: ctx.jeId }, actorId);
+  return { id, value: plans[0]?.totalCost ?? 0n };
 }

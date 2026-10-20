@@ -323,6 +323,20 @@
       "when": 1792383139552,
       "tag": "0045_governance_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1792457964311,
+      "tag": "0046_migration",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792457993685,
+      "tag": "0047_migration_immutable",
+      "breakpoints": true
     }
   ]
 }

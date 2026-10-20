@@ -153,19 +153,25 @@ function Bill({ b, coopName, fontSize }: { b: BillDetail; coopName: string; font
         </Text>
       </View>
 
-      <View style={[s.between, gap]}>
-        <Text>Previous reading</Text>
-        <Text>{n(r.previousReading)}</Text>
-      </View>
-      <View style={s.between}>
-        <Text>Present reading</Text>
-        <Text>{r.presentReading === null ? "Estimated" : n(r.presentReading)}</Text>
-      </View>
+      {r ? (
+        <>
+          <View style={[s.between, gap]}>
+            <Text>Previous reading</Text>
+            <Text>{n(r.previousReading)}</Text>
+          </View>
+          <View style={s.between}>
+            <Text>Present reading</Text>
+            <Text>{r.presentReading === null ? "Estimated" : n(r.presentReading)}</Text>
+          </View>
+        </>
+      ) : (
+        <Text style={[s.muted, gap]}>Unpaid bill migrated from the old system</Text>
+      )}
       <View style={s.between}>
         <Text style={{ fontWeight: "bold" }}>Consumption</Text>
         <Text style={{ fontWeight: "bold" }}>{n(b.bill.consumption)} m³</Text>
       </View>
-      {r.type !== "ACTUAL" ? <Text style={s.muted}>{r.type === "ESTIMATED" ? "Estimated: the meter couldn't be read" : r.type === "METER_CHANGE" ? "Meter changed this period" : "Final reading"}</Text> : null}
+      {r && r.type !== "ACTUAL" ? <Text style={s.muted}>{r.type === "ESTIMATED" ? "Estimated: the meter couldn't be read" : r.type === "METER_CHANGE" ? "Meter changed this period" : "Final reading"}</Text> : null}
 
       <View style={gap}>
         {b.lines.map((l) => (

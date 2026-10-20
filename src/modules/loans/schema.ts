@@ -193,7 +193,8 @@ export const loanApprovals = pgTable(
 
 export const LOAN_STATUSES = ["PENDING", "ACTIVE", "PAST_DUE", "PAID", "RESTRUCTURED", "WRITTEN_OFF", "CANCELLED"] as const;
 export type LoanStatus = (typeof LOAN_STATUSES)[number];
-export const DISBURSEMENTS = ["CASH", "SAVINGS", "RESTRUCTURE"] as const;
+/** MIGRATION: a loan brought in at the cut-off with its remaining schedule (PHASE-17). */
+export const DISBURSEMENTS = ["CASH", "SAVINGS", "RESTRUCTURE", "MIGRATION"] as const;
 export type Disbursement = (typeof DISBURSEMENTS)[number];
 
 /**

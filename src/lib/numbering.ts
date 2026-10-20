@@ -76,3 +76,39 @@ export async function next(code: string, tx: Tx, date: BusinessDate = businessTo
     .where(eq(numberSeries.id, row.id));
   return formatNumber(row.prefixFormat, row.nextNo, date);
 }
+
+/**
+ * Moves series `code` past numbers already in use (records migrated with their old numbers,
+ * PHASE-17). Each number written in the series' format raises its counter (and, for a yearly series,
+ * that year's counter) so the next number issued doesn't collide. Other numbers are ignored.
+ */
+export async function advancePast(tx: Tx, code: string, numbers: string[]): Promise<void> {
+  const [template] = await tx.select().from(numberSeries).where(eq(numberSeries.code, code)).orderBy(desc(numberSeries.year)).limit(1);
+  if (!template || numbers.length === 0) return;
+  const escaped = template.prefixFormat.replace(/[.*+?^$()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(
+    `^${escaped
+      .replace("{YYYYMM}", "(?<ym>\\d{6})")
+      .replace("{YYYY}", "(?<y>\\d{4})")
+      .replace(/\{0+\}/, "(?<n>\\d+)")}$`,
+  );
+  const highest = new Map<number, number>();
+  for (const no of numbers) {
+    const m = pattern.exec(no.trim().toUpperCase());
+    const n = Number(m?.groups?.n);
+    if (!m || !Number.isSafeInteger(n)) continue;
+    const year = template.resetsYearly ? Number(m.groups?.y ?? m.groups?.ym?.slice(0, 4)) : 0;
+    if (template.resetsYearly && !Number.isInteger(year)) continue;
+    highest.set(year, Math.max(highest.get(year) ?? 0, n));
+  }
+  for (const [year, n] of highest) {
+    await tx
+      .insert(numberSeries)
+      .values({ code, prefixFormat: template.prefixFormat, year, nextNo: 1, padding: template.padding, resetsYearly: template.resetsYearly })
+      .onConflictDoNothing({ target: [numberSeries.code, numberSeries.year] });
+    await tx
+      .update(numberSeries)
+      .set({ nextNo: sql`greatest(${numberSeries.nextNo}, ${n + 1})` })
+      .where(and(eq(numberSeries.code, code), eq(numberSeries.year, year)));
+  }
+}

@@ -28,7 +28,8 @@ describe("module registry (sidebar, dashboard, coming-soon pages)", () => {
   });
 
   it("comingSoonItem resolves only planned paths", () => {
-    expect(comingSoonItem("/admin/migration")?.phase).toBe("17");
+    expect(comingSoonItem("/admin/backups")?.phase).toBe("18");
+    expect(comingSoonItem("/admin/migration")).toBeUndefined();
     expect(comingSoonItem("/reports/cda")).toBeUndefined();
     expect(comingSoonItem("/year-end/surplus")).toBeUndefined();
     expect(comingSoonItem("/accounting/statements")).toBeUndefined();
@@ -44,7 +45,10 @@ describe("module registry (sidebar, dashboard, coming-soon pages)", () => {
 
   it("live items need their permission; coming-soon items are visible to everyone", () => {
     const none = visibleHrefs(new Set());
-    expect(none).toContain("/admin/migration");
+    expect(none).toContain("/admin/backups");
+    expect(none).not.toContain("/admin/migration");
+    expect(visibleHrefs(new Set(["migration.import"]))).toContain("/admin/migration");
+    expect(visibleHrefs(new Set(["migration.post"]))).toContain("/admin/migration");
     expect(none).not.toContain("/reports/cda");
     expect(none).not.toContain("/year-end/surplus");
     expect(none).not.toContain("/accounting/statements");

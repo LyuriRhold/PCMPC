@@ -37,3 +37,6 @@ Thumbs.db
 npm-debug.log*
 .vercel
 *.pem
+
+# demo migration files (npm run db:seed:demo writes them)
+/demo/

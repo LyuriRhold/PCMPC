@@ -118,10 +118,17 @@ async function assertPeriodOpen(tx: Tx, date: BusinessDate): Promise<void> {
 }
 
 async function insertLines(tx: Tx, jeId: string, lines: LineInput[], actorId: string | null): Promise<void> {
+  // In chunks: Postgres takes at most 65,535 parameters per statement (an opening entry can have thousands of lines).
+  for (let start = 0; start < lines.length; start += 1000) {
+    await insertLineChunk(tx, jeId, lines.slice(start, start + 1000), start, actorId);
+  }
+}
+
+async function insertLineChunk(tx: Tx, jeId: string, lines: LineInput[], offset: number, actorId: string | null): Promise<void> {
   await tx.insert(journalLines).values(
     lines.map((l, i) => ({
       jeId,
-      lineNo: i + 1,
+      lineNo: offset + i + 1,
       accountId: l.accountId,
       memberId: l.memberId ?? null,
       customerId: l.customerId ?? null,

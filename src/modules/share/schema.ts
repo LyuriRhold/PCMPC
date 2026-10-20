@@ -87,9 +87,8 @@ export const memberFees = pgTable(
     feeType: text("fee_type").$type<"MEMBERSHIP">().notNull(),
     amount: money("amount").notNull(),
     paidAt: date("paid_at", { mode: "string" }).notNull(),
-    receiptItemId: uuid("receipt_item_id")
-      .notNull()
-      .references(() => receiptItems.id),
+    /** The receipt it was paid on; none for a fee paid before the cut-off (migrated, PHASE-17). */
+    receiptItemId: uuid("receipt_item_id").references(() => receiptItems.id),
     jeId: uuid("je_id")
       .notNull()
       .references(() => journalEntries.id),

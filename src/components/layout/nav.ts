@@ -439,7 +439,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/admin/roles", label: "Roles & permissions", icon: ShieldCheck, status: "live", phase: "01", permission: "admin.users", summary: "Which role can do what." },
       { href: "/admin/settings", label: "Coop settings", icon: Settings, status: "live", phase: "01", permission: "admin.settings", summary: "Coop profile, rates, limits and policies." },
       { href: "/admin/audit", label: "Audit log", icon: ScrollText, status: "live", phase: "01", permission: "audit.read", summary: "Every change, sign-in and denied action." },
-      { href: "/admin/migration", label: "Data migration", icon: Database, status: "soon", phase: "17", summary: "Import existing records and opening balances." },
+      { href: "/admin/migration", label: "Data migration", icon: Database, status: "live", phase: "17", permission: ["migration.import", "migration.post"], summary: "Import existing records and opening balances." },
       { href: "/admin/backups", label: "Backups", icon: Archive, status: "soon", phase: "18", summary: "Backup status and restore drills." },
     ],
   },

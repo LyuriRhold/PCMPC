@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { and, asc, eq, inArray, like, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { addMonths, businessToday, monthEnd, type BusinessDate } from "@/lib/dates";
@@ -226,14 +226,14 @@ export async function recordPayment(tx: Tx, plan: PaymentPlan, ctx: { receiptIte
 
 // ── Membership fee ──
 
-/** Whether the member's membership fee is paid (on a VALID receipt). */
+/** Whether the member's membership fee is paid (on a VALID receipt, or before the cut-off: migrated, PHASE-17). */
 export async function membershipFeePaid(memberId: string, db: Db | Tx = getDb()): Promise<boolean> {
   const [r] = await db
     .select({ id: memberFees.id })
     .from(memberFees)
-    .innerJoin(receiptItems, eq(receiptItems.id, memberFees.receiptItemId))
-    .innerJoin(receipts, eq(receipts.id, receiptItems.receiptId))
-    .where(and(eq(memberFees.memberId, memberId), eq(memberFees.feeType, "MEMBERSHIP"), eq(receipts.status, "VALID")))
+    .leftJoin(receiptItems, eq(receiptItems.id, memberFees.receiptItemId))
+    .leftJoin(receipts, eq(receipts.id, receiptItems.receiptId))
+    .where(and(eq(memberFees.memberId, memberId), eq(memberFees.feeType, "MEMBERSHIP"), or(isNull(memberFees.receiptItemId), eq(receipts.status, "VALID"))))
     .limit(1);
   return !!r;
 }
@@ -608,4 +608,33 @@ export async function shareRegistry(filters: { q?: string; page?: number }, db: 
     db.select({ n: sql<number>`count(*)::int` }).from(memberShareBalance).innerJoin(members, eq(members.id, memberShareBalance.memberId)).where(where),
   ]);
   return { rows, total: count?.n ?? 0, page, pageSize };
+}
+
+// ── Data migration (PHASE-17) ──
+
+/**
+ * A member's share capital at the cut-off: one subscription (whole shares at the par value) and,
+ * for the part paid, one payment; both on the opening entry. Paid-up = subscribed − receivable.
+ */
+export async function migrateShareCapital(tx: Tx, input: { memberId: string; subscribed: Money; paidUp: Money; date: BusinessDate; jeId: string; ref: string }, actorId: string): Promise<void> {
+  const par = BigInt(await getSetting("share.par_value", tx));
+  if (input.subscribed <= 0n || input.subscribed % par !== 0n) throw new ShareError(`The subscription must be whole shares of ${format(par)}`);
+  if (input.paidUp < 0n || input.paidUp > input.subscribed) throw new ShareError("The paid-up amount must be between zero and the subscription");
+  const remarks = "Balance at the cut-off (data migration)";
+  const [sub] = await tx
+    .insert(shareSubscriptions)
+    .values({ memberId: input.memberId, subDate: input.date, shares: Number(input.subscribed / par), parValue: par, amount: input.subscribed, jeId: input.jeId, createdBy: actorId })
+    .returning();
+  if (!sub) throw new Error("subscription insert returned no row");
+  await tx.insert(shareTransactions).values({ memberId: input.memberId, txnDate: input.date, type: "SUBSCRIBE", amount: input.subscribed, refNo: input.ref, subscriptionId: sub.id, jeId: input.jeId, remarks, createdBy: actorId });
+  if (input.paidUp > 0n) {
+    await tx.insert(shareTransactions).values({ memberId: input.memberId, txnDate: input.date, type: "PAYMENT", amount: input.paidUp, refNo: input.ref, jeId: input.jeId, remarks, createdBy: actorId });
+  }
+  await audit(tx, { action: "share.migrate", entity: "member", entityId: input.memberId, after: { subscribed: format(input.subscribed), paidUp: format(input.paidUp) }, userId: actorId });
+}
+
+/** The membership fee paid before the cut-off (no receipt in the MIS; the income is in the old books). */
+export async function recordMigratedMembershipFee(tx: Tx, input: { memberId: string; amount: Money; paidAt: BusinessDate; jeId: string }, actorId: string): Promise<void> {
+  if (input.amount <= 0n) throw new ShareError("The membership fee must be more than zero");
+  await tx.insert(memberFees).values({ memberId: input.memberId, feeType: "MEMBERSHIP", amount: input.amount, paidAt: input.paidAt, receiptItemId: null, jeId: input.jeId, createdBy: actorId });
 }

@@ -76,12 +76,13 @@ export const depositAccounts = pgTable(
   ],
 );
 
-export const DEPOSIT_TXN_TYPES = ["DEPOSIT", "WITHDRAWAL", "INTEREST", "WTAX", "ADJUSTMENT", "TRANSFER_IN", "TRANSFER_OUT"] as const;
+export const DEPOSIT_TXN_TYPES = ["DEPOSIT", "WITHDRAWAL", "INTEREST", "WTAX", "ADJUSTMENT", "TRANSFER_IN", "TRANSFER_OUT", "OPENING"] as const;
 export type DepositTxnType = (typeof DEPOSIT_TXN_TYPES)[number];
 
 /**
- * The passbook. `amount` is signed: + adds to the balance (DEPOSIT, INTEREST, TRANSFER_IN),
- * − takes from it (WITHDRAWAL, WTAX, TRANSFER_OUT); an ADJUSTMENT can be either.
+ * The passbook. `amount` is signed: + adds to the balance (DEPOSIT, INTEREST, TRANSFER_IN, and
+ * OPENING: the balance migrated at the cut-off, PHASE-17), − takes from it (WITHDRAWAL, WTAX,
+ * TRANSFER_OUT); an ADJUSTMENT can be either.
  */
 export const depositTransactions = pgTable(
   "deposit_transactions",
@@ -110,7 +111,7 @@ export const depositTransactions = pgTable(
     check("deposit_transactions_type_chk", inList("type", DEPOSIT_TXN_TYPES)),
     check(
       "deposit_transactions_sign_chk",
-      sql`${t.amount} <> 0 AND (${t.type} = 'ADJUSTMENT' OR (${t.type} IN ('DEPOSIT', 'INTEREST', 'TRANSFER_IN') AND ${t.amount} > 0) OR (${t.type} IN ('WITHDRAWAL', 'WTAX', 'TRANSFER_OUT') AND ${t.amount} < 0))`,
+      sql`${t.amount} <> 0 AND (${t.type} = 'ADJUSTMENT' OR (${t.type} IN ('DEPOSIT', 'INTEREST', 'TRANSFER_IN', 'OPENING') AND ${t.amount} > 0) OR (${t.type} IN ('WITHDRAWAL', 'WTAX', 'TRANSFER_OUT') AND ${t.amount} < 0))`,
     ),
     check("deposit_transactions_balance_chk", sql`${t.balanceAfter} >= 0`),
     index("deposit_transactions_account_idx").on(t.accountId, t.seq),

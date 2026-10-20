@@ -9,6 +9,7 @@ import {
   waterAccounts,
   waterBillingExclusions,
   waterBillingPeriods,
+  waterConsumptionHistory,
   waterMeterInstallations,
   waterMeters,
   waterReadings,
@@ -163,6 +164,17 @@ export async function readingContext(db: Db | Tx, account: WaterAccount, period:
     .filter((p) => p.r.type !== "ESTIMATED" && p.r.status === "APPROVED")
     .slice(0, months)
     .map((p) => p.r.consumption);
+  if (history.length < months) {
+    // An account migrated at the cut-off (PHASE-17): the old system's monthly consumption fills in
+    // for the readings the MIS doesn't have yet.
+    const old = await db
+      .select({ consumption: waterConsumptionHistory.consumption })
+      .from(waterConsumptionHistory)
+      .where(and(eq(waterConsumptionHistory.accountId, account.id), lt(waterConsumptionHistory.period, period.period)))
+      .orderBy(desc(waterConsumptionHistory.period))
+      .limit(months - history.length);
+    history.push(...old.map((h) => h.consumption));
+  }
 
   return { account, meter: { id: current.inst.meterId, serialNo: current.serialNo, digits: current.digits }, previous, changes, estimatedSince, history };
 }

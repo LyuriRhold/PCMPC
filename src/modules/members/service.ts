@@ -399,3 +399,75 @@ export async function getMemberProfile(memberId: string, canSeeSensitive: boolea
     history,
   };
 }
+
+// ── Data migration (PHASE-17) ──
+
+export type MigratedMemberInput = {
+  memberNo: string;
+  type: MemberType;
+  status: "ACTIVE" | "INACTIVE";
+  lastName: string;
+  firstName: string;
+  middleName: string | null;
+  suffix: string | null;
+  birthdate: string;
+  sex: string;
+  civilStatus: string;
+  addrStreet: string | null;
+  addrPurok: string | null;
+  addrBarangay: string;
+  addrMunicipality: string;
+  addrProvince: string;
+  mobile: string | null;
+  email: string | null;
+  occupation: string | null;
+  tin: string | null;
+  membershipDate: string;
+  pmesDate: string | null;
+  bodResolutionNo: string | null;
+};
+
+/**
+ * A member brought in at the cut-off, already approved in the old records: their old member no.
+ * and membership date are kept, and the status history says they were migrated.
+ */
+export async function createMigratedMember(tx: Tx, input: MigratedMemberInput, ref: string, actorId: string): Promise<Member> {
+  const at = now();
+  const [m] = await tx
+    .insert(members)
+    .values({
+      memberNo: input.memberNo,
+      type: input.type,
+      status: input.status,
+      lastName: input.lastName,
+      firstName: input.firstName,
+      middleName: input.middleName,
+      suffix: input.suffix,
+      nameKey: nameKey(input.lastName, input.firstName),
+      searchText: searchTextOf(input),
+      birthdate: input.birthdate,
+      sex: input.sex,
+      civilStatus: input.civilStatus,
+      addrStreet: input.addrStreet,
+      addrPurok: input.addrPurok,
+      addrBarangay: input.addrBarangay,
+      addrMunicipality: input.addrMunicipality,
+      addrProvince: input.addrProvince,
+      mobile: input.mobile,
+      email: input.email,
+      occupation: input.occupation,
+      tin: input.tin,
+      membershipDate: input.membershipDate,
+      pmesDate: input.pmesDate,
+      bodResolutionNo: input.bodResolutionNo,
+      remarks: "Migrated from the old records",
+      createdBy: actorId,
+      createdAt: at,
+      updatedAt: at,
+    })
+    .returning();
+  if (!m) throw new Error("member insert returned no row");
+  await tx.insert(memberStatusHistory).values({ memberId: m.id, fromStatus: "APPLICANT", toStatus: input.status, reason: `Migrated from the old records (member since ${input.membershipDate})`, ref, at, by: actorId, createdBy: actorId });
+  await audit(tx, { action: "member.migrate", entity: "member", entityId: m.id, after: auditView(m), userId: actorId });
+  return m;
+}

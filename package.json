@@ -21,6 +21,7 @@
     "scan": "node scripts/scan-placeholders.mjs",
     "gate": "npm run typecheck && npm run lint && npm run test && npm run scan",
     "db:seed:dev": "tsx scripts/db-seed-dev.mts",
+    "db:seed:demo": "tsx scripts/db-seed-demo.mts",
     "water:cycle": "tsx scripts/water-cycle.mts"
   },
   "dependencies": {

@@ -25,7 +25,7 @@
 | 14 | [Financial Statements, Period Close & Fixed Assets](docs/phases/PHASE-14-fs-close.md) | ✅ | phase-14-fs-close · tag `phase-14` | rldejoya (reviewer agent: next fiscal year and asset register fixed; follow-ups) · 2026-10-14 |
 | 15 | [Net Surplus Allocation, Interest on Share Capital & Patronage Refund](docs/phases/PHASE-15-surplus-allocation.md) | ✅ | phase-15-surplus-allocation · tag `phase-15` | rldejoya (reviewer agent: fiscal-year windows fixed; follow-ups) · 2026-10-17 |
 | 16 | [Reports: CDA, Management Dashboard & Member Statements](docs/phases/PHASE-16-reports.md) | ✅ | phase-16-reports · tag `phase-16` | rldejoya (reviewer agent: deposits, delinquency footer, CAPR funds, auditor masking fixed; follow-ups) · 2026-10-19 |
-| 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | ⬜ | | |
+| 17 | [Data Migration & Opening Balances](docs/phases/PHASE-17-migration.md) | 🔨 | phase-17-migration | |
 | 18 | [Hardening, Vercel Deployment, Backups, UAT & Go-Live](docs/phases/PHASE-18-golive.md) | ⬜ | | |
 
 ## Checklists

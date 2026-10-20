@@ -25,7 +25,7 @@ async function membersFile(page: Page, rows: Array<Array<string | number>>): Pro
   const res = await page.request.get("/api/migration/templates/members");
   expect(res.ok()).toBe(true);
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(await res.body());
+  await wb.xlsx.load(Uint8Array.from(await res.body()).buffer);
   const ws = wb.getWorksheet("Members");
   if (!ws) throw new Error("no Members sheet");
   rows.forEach((r, i) => r.forEach((v, c) => (ws.getCell(i + 2, c + 1).value = v === "" ? null : v)));

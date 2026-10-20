@@ -16,6 +16,7 @@ export const DEPOSIT_TXN_LABEL: Record<DepositTxnType, string> = {
   ADJUSTMENT: "Correction",
   TRANSFER_IN: "Transfer in",
   TRANSFER_OUT: "Transfer out",
+  OPENING: "Opening balance",
 };
 
 export const pct = (rate: string) => new Decimal(rate).mul(100).toString();

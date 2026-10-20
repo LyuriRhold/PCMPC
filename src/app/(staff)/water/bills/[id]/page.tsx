@@ -77,7 +77,10 @@ async function BillContent(props: PageProps<"/water/bills/[id]">) {
             />
             <Row label="Period" value={`${d.period.period} · zone ${d.zone.code}`} />
             <Row label="Bill / due date" value={`${formatDate(b.billDate)} / ${formatDate(b.dueDate)}`} />
-            <Row label="Readings" value={`${r.previousReading.toLocaleString("en-US")} → ${r.presentReading === null ? "estimated" : r.presentReading.toLocaleString("en-US")} (${r.type})`} />
+            <Row
+              label="Readings"
+              value={r ? `${r.previousReading.toLocaleString("en-US")} → ${r.presentReading === null ? "estimated" : r.presentReading.toLocaleString("en-US")} (${r.type})` : "Unpaid bill migrated from the old system"}
+            />
             <Row label="Consumption" value={`${b.consumption} m³`} />
             <Row
               label="Journal entry"

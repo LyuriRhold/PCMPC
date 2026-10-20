@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { and, asc, eq, inArray, like, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { addMonths, businessToday, monthEnd, type BusinessDate } from "@/lib/dates";
@@ -226,14 +226,14 @@ export async function recordPayment(tx: Tx, plan: PaymentPlan, ctx: { receiptIte
 
 // ── Membership fee ──
 
-/** Whether the member's membership fee is paid (on a VALID receipt). */
+/** Whether the member's membership fee is paid (on a VALID receipt, or before the cut-off: migrated, PHASE-17). */
 export async function membershipFeePaid(memberId: string, db: Db | Tx = getDb()): Promise<boolean> {
   const [r] = await db
     .select({ id: memberFees.id })
     .from(memberFees)
-    .innerJoin(receiptItems, eq(receiptItems.id, memberFees.receiptItemId))
-    .innerJoin(receipts, eq(receipts.id, receiptItems.receiptId))
-    .where(and(eq(memberFees.memberId, memberId), eq(memberFees.feeType, "MEMBERSHIP"), eq(receipts.status, "VALID")))
+    .leftJoin(receiptItems, eq(receiptItems.id, memberFees.receiptItemId))
+    .leftJoin(receipts, eq(receipts.id, receiptItems.receiptId))
+    .where(and(eq(memberFees.memberId, memberId), eq(memberFees.feeType, "MEMBERSHIP"), or(isNull(memberFees.receiptItemId), eq(receipts.status, "VALID"))))
     .limit(1);
   return !!r;
 }

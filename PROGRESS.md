@@ -218,7 +218,7 @@
 - [x] Exit checks passed
 
 ### Phase 17 — Data Migration & Opening Balances
-- [ ] T17.1 Schema + migrations
+- [x] T17.1 Schema + migrations
 - [ ] T17.2 Template generator (exceljs) for each entity
 - [ ] T17.3 Upload + parser + validators + dry-run report (downloadable error list)
 - [ ] T17.4 Staging + reconciliation screen

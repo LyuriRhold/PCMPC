@@ -384,9 +384,8 @@ export const waterBills = pgTable(
     periodId: uuid("period_id")
       .notNull()
       .references(() => waterBillingPeriods.id),
-    readingId: uuid("reading_id")
-      .notNull()
-      .references(() => waterReadings.id),
+    /** The reading billed; none for an unpaid bill migrated from the old system (PHASE-17). */
+    readingId: uuid("reading_id").references(() => waterReadings.id),
     customerType: text("customer_type").$type<CustomerType>().notNull(),
     classification: text("classification").$type<Classification>().notNull(),
     consumption: integer("consumption").notNull(),
@@ -403,6 +402,10 @@ export const waterBills = pgTable(
     dueDate: date("due_date", { mode: "string" }).notNull(),
     status: text("status").$type<BillStatus>().notNull().default("UNPAID"),
     isFinal: boolean("is_final").notNull().default(false),
+    /** A bill brought in at the cut-off (its amount is the unpaid balance, penalties included). */
+    migrated: boolean("migrated").notNull().default(false),
+    /** The penalty on this bill was already assessed (by the old system): the penalty job skips it. */
+    penaltyAssessed: boolean("penalty_assessed").notNull().default(false),
     jeId: uuid("je_id")
       .notNull()
       .references(() => journalEntries.id),
@@ -412,6 +415,7 @@ export const waterBills = pgTable(
     unique("water_bills_period_account_uq").on(t.periodId, t.accountId),
     check("water_bills_status_chk", inList("status", BILL_STATUSES)),
     check("water_bills_customer_type_chk", inList("customer_type", CUSTOMER_TYPES)),
+    check("water_bills_reading_chk", sql`${t.readingId} IS NOT NULL OR ${t.migrated}`),
     check(
       "water_bills_amounts_chk",
       sql`${t.basicCharge} >= 0 AND ${t.seniorDiscount} >= 0 AND ${t.otherCharges} >= 0 AND ${t.advanceApplied} >= 0 AND ${t.previousBalance} >= 0 AND ${t.currentAmount} = ${t.basicCharge} - ${t.seniorDiscount} + ${t.otherCharges} AND ${t.advanceApplied} <= ${t.currentAmount} AND ${t.totalAmountDue} = ${t.currentAmount} - ${t.advanceApplied} + ${t.previousBalance}`,
@@ -613,3 +617,24 @@ export const waterProductionReadings = pgTable(
 export type WaterPenalty = typeof waterPenalties.$inferSelect;
 export type WaterDisconnection = typeof waterDisconnections.$inferSelect;
 export type WaterPaymentAllocation = typeof waterPaymentAllocations.$inferSelect;
+
+/**
+ * Monthly consumption billed by the old system before the cut-off (PHASE-17 migration): it stands
+ * in for readings the MIS doesn't have, so the high-consumption check has an average from day one.
+ */
+export const waterConsumptionHistory = pgTable(
+  "water_consumption_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => waterAccounts.id),
+    period: text("period").notNull(),
+    consumption: integer("consumption").notNull(),
+    ...createdColumns(),
+  },
+  (t) => [
+    unique("water_consumption_history_uq").on(t.accountId, t.period),
+    check("water_consumption_history_chk", sql`${t.period} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$' AND ${t.consumption} >= 0`),
+  ],
+);

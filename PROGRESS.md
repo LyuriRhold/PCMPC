@@ -1936,4 +1936,18 @@ Built · Decisions · Deviations from spec (with reason) · Follow-ups · Gate p
 - **Backlog:** production zones seed, back-dated encoding of manual receipts, aging of undated migrated balances, transaction history.
 
 **Exit checks / counts:**
-GATE17_LINE
+- `npm run gate` is green: 732 tests (61 files), scan clean (after rewording a comment the scanner misread). Phase 17 adds:
+  - 8 acceptance tests (A17.1–A17.8);
+  - 16 integration tests (schema and triggers; templates; upload, parser and validators; staging and reconciliation; the full posting; rollback and audit);
+  - the demo migration test.
+- `npm run build` is green, with no warnings (`/admin/migration`, `/api/migration/templates/[entity]`, `/api/migration/batches/[id]/errors`).
+- `npm run e2e -- phase-17` and ui-shell are green on a production build (4 of 4), with SEED_ADMIN_* unset.
+- Fresh `db:reset → db:migrate → db:seed → db:seed:dev` OK (migrations 0046 and 0047).
+- Fresh `db:reset → db:migrate → db:seed → db:seed:demo` OK:
+  - 11 files staged;
+  - opening entry GJ-2026-00001 posted (252 lines; trial balance ₱7,595,427.83);
+  - January–September 2026 closed;
+  - Admin › Data migration shows every control account at ₱0.00 difference.
+  - The local dev database now holds this demo.
+- `docs/CUTOVER.md` is written.
+- Databases set up earlier need `npm run db:migrate && npm run db:seed` (migrations 0046 and 0047).

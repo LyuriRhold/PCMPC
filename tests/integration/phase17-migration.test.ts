@@ -3,11 +3,16 @@ import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import "@/modules/plugins";
 import { getDb, withTx } from "@/db/client";
+import { runAs } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
+import { members } from "@/modules/members/schema";
+import { uploadBatchAction } from "@/modules/migration/actions";
 import { importBatches, stgShareCapital } from "@/modules/migration/schema";
+import { batchErrors, getBatch, uploadBatch } from "@/modules/migration/service";
 import { MIGRATION_ENTITIES, TEMPLATES, templateFileName, templateWorkbook } from "@/modules/migration/templates";
 import { makeUser } from "../helpers/phase01";
 import { seedLedger } from "../helpers/phase03";
+import { CUTOFF, filled, MEMBERS, setupMigration, upload, uploadAndStage } from "../helpers/phase17";
 
 async function bookkeeperOnly() {
   await seedLedger();
@@ -70,5 +75,116 @@ describe("T17.2 templates", () => {
       expect(documented).toEqual(def.columns.map((c) => [c.header, c.required ? "Yes" : "No"]));
       expect(templateFileName(entity)).toBe(`migration-${entity.replaceAll("_", "-")}.xlsx`);
     }
+  });
+});
+
+describe("T17.3 upload, parser, validators and dry-run report", () => {
+  it("a clean file is checked without writing live rows; the action takes the file as a form upload and needs migration.import", async () => {
+    const { bookkeeper } = await setupMigration();
+    const form = new FormData();
+    form.set("entity", "members");
+    form.set("cutoffDate", CUTOFF);
+    form.set("file", new File([new Uint8Array(await filled("members", MEMBERS))], "members.xlsx"));
+    const r = await runAs(bookkeeper, () => uploadBatchAction(form));
+    expect(r).toMatchObject({ ok: true, data: { status: "VALIDATED", rowCount: 3, errorCount: 0 } });
+    expect(await getDb().select().from(members)).toEqual([]);
+    const teller = (await makeUser("TELLER", "teller17")).id;
+    await expect(runAs(teller, () => uploadBatchAction(form))).rejects.toThrow(/Forbidden: migration.import/);
+  });
+
+  it("the cut-off is a month end that is over; a new upload replaces an unstaged file of the same kind", async () => {
+    const { bookkeeper } = await setupMigration();
+    const up = (cutoffDate: string, rows = MEMBERS) =>
+      filled("members", rows).then((content) => withTx((tx) => uploadBatch(tx, { entity: "members", fileName: "m.xlsx", content, cutoffDate }, bookkeeper)));
+    await expect(up("2026-09-15")).rejects.toThrow("The cut-off must be the last day of a month (a period end)");
+    await expect(up("2026-10-31")).rejects.toThrow(/must be a day that is over/);
+    const first = await up(CUTOFF, [{ ...MEMBERS[0]!, Sex: "X" }]);
+    expect(await batchErrors(first.id)).toEqual([{ row: 2, column: "Sex", message: "Use one of: MALE, FEMALE" }]);
+    const second = await up(CUTOFF);
+    expect(second.status).toBe("VALIDATED");
+    expect((await getBatch(first.id))?.status).toBe("ROLLED_BACK");
+  });
+
+  it("files that aren't the template are refused with one clear problem", async () => {
+    const { bookkeeper } = await setupMigration();
+    const notExcel = await withTx((tx) => uploadBatch(tx, { entity: "members", fileName: "m.csv", content: new TextEncoder().encode("a,b"), cutoffDate: CUTOFF }, bookkeeper));
+    expect(await batchErrors(notExcel.id)).toEqual([{ row: 1, column: "(file)", message: "This isn't an Excel (.xlsx) file; use the downloaded template" }]);
+    const wrong = await withTx(async (tx) => uploadBatch(tx, { entity: "savings", fileName: "s.xlsx", content: await filled("members", MEMBERS), cutoffDate: CUTOFF }, bookkeeper));
+    expect((await batchErrors(wrong.id))[0]).toMatchObject({ row: 1, column: "(file)", message: `The file has no "Savings" sheet; use the Savings template` });
+  });
+
+  it("rows are checked against the staged files and the MIS: members, products, schedules, totals", async () => {
+    await setupMigration();
+    // Share capital before the members are staged: the members aren't known.
+    const early = await upload("share_capital", [{ "Member No.": "M-000101", Subscribed: 10000, "Paid-up": 10000 }]);
+    expect(await batchErrors(early.id)).toEqual([{ row: 2, column: "Member No.", message: "No member with this no. (stage the Members file first)" }]);
+    await uploadAndStage("members", MEMBERS);
+    const share = await upload("share_capital", [
+      { "Member No.": "m-000101", Subscribed: 10050, "Paid-up": 100 },
+      { "Member No.": "M-000102", Subscribed: 1000, "Paid-up": 2000 },
+    ]);
+    expect(await batchErrors(share.id)).toEqual([
+      { row: 2, column: "Subscribed", message: "Not a whole number of shares (par value ₱100.00)" },
+      { row: 3, column: "Paid-up", message: "More than the subscribed amount" },
+    ]);
+    const savings = await upload("savings", [
+      { "Member No.": "M-000101", "Product Code": "XYZ", "Opened On": "2015-03-01", Balance: 5000 },
+      { "Member No.": "M-000102", "Product Code": "SAV", "Opened On": "2026-10-05", Balance: "12.345" },
+    ]);
+    expect(await batchErrors(savings.id)).toEqual([
+      { row: 2, column: "Product Code", message: "No savings product XYZ in the MIS" },
+      { row: 3, column: "Opened On", message: "After the cut-off (Sep 30, 2026)" },
+      { row: 3, column: "Balance", message: "Not an amount (a plain number with up to 2 decimals)" },
+    ]);
+    const loan = await upload("loans", [
+      {
+        "Member No.": "M-000101",
+        "Product Code": "REG",
+        Principal: 10000,
+        "Term (months)": 12,
+        "Release Date": "2026-07-07",
+        "First Due Date": "2026-08-07",
+        "Installments Paid": 2,
+        "Outstanding Principal": 9000,
+      },
+    ]);
+    expect(await batchErrors(loan.id)).toEqual([
+      {
+        row: 2,
+        column: "Outstanding Principal",
+        message: "After 2 installment(s) the schedule's balance is ₱8,454.90: the outstanding principal must be that, or less by part of installment 3's principal (₱789.98)",
+      },
+    ]);
+    const tb = await upload("trial_balance", [
+      { "Account Code": "11110", Debit: 100 },
+      { "Account Code": "11000", Credit: 50 },
+      { "Account Code": "99999", Credit: 50 },
+    ]);
+    expect(await batchErrors(tb.id)).toEqual([
+      { row: 3, column: "Account Code", message: expect.stringMatching(/is a header account/) },
+      { row: 4, column: "Account Code", message: "No such account in the chart of accounts" },
+    ]);
+    const unbalanced = await upload("trial_balance", [
+      { "Account Code": "11110", Debit: 100 },
+      { "Account Code": "31110", Credit: 99.99 },
+    ]);
+    expect(await batchErrors(unbalanced.id)).toEqual([{ row: 4, column: "Debit", message: "Total debits ₱100.00 don't equal total credits ₱99.99" }]);
+  });
+
+  it("water accounts need a known zone and route, a tariff, and their own meter", async () => {
+    await setupMigration();
+    const base = { "Customer Address": "Pipindan", Classification: "RESIDENTIAL", "Service Address": "Pipindan", Status: "ACTIVE", "Connected On": "2020-01-01", "Last Reading": 120 };
+    const b = await upload("water_accounts", [
+      { ...base, "Account No.": "WA-1", "Last Name": "Cruz", "First Name": "Ana", "Zone Code": "NOPE", "Route Code": "R-01", "Meter Serial No.": "S1" },
+      { ...base, "Account No.": "WA-2", "Business Name": "Store", "Zone Code": "PIPINDAN", "Route Code": "R-01", "Meter Serial No.": "S1", Classification: "BULK" },
+      { ...base, "Account No.": "WA-3", "Zone Code": "PIPINDAN", "Route Code": "R-01", "Meter Serial No.": "S3", "Meter Digits": 4, "Last Reading": 12345 },
+    ]);
+    expect(await batchErrors(b.id)).toEqual([
+      { row: 2, column: "Zone Code", message: "No such zone (Water › Zones & routes)" },
+      { row: 3, column: "Classification", message: "No BULK tariff in the MIS yet" },
+      { row: 3, column: "Meter Serial No.", message: "Duplicate of row 2" },
+      { row: 4, column: "Last Name", message: "Enter the member no., the last and first name, or the business name" },
+      { row: 4, column: "Last Reading", message: "Doesn't fit a 4-digit meter" },
+    ]);
   });
 });

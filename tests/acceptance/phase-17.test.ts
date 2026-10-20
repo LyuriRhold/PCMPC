@@ -8,7 +8,7 @@ import { trialBalance } from "@/modules/ledger/service";
 import { schedule } from "@/modules/loans/amortization";
 import { getLoan, planLoanPayment } from "@/modules/loans/servicing";
 import { members } from "@/modules/members/schema";
-import { batchErrors, errorWorkbook, getBatch, postMigration, reconciliation, rollbackBatch, stageBatch, stagedRowCount, uploadBatch } from "@/modules/migration/service";
+import { batchErrors, errorWorkbook, getBatch, postMigration, reconciliation, rollbackBatch, stagedRowCount, uploadBatch } from "@/modules/migration/service";
 import { templateWorkbook } from "@/modules/migration/templates";
 import { memberSoa } from "@/modules/reports/soa";
 import { billBalances, assessPenalties } from "@/modules/water/collections";
@@ -145,7 +145,9 @@ describe("Phase 17 acceptance", () => {
     ]);
     expect(loan?.schedule[2]).toMatchObject({ dueDate: "2026-10-07", principalDue: row3.principal, interestDue: P(126, 82) });
     const plan = await withTx((tx) => planLoanPayment(tx, loanId, row3.payment));
-    expect(plan.allocations).toEqual([{ no: 3, penalty: 0n, interest: P(126, 82), principal: row3.principal }]);
+    // Allocations keep centavos as decimal strings (PaymentAllocation, stored as jsonb); the plan's totals are Money.
+    expect(plan.allocations).toEqual([{ no: 3, penalty: "0", interest: String(P(126, 82)), principal: String(row3.principal) }]);
+    expect([plan.penalty, plan.interest, plan.principal]).toEqual([0n, P(126, 82), row3.principal]);
   });
 
   it("A17.6 upload the same file twice → the second is rejected (duplicate file hash)", async () => {

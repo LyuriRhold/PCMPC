@@ -781,3 +781,91 @@ registerTerminationRule({
     return `all deposit accounts must be closed (zero balance) first (${open.map((a) => a.accountNo).join(", ")})`;
   },
 });
+
+// ── Data migration (PHASE-17) ──
+
+/**
+ * A savings account brought in at the cut-off: its old passbook no. (or a new one) and the balance
+ * as one OPENING passbook row on the opening entry. Interest up to the cut-off is in the balance.
+ */
+export async function openMigratedAccount(
+  tx: Tx,
+  input: { memberId: string; productId: string; accountNo: string | null; openedAt: BusinessDate; lastTxnAt: BusinessDate; balance: Money; date: BusinessDate; jeId: string; ref: string },
+  actorId: string,
+): Promise<{ id: string; accountNo: string }> {
+  const [product] = await tx.select().from(depositProducts).where(eq(depositProducts.id, input.productId));
+  if (product?.kind !== "SAVINGS") throw new SavingsError("Choose a savings product");
+  if (input.balance < 0n) throw new SavingsError("The balance can't be negative");
+  const accountNo = input.accountNo ?? (await nextNumber("SA", tx, input.date));
+  const [account] = await tx
+    .insert(depositAccounts)
+    .values({ accountNo, memberId: input.memberId, productId: product.id, status: "OPEN", openedAt: input.openedAt, lastCustomerTxnAt: input.lastTxnAt, createdBy: actorId })
+    .returning();
+  if (!account) throw new Error("deposit account insert returned no row");
+  if (input.balance > 0n) {
+    await post(tx, { accountId: account.id, type: "OPENING", amount: input.balance, date: input.date, jeId: input.jeId, refNo: input.ref, remarks: "Balance at the cut-off (data migration)" }, actorId);
+  }
+  await audit(tx, { action: "savings.migrate_account", entity: "deposit_account", entityId: account.id, after: { accountNo, balance: format(input.balance), openedAt: input.openedAt }, userId: actorId });
+  return { id: account.id, accountNo };
+}
+
+/** A time deposit running at the cut-off: its own TD account (OPENING row of the principal) and certificate. */
+export async function migrateTimeDeposit(
+  tx: Tx,
+  input: {
+    memberId: string;
+    productId: string;
+    savingsAccountId: string;
+    certificateNo: string | null;
+    principal: Money;
+    ratePa: string;
+    termDays: number;
+    placementDate: BusinessDate;
+    maturityDate: BusinessDate;
+    date: BusinessDate;
+    jeId: string;
+    ref: string;
+  },
+  actorId: string,
+): Promise<{ id: string; certificateNo: string }> {
+  const [product] = await tx.select().from(depositProducts).where(eq(depositProducts.id, input.productId));
+  if (product?.kind !== "TIME") throw new SavingsError("Choose a time deposit product");
+  if (input.principal <= 0n) throw new SavingsError("The principal must be more than zero");
+  const accountNo = await nextNumber("TD", tx, input.date);
+  const [account] = await tx
+    .insert(depositAccounts)
+    .values({ accountNo, memberId: input.memberId, productId: product.id, status: "OPEN", openedAt: input.placementDate, lastCustomerTxnAt: input.placementDate, createdBy: actorId })
+    .returning();
+  if (!account) throw new Error("deposit account insert returned no row");
+  await post(tx, { accountId: account.id, type: "OPENING", amount: input.principal, date: input.date, jeId: input.jeId, refNo: input.ref, remarks: "Time deposit at the cut-off (data migration)" }, actorId);
+  const certificateNo = input.certificateNo ?? `${accountNo}-1`;
+  const [td] = await tx
+    .insert(timeDeposits)
+    .values({
+      accountId: account.id,
+      certificateNo,
+      principal: input.principal,
+      ratePa: input.ratePa,
+      termDays: input.termDays,
+      placementDate: input.placementDate,
+      maturityDate: input.maturityDate,
+      savingsAccountId: input.savingsAccountId,
+      jeId: input.jeId,
+      createdBy: actorId,
+    })
+    .returning();
+  if (!td) throw new Error("time deposit insert returned no row");
+  await audit(tx, { action: "savings.migrate_td", entity: "time_deposit", entityId: td.id, after: { certificateNo, principal: format(input.principal), maturityDate: input.maturityDate }, userId: actorId });
+  return { id: td.id, certificateNo };
+}
+
+/**
+ * Records a product's interest as posted through `quarterEnd` (the old system credited it; the
+ * migrated balances include it), so the first quarter run in the MIS isn't held up waiting for it.
+ */
+export async function markInterestMigratedThrough(tx: Tx, productId: string, quarterEnd: BusinessDate, actorId: string): Promise<void> {
+  const [product] = await tx.select().from(depositProducts).where(eq(depositProducts.id, productId));
+  if (!product) throw new SavingsError("Deposit product not found");
+  if (await hasRun(tx, "savings-interest", `${product.code}:${quarterEnd}`)) return;
+  await runOnce(tx, "savings-interest", `${product.code}:${quarterEnd}`, actorId, async () => ({ migrated: true, note: "Interest through this quarter is in the balances migrated from the old system" }));
+}

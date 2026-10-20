@@ -13,6 +13,7 @@ import { depositAccounts, depositProducts, timeDeposits } from "@/modules/saving
 import { getSetting } from "@/modules/settings/service";
 import { shareTransactions } from "@/modules/share/schema";
 import { products, suppliers } from "@/modules/store/schema";
+import { BARCODE_PATTERN, SKU_PATTERN, TIN_PATTERN } from "@/modules/store/service";
 import { CLASSIFICATIONS, waterAccounts, waterBillingPeriods, waterBills, waterCustomers, waterMeters, waterRateSchedules, waterRoutes, waterZones } from "@/modules/water/schema";
 import type { RawRow, RowError } from "./parse";
 import { importBatches, stgMembers, stgSavings, stgWaterAccounts, type MigrationEntity, type STAGING } from "./schema";
@@ -628,9 +629,11 @@ async function vStoreStock(ctx: Ctx, rows: Cells[]): Promise<StgInsert<"store_st
   const out: StgInsert<"store_stock">[] = [];
   for (const c of rows) {
     const sku = c.id("SKU", true);
-    if (!duplicate(seenSku, sku, c, "SKU") && sku && liveSkus.has(sku)) c.fail("SKU", "Already in the MIS");
+    if (sku && !SKU_PATTERN.test(sku)) c.fail("SKU", "Use letters, digits, dot, dash or underscore (up to 40)");
+    else if (!duplicate(seenSku, sku, c, "SKU") && sku && liveSkus.has(sku)) c.fail("SKU", "Already in the MIS");
     const barcode = c.id("Barcode");
-    if (!duplicate(seenBarcode, barcode, c, "Barcode") && barcode && liveBarcodes.has(barcode)) c.fail("Barcode", "Already in the MIS");
+    if (barcode && !BARCODE_PATTERN.test(barcode)) c.fail("Barcode", "Use 4 to 40 letters or digits");
+    else if (!duplicate(seenBarcode, barcode, c, "Barcode") && barcode && liveBarcodes.has(barcode)) c.fail("Barcode", "Already in the MIS");
     const name = c.text("Name", true, 120);
     const unit = c.text("Unit", true, 20);
     const category = c.text("Category", false, 60);
@@ -654,6 +657,7 @@ async function vSuppliers(ctx: Ctx, rows: Cells[]): Promise<StgInsert<"suppliers
     if (!duplicate(seen, name?.toUpperCase() ?? null, c, "Supplier Name") && name && live.has(name.toUpperCase())) c.fail("Supplier Name", "Already in the MIS");
     const contact = c.text("Contact", false, 120);
     const tin = c.text("TIN", false, 20);
+    if (tin && !TIN_PATTERN.test(tin)) c.fail("TIN", "Enter the TIN as 000-000-000 or 000-000-000-000");
     const termsDays = c.int("Terms (days)", false, 0, 365) ?? 0;
     const balance = c.money("Balance", true);
     if (c.ok && name && balance !== null) out.push({ rowNo: c.rowNo, name, contact, tin, termsDays, balance });

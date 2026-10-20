@@ -222,7 +222,7 @@
 - [x] T17.2 Template generator (exceljs) for each entity
 - [x] T17.3 Upload + parser + validators + dry-run report (downloadable error list)
 - [x] T17.4 Staging + reconciliation screen
-- [ ] T17.5 Post: opening JE + subledger creation per module + migrated water accounts/bills, loans and TDs
+- [x] T17.5 Post: opening JE + subledger creation per module + migrated water accounts/bills, loans and TDs
 - [ ] T17.6 Rollback + audit
 - [ ] T17.7 Cut-over runbook in `docs/CUTOVER.md` (steps, owners, timing, freeze, sign-off)
 - [ ] Acceptance tests written first (tests/acceptance/phase-17.test.ts)

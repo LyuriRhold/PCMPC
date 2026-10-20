@@ -9,9 +9,10 @@ import { can } from "@/lib/auth-guard";
 import { addDays, businessToday, formatDate, formatDateTime } from "@/lib/dates";
 import { format } from "@/lib/money";
 import { guardPageAny } from "@/lib/page-guard";
-import { batchErrors, listBatches, migrationCutoff, reconciliation, STATUS_LABEL } from "@/modules/migration/service";
+import { batchErrors, listBatches, migrationCutoff, openingEntry, reconciliation, STATUS_LABEL } from "@/modules/migration/service";
 import { MIGRATION_ENTITIES, TEMPLATES } from "@/modules/migration/templates";
 import { BatchButtons, UploadForm } from "@/modules/migration/ui/forms";
+import { PostForm } from "@/modules/migration/ui/post-form";
 
 export const metadata: Metadata = { title: "Data migration · PCMPC MIS" };
 
@@ -24,12 +25,14 @@ async function MigrationContent() {
   const access = await guardPageAny(["migration.import", "migration.post"]);
   if (!access.ok) return <Forbidden permission={access.permission} />;
   const canImport = can(access.user, "migration.import");
+  const canPost = can(access.user, "migration.post");
   const cutoff = await migrationCutoff();
   const batches = await listBatches();
   const rec = cutoff ? await reconciliation(cutoff) : null;
   const withErrors = batches.filter((b) => b.status === "UPLOADED" && b.errorCount > 0).slice(0, 3);
   const errors = await Promise.all(withErrors.map(async (b) => ({ batch: b, errors: (await batchErrors(b.id)).slice(0, 50) })));
   const nonZero = rec ? rec.rows.filter((r) => r.tb !== 0n || r.subledger !== 0n) : [];
+  const opening = rec?.posted ? await openingEntry() : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -46,7 +49,10 @@ async function MigrationContent() {
           <CardHeader>
             <CardTitle>Opening balances posted</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm">The books start from the opening entry dated {formatDate(rec.cutoffDate)}. Later corrections go through the regular screens.</CardContent>
+          <CardContent className="text-sm">
+            The books start from the opening entry {opening?.jeNo ?? ""} dated {formatDate(rec.cutoffDate)}; the months up to the cut-off are closed. Later corrections go through
+            the regular screens.
+          </CardContent>
         </Card>
       ) : null}
 
@@ -212,6 +218,7 @@ async function MigrationContent() {
               </ul>
             </div>
           ) : null}
+          {rec.posted ? null : <PostForm cutoff={rec.cutoffDate} cutoffLabel={formatDate(rec.cutoffDate)} canPost={rec.canPost} allowed={canPost} />}
         </>
       ) : null}
     </div>

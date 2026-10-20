@@ -26,6 +26,7 @@ import {
   type Disbursement,
   type Loan,
   type LoanApplication,
+  type LoanProduct,
   type LoanScheduleRow,
   type LoanStatus,
   type PaymentAllocation,
@@ -802,4 +803,101 @@ export async function releaseQueue(db: Db | Tx = getDb()) {
     .orderBy(desc(loans.releaseDate))
     .limit(50);
   return { approved, pending, recent };
+}
+
+// ── Data migration (PHASE-17) ──
+
+/**
+ * A loan brought in at the cut-off. The schedule is rebuilt from the original terms; installments
+ * 1..N are PAID, and part of installment N+1's principal when the outstanding balance is lower
+ * (its interest was then paid first, by the allocation order). Unpaid installments keep their due
+ * dates, so aging works on day one. The unpaid penalty sits on the oldest unpaid installment, and
+ * the daily job charges penalties only from the cut-off on (a zero accrual marks where it starts).
+ */
+export async function migrateLoan(
+  tx: Tx,
+  input: {
+    memberId: string;
+    product: LoanProduct;
+    loanNo: string | null;
+    principal: Money;
+    term: number;
+    ratePm: string;
+    releaseDate: BusinessDate;
+    firstDueDate: BusinessDate;
+    installmentsPaid: number;
+    outstanding: Money;
+    unpaidPenalty: Money;
+    cutoff: BusinessDate;
+    jeId: string;
+  },
+  actorId: string,
+): Promise<{ id: string; loanNo: string }> {
+  const rows = schedule({ principal: input.principal, ratePm: input.ratePm, term: input.term, method: input.product.method, firstDueDate: input.firstDueDate });
+  const n = input.installmentsPaid;
+  const next = rows[n];
+  const after = rows.slice(n).reduce((t, r) => t + r.principal, 0n);
+  const partial = after - input.outstanding;
+  if (!next || input.outstanding <= 0n || partial < 0n || partial >= next.principal) throw new LoanError("The outstanding principal doesn't fit the schedule");
+  const loanNo = input.loanNo ?? (await nextNumber("LN", tx, input.releaseDate));
+  const [loan] = await tx
+    .insert(loans)
+    .values({
+      loanNo,
+      applicationId: null,
+      memberId: input.memberId,
+      productId: input.product.id,
+      principal: input.principal,
+      ratePm: input.ratePm,
+      method: input.product.method,
+      term: input.term,
+      releaseDate: input.releaseDate,
+      firstDueDate: input.firstDueDate,
+      maturityDate: addMonths(input.firstDueDate, input.term - 1),
+      status: "ACTIVE",
+      disbursement: "MIGRATION",
+      savingsAccountId: null,
+      deductions: [],
+      netProceeds: input.principal,
+      receivableGlKey: input.product.receivableGlKey,
+      penaltyRatePm: input.product.penaltyRatePm,
+      graceDays: input.product.graceDays,
+      authorizedBy: actorId,
+      releasedBy: actorId,
+      jeId: input.jeId,
+      createdBy: actorId,
+    })
+    .returning();
+  if (!loan) throw new Error("loan insert returned no row");
+  await tx.insert(loanSchedule).values(
+    rows.map((r, i) => {
+      const paid = i < n;
+      const part = i === n && partial > 0n;
+      return {
+        loanId: loan.id,
+        no: r.no,
+        dueDate: r.dueDate,
+        principalDue: r.principal,
+        interestDue: r.interest,
+        principalPaid: paid ? r.principal : part ? partial : 0n,
+        interestPaid: paid || part ? r.interest : 0n,
+        penaltyAccrued: i === n ? input.unpaidPenalty : 0n,
+        status: paid ? ("PAID" as const) : part ? ("PARTIAL" as const) : ("OPEN" as const),
+        createdBy: actorId,
+      };
+    }),
+  );
+  const pastGrace = rows.slice(n).filter((r) => r.dueDate < input.cutoff && daysBetween(r.dueDate, input.cutoff) > input.product.graceDays);
+  if (pastGrace.length) {
+    await tx.insert(loanPenaltyAccruals).values(pastGrace.map((r) => ({ loanId: loan.id, scheduleNo: r.no, businessDate: input.cutoff, amount: 0n, basis: 0n, days: 1, createdBy: actorId })));
+  }
+  const status = await refreshStatus(tx, loan, businessToday());
+  await audit(tx, {
+    action: "loans.migrate",
+    entity: "loan",
+    entityId: loan.id,
+    after: { loanNo, principal: format(input.principal), installmentsPaid: n, outstanding: format(input.outstanding), unpaidPenalty: format(input.unpaidPenalty), status },
+    userId: actorId,
+  });
+  return { id: loan.id, loanNo };
 }

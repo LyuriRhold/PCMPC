@@ -4,11 +4,20 @@ import { z } from "zod";
 import { withTx } from "@/db/client";
 import { failFrom, ok, type ActionResult } from "@/lib/action-result";
 import { requirePermission } from "@/lib/auth-guard";
+import { NumberingError } from "@/lib/numbering";
+import { LedgerError } from "@/modules/ledger/service";
+import { LoanError } from "@/modules/loans/service";
+import { SavingsError } from "@/modules/savings/service";
+import { ShareError } from "@/modules/share/service";
+import { StoreError } from "@/modules/store/service";
+import { WaterError } from "@/modules/water/service";
 import { MigrationError } from "./errors";
 import { MIGRATION_ENTITIES, type BatchStatus } from "./schema";
-import { rollbackBatch, stageBatch, uploadBatch } from "./service";
+import { postMigration, rollbackBatch, stageBatch, uploadBatch } from "./service";
 
 const EXPECTED = [MigrationError];
+/** Posting creates records in every module; their rules can still refuse a record (shown, nothing is posted). */
+const POSTING = [MigrationError, LedgerError, LoanError, SavingsError, ShareError, StoreError, WaterError, NumberingError];
 
 const uploadSchema = z.object({
   entity: z.enum(MIGRATION_ENTITIES, "Choose what the file holds"),
@@ -51,5 +60,19 @@ export async function rollbackBatchAction(input: z.input<typeof batchSchema>): P
     return ok(null);
   } catch (e) {
     return failFrom(e, EXPECTED);
+  }
+}
+
+const postSchema = z.object({ cutoffDate: z.string().trim().max(10) });
+
+/** General manager: posts the opening balances once the reconciliation agrees (one opening entry; the months up to the cut-off close). */
+export async function postMigrationAction(input: z.input<typeof postSchema>): Promise<ActionResult<{ jeNo: string }>> {
+  const actor = await requirePermission("migration.post");
+  try {
+    const { cutoffDate } = postSchema.parse(input);
+    const r = await withTx((tx) => postMigration(tx, { cutoffDate }, actor.id));
+    return ok({ jeNo: r.jeNo });
+  } catch (e) {
+    return failFrom(e, POSTING);
   }
 }

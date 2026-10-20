@@ -54,14 +54,14 @@ export async function filled(entity: MigrationEntity, rows: Cells[]): Promise<Bu
 }
 
 /** Uploads (and dry-runs) a filled template as the bookkeeper. */
-export async function upload(entity: MigrationEntity, rows: Cells[], fileName = `${entity}.xlsx`) {
+export async function upload(entity: MigrationEntity, rows: Cells[], fileName = `${entity}.xlsx`, cutoffDate: BusinessDate = CUTOFF) {
   const content = await filled(entity, rows);
-  return withTx((tx) => uploadBatch(tx, { entity, fileName, content, cutoffDate: CUTOFF }, people.bookkeeper));
+  return withTx((tx) => uploadBatch(tx, { entity, fileName, content, cutoffDate }, people.bookkeeper));
 }
 
 /** Uploads and stages a file that must be clean. */
-export async function uploadAndStage(entity: MigrationEntity, rows: Cells[]): Promise<string> {
-  const b = await upload(entity, rows);
+export async function uploadAndStage(entity: MigrationEntity, rows: Cells[], cutoffDate: BusinessDate = CUTOFF): Promise<string> {
+  const b = await upload(entity, rows, `${entity}.xlsx`, cutoffDate);
   if (b.errorCount > 0) throw new Error(`${entity}: ${JSON.stringify(await batchErrors(b.id))}`);
   await withTx((tx) => stageBatch(tx, b.id, people.bookkeeper));
   return b.id;

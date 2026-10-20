@@ -1,7 +1,8 @@
 import { and, asc, eq, inArray, lte, or, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
-import { formatDate, type BusinessDate } from "@/lib/dates";
+import { addMonths, formatDate, monthEnd, type BusinessDate } from "@/lib/dates";
 import { format, type Money } from "@/lib/money";
+import { fiscalYearStart } from "@/modules/ledger/periods";
 import { accountMappings, accounts, journalEntries } from "@/modules/ledger/schema";
 import { loanProducts } from "@/modules/loans/schema";
 import { depositProducts } from "@/modules/savings/schema";
@@ -134,6 +135,12 @@ export async function reconciliation(cutoff: BusinessDate, db: Db | Tx = getDb()
     for (const b of data.unstaged) blockers.push(`Stage or roll back the ${TEMPLATES[b.entity].title} file ${b.fileName}`);
     for (const r of rows.filter((x) => x.difference !== 0n)) {
       blockers.push(`${r.code} ${r.name}: the trial balance has ${format(r.tb)} and the subsidiary records ${format(r.subledger)} (difference ${format(r.difference)})`);
+    }
+    // At a fiscal year end the books are closed: the trial balance must be the post-closing one.
+    if (data.tb.length && monthEnd(addMonths(await fiscalYearStart(cutoff, db), 11)) === cutoff) {
+      const ids = data.tb.map((t) => t.accountId);
+      const nominal = await db.select({ code: accounts.code }).from(accounts).where(and(inArray(accounts.id, ids), inArray(accounts.type, ["REVENUE", "EXPENSE"])));
+      if (nominal.length) blockers.push(`${formatDate(cutoff)} is a fiscal year end: stage the post-closing trial balance (revenues and expenses closed into Undivided Net Surplus; ${nominal.map((n) => n.code).join(", ")} have balances)`);
     }
     for (const key of unknownKeys) blockers.push(`No account is mapped to "${key}" for the staged records`);
     const [entries] = await db

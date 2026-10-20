@@ -5,15 +5,31 @@ import "@/modules/plugins";
 import { getDb, withTx } from "@/db/client";
 import { runAs } from "@/lib/auth-guard";
 import { setClock } from "@/lib/dates";
+import { hasRun } from "@/lib/jobs";
+import { next as nextNumber } from "@/lib/numbering";
+import { journalEntries, periods } from "@/modules/ledger/schema";
+import { accruePenalties, getLoan } from "@/modules/loans/servicing";
 import { members } from "@/modules/members/schema";
-import { uploadBatchAction } from "@/modules/migration/actions";
+import { dashboardKpis } from "@/modules/reports/kpis";
+import { memberSoa } from "@/modules/reports/soa";
+import { depositAccounts, depositTransactions, timeDeposits } from "@/modules/savings/schema";
+import { isGoodStanding } from "@/modules/share/service";
+import { chargeLimit, memberAr } from "@/modules/store/pos";
+import { inventoryValuation } from "@/modules/store/reports";
+import { suppliers } from "@/modules/store/schema";
+import { supplierBalance } from "@/modules/store/service";
+import { advanceBalance } from "@/modules/water/billing";
+import { assessPenalties, billBalances } from "@/modules/water/collections";
+import { readingContext } from "@/modules/water/readings";
+import { waterAccounts, waterCustomers, waterDisconnections } from "@/modules/water/schema";
+import { postMigrationAction, uploadBatchAction } from "@/modules/migration/actions";
 import { importBatches, stgShareCapital } from "@/modules/migration/schema";
-import { batchErrors, getBatch, reconciliation, rollbackBatch, stageBatch, uploadBatch } from "@/modules/migration/service";
-import { accountIdFor, postJournal } from "@/modules/ledger/service";
+import { batchErrors, getBatch, listBatches, postMigration, reconciliation, rollbackBatch, stageBatch, uploadBatch } from "@/modules/migration/service";
+import { accountIdFor, postJournal, trialBalance } from "@/modules/ledger/service";
 import { MIGRATION_ENTITIES, TEMPLATES, templateFileName, templateWorkbook } from "@/modules/migration/templates";
 import { makeUser } from "../helpers/phase01";
 import { P, seedLedger } from "../helpers/phase03";
-import { CUTOFF, filled, MEMBERS, on, setupMigration, upload, uploadAndStage } from "../helpers/phase17";
+import { CUTOFF, type Cells, filled, MEMBERS, memberIdOf, migratedLoanId, migrationUsers, on, setupMigration, upload, uploadAndStage } from "../helpers/phase17";
 
 async function bookkeeperOnly() {
   await seedLedger();
@@ -248,3 +264,176 @@ describe("T17.4 staging and reconciliation", () => {
     await expect(withTx((tx) => rollbackBatch(tx, membersId, bookkeeper))).rejects.toThrow("This file is already rolled back");
   });
 });
+
+/** Every template filled: the full A-to-Z migration of the T17.5 tests (cut-off Sep 30, 2026). */
+async function fullMigration() {
+  const people = await setupMigration();
+  await uploadAndStage("members", [
+    ...MEMBERS,
+    { ...MEMBERS[2]!, "Member No.": "M-000104", "Last Name": "Garcia", "First Name": "Rosa", Sex: "FEMALE", Birthdate: "1990-07-07", Status: "INACTIVE", "Membership Fee Paid": null },
+  ]);
+  await uploadAndStage("share_capital", [
+    { "Member No.": "M-000101", Subscribed: 10000, "Paid-up": 7500 },
+    { "Member No.": "M-000102", Subscribed: 5000, "Paid-up": 5000 },
+  ]);
+  await uploadAndStage("savings", [
+    { "Member No.": "M-000101", "Account No.": "SA-000150", "Product Code": "SAV", "Opened On": "2015-03-01", Balance: 5000, "Last Transaction Date": "2026-09-12" },
+    { "Member No.": "M-000102", "Product Code": "SAV", "Opened On": "2016-07-15", Balance: 2000 },
+  ]);
+  await uploadAndStage("time_deposits", [{ "Member No.": "M-000101", Principal: 20000, "Rate p.a. (%)": 3.5, "Term (days)": 180, "Placement Date": "2026-06-01" }]);
+  await uploadAndStage("loans", [
+    // 2 installments paid; installments 3 (Aug 7) and 4 (Sep 7) unpaid at the cut-off.
+    { "Member No.": "M-000102", "Product Code": "REG", Principal: 10000, "Term (months)": 12, "Release Date": "2026-05-07", "First Due Date": "2026-06-07", "Installments Paid": 2, "Outstanding Principal": 8454.9, "Unpaid Penalty": 150 },
+    // Installment 1 (Sep 7) partly paid: ₱500.00 of its ₱766.80 principal (its interest first).
+    { "Member No.": "M-000103", "Loan No.": "LN-2026-00042", "Product Code": "REG", Principal: 10000, "Term (months)": 12, "Release Date": "2026-08-07", "First Due Date": "2026-09-07", "Installments Paid": 0, "Outstanding Principal": 9500 },
+  ]);
+  const water = { "Customer Address": "Purok Siete, Pipindan", Classification: "RESIDENTIAL", "Zone Code": "PIPINDAN", "Route Code": "R-01", "Service Address": "Purok Siete, Pipindan", "Connected On": "2019-06-01" };
+  await uploadAndStage("water_accounts", [
+    { ...water, "Account No.": "WA-000501", "Customer No.": "WC-000501", "Last Name": "Cruz", "First Name": "Ana", Status: "ACTIVE", "Meter Serial No.": "MIG-0501", "Last Reading": 1250, "Consumption 1 Month Ago": 15, "Consumption 2 Months Ago": 16, "Consumption 3 Months Ago": 17, "Meter Deposit": 1000 },
+    { ...water, "Account No.": "WA-000502", "Member No.": "M-000101", Status: "DISCONNECTED", "Meter Serial No.": "MIG-0502", "Last Reading": 300, "Meter Deposit": 500, "Advance Payment": 100 },
+  ]);
+  await uploadAndStage("water_bills", [
+    { "Account No.": "WA-000501", Period: "2026-08", "Bill Date": "2026-08-31", "Due Date": "2026-09-15", "Amount Unpaid": 400, "Penalty Assessed": "YES" },
+    { "Account No.": "WA-000502", Period: "2026-07", "Bill Date": "2026-07-31", "Due Date": "2026-08-15", "Amount Unpaid": 350, "Penalty Assessed": "NO" },
+    { "Account No.": "WA-000502", Period: "2026-08", "Bill Date": "2026-08-31", "Due Date": "2026-09-15", "Amount Unpaid": 380, "Penalty Assessed": "NO" },
+  ]);
+  await uploadAndStage("store_stock", [
+    { SKU: "RICE-25", Name: "Rice 25 kg", Unit: "sack", Category: "Grocery", "Selling Price": 1350, "Unit Cost": 1180.5, Quantity: 40, "Reorder Level": 10 },
+    { SKU: "SOAP", Name: "Laundry soap", Unit: "bar", Category: "grocery", "Selling Price": 25, "Unit Cost": 20, Quantity: 0 },
+  ]);
+  await uploadAndStage("suppliers", [
+    { "Supplier Name": "S1 Trading", "Terms (days)": 30, Balance: 15250 },
+    { "Supplier Name": "S2 Wholesale", Balance: 0 },
+  ]);
+  await uploadAndStage("store_ar", [{ "Member No.": "M-000102", Balance: 850, "Charge Limit": 2000 }]);
+  await uploadAndStage("trial_balance", TB_ROWS);
+  return people;
+}
+
+const TB_ROWS: Cells[] = [
+  { "Account Code": "11110", Debit: 20000 },
+  { "Account Code": "11210", Debit: 17954.9 },
+  { "Account Code": "11250", Debit: 850 },
+  { "Account Code": "11260", Debit: 1130 },
+  { "Account Code": "11270", Debit: 2500 },
+  { "Account Code": "11310", Debit: 47220 },
+  { "Account Code": "21110", Credit: 7000 },
+  { "Account Code": "21120", Credit: 20000 },
+  { "Account Code": "21210", Credit: 15250 },
+  { "Account Code": "21220", Credit: 1500 },
+  { "Account Code": "21230", Credit: 100 },
+  { "Account Code": "31110", Credit: 15000 },
+  { "Account Code": "32100", Credit: 30804.9 },
+];
+
+describe("T17.5 posting the opening balances", () => {
+  it("one opening entry; every module's records on it; every subsidiary ledger equals its control account", async () => {
+    const { manager, bookkeeper } = await fullMigration();
+    const rec = await reconciliation(CUTOFF);
+    expect(rec.blockers).toEqual([]);
+    const posted = await runAs(manager, () => postMigrationAction({ cutoffDate: CUTOFF }));
+    if (!posted.ok) throw new Error(posted.error);
+    expect(posted.data.jeNo).toMatch(/^GJ-2026-\d{5}$/);
+
+    // The ledger is the cut-off trial balance, and the opening entry is its only entry.
+    const tb = (await trialBalance(CUTOFF)).rows.map((r) => [r.code, r.debit > 0n ? r.debit : -r.credit]);
+    expect(tb).toEqual(TB_ROWS.map((r) => [r["Account Code"], r.Debit !== undefined ? toCentavos(Number(r.Debit)) : -toCentavos(Number(r.Credit))]));
+    const entries = await getDb().select().from(journalEntries);
+    expect(entries.map((e) => [e.sourceModule, e.entryDate, e.book])).toEqual([["migration", CUTOFF, "GJ"]]);
+
+    // Every subsidiary agrees with the GL.
+    expect((await dashboardKpis()).reconciliation.map((r) => [r.label, r.difference])).toEqual((await dashboardKpis()).reconciliation.map((r) => [r.label, 0n]));
+    for (const no of ["M-000101", "M-000102", "M-000103"]) {
+      expect((await memberSoa(await memberIdOf(no))).reconciliation.every((r) => r.difference === 0n)).toBe(true);
+    }
+    const valuation = await inventoryValuation(CUTOFF);
+    expect([valuation.total, valuation.difference]).toEqual([P(47220), 0n]);
+    const [s1] = await getDb().select().from(suppliers).where(eq(suppliers.name, "S1 Trading"));
+    expect(await supplierBalance(s1!.id)).toBe(P(15250));
+    const m102 = await memberIdOf("M-000102");
+    expect([await memberAr(m102), (await chargeLimit(m102)).limit]).toEqual([P(850), P(2000)]);
+
+    // Members: old numbers kept, the series continues after them; the fee paid before the cut-off counts.
+    const [m104] = await getDb().select().from(members).where(eq(members.memberNo, "M-000104"));
+    expect([m104?.status, m104?.membershipDate]).toEqual(["INACTIVE", "2018-11-05"]);
+    expect(await isGoodStanding(m102)).toBe(true);
+    expect(await withTx((tx) => nextNumber("MEMBER", tx))).toBe("M-000105");
+
+    // Savings: the passbook opens with the migrated balance; the interest through Sep 30 is marked as done.
+    const savings = await getDb().select().from(depositAccounts).orderBy(depositAccounts.accountNo);
+    expect(savings.map((a) => a.accountNo)).toEqual(["SA-000150", "SA-000151", "TD-000001"]);
+    const [opening] = await getDb().select().from(depositTransactions).where(eq(depositTransactions.accountId, savings[0]!.id));
+    expect([opening?.type, opening?.amount, opening?.txnDate]).toEqual(["OPENING", P(5000), CUTOFF]);
+    expect(await withTx((tx) => hasRun(tx, "savings-interest", "SAV:2026-09-30"))).toBe(true);
+    const [td] = await getDb().select().from(timeDeposits);
+    expect([td?.certificateNo, td?.principal, td?.ratePa, td?.maturityDate, td?.savingsAccountId]).toEqual(["TD-000001-1", P(20000), "0.035", "2026-11-28", savings[0]!.id]);
+
+    // Loans: arrears keep their due dates; the partly paid installment is PARTIAL.
+    const l102 = await getLoan(await migratedLoanId("M-000102"));
+    expect([l102?.loan.status, l102?.daysPastDue, l102?.unpaidPenalty]).toEqual(["PAST_DUE", 55, P(150)]);
+    expect(l102?.schedule.slice(1, 4).map((r) => r.status)).toEqual(["PAID", "OPEN", "OPEN"]);
+    const l103 = await getLoan(await migratedLoanId("M-000103"));
+    expect([l103?.loan.loanNo, l103?.outstandingPrincipal, l103?.schedule[0]?.status, l103?.schedule[0]?.principalPaid, l103?.schedule[0]?.interestPaid]).toEqual([
+      "LN-2026-00042",
+      P(9500),
+      "PARTIAL",
+      P(500),
+      P(150),
+    ]);
+    // Penalties after the cut-off only: Oct 2 adds 2 days on each overdue installment (not every day since its due date).
+    on("2026-10-02");
+    expect(await withTx((tx) => accruePenalties(tx, "2026-10-02"))).toEqual({ accruals: 3, amount: 122n + 122n + 36n });
+    on("2026-10-01");
+
+    // Water: customers, meters at the last reading, consumption history, deposits, advances, the disconnection.
+    const accounts = await getDb().select().from(waterAccounts).orderBy(waterAccounts.accountNo);
+    expect(accounts.map((a) => [a.accountNo, a.status, a.depositAmount])).toEqual([
+      ["WA-000501", "ACTIVE", P(1000)],
+      ["WA-000502", "DISCONNECTED", P(500)],
+    ]);
+    const [c502] = await getDb().select().from(waterCustomers).where(eq(waterCustomers.id, accounts[1]!.customerId));
+    expect([c502?.type, c502?.memberId, c502?.lastName]).toEqual(["MEMBER", await memberIdOf("M-000101"), "Dela Cruz"]);
+    expect(await advanceBalance(getDb(), c502!.id)).toBe(P(100));
+    const ctx = await readingContext(getDb(), accounts[0]!, { period: "2026-10" });
+    expect([ctx.previous, ctx.history]).toEqual([1250, [15, 16, 17]]);
+    const [notice] = await getDb().select().from(waterDisconnections);
+    expect([notice?.status, notice?.noticeAmount, notice?.noticeBills]).toEqual(["DISCONNECTED", P(730), 2]);
+    const bills = await billBalances(getDb(), { accountIds: accounts.map((a) => a.id) });
+    expect(bills.map((b) => String(b.outstanding)).sort()).toEqual([String(P(350)), String(P(380)), String(P(400))]);
+    // The penalty job charges the two bills the old system hadn't (10%), not the one it had.
+    on("2026-10-02");
+    expect(await withTx((tx) => assessPenalties(tx, "2026-10-02"))).toEqual({ penalties: 2, total: String(P(35) + P(38)) });
+    on("2026-10-01");
+
+    // The months up to the cut-off are closed; October is open. The files are posted and final.
+    const months = await getDb().select().from(periods).orderBy(periods.month);
+    expect(months.filter((p) => p.year === 2026).map((p) => p.status)).toEqual([...Array(9).fill("CLOSED"), "OPEN", "OPEN", "OPEN"]);
+    expect((await listBatches()).every((b) => b.status === "POSTED")).toBe(true);
+    await expect(withTx((tx) => postMigration(tx, { cutoffDate: CUTOFF }, manager))).rejects.toThrow("The opening balances for this cut-off are already posted");
+    await expect(upload("members", MEMBERS, "more.xlsx")).rejects.toThrow(/The opening balances were posted \(cut-off Sep 30, 2026\)/);
+    const [b] = await listBatches();
+    await expect(withTx((tx) => rollbackBatch(tx, b!.id, bookkeeper))).rejects.toThrow("A posted file can't be rolled back");
+  });
+
+  it("posting needs migration.post; a blocked reconciliation names every reason", async () => {
+    const { bookkeeper, manager } = await setupMigration();
+    await uploadAndStage("members", MEMBERS);
+    await expect(runAs(bookkeeper, () => postMigrationAction({ cutoffDate: CUTOFF }))).rejects.toThrow(/Forbidden: migration.post/);
+    expect(await runAs(manager, () => postMigrationAction({ cutoffDate: CUTOFF }))).toEqual({ ok: false, error: "Posting is blocked: Stage the trial balance as of the cut-off" });
+  });
+
+  it("at a fiscal year end the trial balance must be the post-closing one", async () => {
+    await seedLedger();
+    on("2026-01-15");
+    await migrationUsers();
+    await uploadAndStage("trial_balance", [
+      { "Account Code": "11110", Debit: 1000 },
+      { "Account Code": "41110", Credit: 1000 },
+    ], "2025-12-31");
+    expect((await reconciliation("2025-12-31")).blockers).toEqual([expect.stringMatching(/^Dec 31, 2025 is a fiscal year end: stage the post-closing trial balance/)]);
+  });
+});
+
+function toCentavos(pesos: number): bigint {
+  return BigInt(Math.round(pesos * 100));
+}

@@ -243,3 +243,24 @@ export async function yearPeriods(year: number, db: Db | Tx = getDb()) {
 export async function keptChecklist(period: string, db: Db | Tx = getDb()) {
   return db.select().from(closeChecklists).where(eq(closeChecklists.period, period)).orderBy(sql`${closeChecklists.at} DESC`);
 }
+
+/**
+ * Closes every month up to and including the cut-off's (PHASE-17 data migration): the opening
+ * entry is the books' first, and nothing may be posted before go-live. At a fiscal year end the
+ * year is closed too and the next one opened.
+ */
+export async function closeThroughCutoff(tx: Tx, cutoff: BusinessDate, ref: string, actorId: string): Promise<{ months: number }> {
+  const ym = Number(cutoff.slice(0, 4)) * 100 + Number(cutoff.slice(5, 7));
+  const closed = await tx
+    .update(periods)
+    .set({ status: "CLOSED", closedBy: actorId, closedAt: sql`now()` })
+    .where(and(eq(periods.status, "OPEN"), sql`${periods.year} * 100 + ${periods.month} <= ${ym}`))
+    .returning({ id: periods.id, year: periods.year, month: periods.month });
+  const [fy] = await tx.select().from(fiscalYears).where(eq(fiscalYears.endDate, cutoff));
+  if (fy && fy.status === "OPEN") {
+    await tx.update(fiscalYears).set({ status: "CLOSED" }).where(eq(fiscalYears.id, fy.id));
+    await ensureFiscalYear(tx, fy.year + 1);
+  }
+  await audit(tx, { action: "gl.period_close", entity: "period", entityId: cutoff, after: { through: cutoff, months: closed.map((p) => label(p.year, p.month)), fiscalYearClosed: fy?.year ?? null, ref }, userId: actorId });
+  return { months: closed.length };
+}

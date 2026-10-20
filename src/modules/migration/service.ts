@@ -5,6 +5,7 @@ import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { formatDate, now, type BusinessDate } from "@/lib/dates";
 import { users } from "@/modules/auth/schema";
+import { journalEntries } from "@/modules/ledger/schema";
 import { MigrationError } from "./errors";
 import { readSheet, type RowError } from "./parse";
 import {
@@ -31,6 +32,7 @@ import { cutoffProblem, validateRows, type Validated } from "./validate";
 
 export { MigrationError } from "./errors";
 export { reconciliation } from "./reconcile";
+export { postMigration } from "./post";
 
 /**
  * Import batches (PHASE-17 T17.3, T17.6): upload = store the file and dry-run it (problems listed
@@ -289,6 +291,17 @@ export async function migrationCutoff(db: Db | Tx = getDb()): Promise<BusinessDa
   if (posted) return posted.cutoff;
   const [open] = await db.select({ cutoff: importBatches.cutoffDate }).from(importBatches).where(inArray(importBatches.status, OPEN_STATUSES)).limit(1);
   return open?.cutoff ?? null;
+}
+
+/** The opening entry of a posted migration (its JE no. and date), or null. */
+export async function openingEntry(db: Db | Tx = getDb()) {
+  const [r] = await db
+    .select({ id: journalEntries.id, jeNo: journalEntries.jeNo, date: journalEntries.entryDate })
+    .from(importBatches)
+    .innerJoin(journalEntries, eq(journalEntries.id, importBatches.jeId))
+    .where(eq(importBatches.status, "POSTED"))
+    .limit(1);
+  return r ?? null;
 }
 
 /** How many rows of a batch are in its staging table. */

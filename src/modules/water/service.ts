@@ -2,8 +2,9 @@ import { and, asc, eq, gte, inArray, lte, max, ne, sql } from "drizzle-orm";
 import { getDb, type Db, type Tx } from "@/db/client";
 import { audit } from "@/lib/audit";
 import { assertNotSameUser } from "@/lib/auth-guard";
-import { businessToday, now, type BusinessDate } from "@/lib/dates";
+import { addMonths, businessToday, now, type BusinessDate } from "@/lib/dates";
 import { normalizeName } from "@/lib/names";
+import type { Money } from "@/lib/money";
 import { next as nextNumber } from "@/lib/numbering";
 import { receiptItems, receipts } from "@/modules/cashiering/schema";
 import { onMemberStatusChange } from "@/modules/members/hooks";
@@ -13,7 +14,12 @@ import {
   waterAccountHistory,
   waterAccounts,
   waterApplications,
+  waterBillingPeriods,
+  waterBillLines,
+  waterBills,
+  waterConsumptionHistory,
   waterCustomers,
+  waterDisconnections,
   waterFees,
   waterMeterInstallations,
   waterMeters,
@@ -503,4 +509,188 @@ for (const [key, code] of [
   onSettingChange(key, async (tx, value) => {
     await tx.update(waterFees).set({ amount: BigInt(String(value)) }).where(eq(waterFees.code, code));
   });
+}
+
+// ── Data migration (PHASE-17) ──
+
+/** A water customer brought in at the cut-off: their old customer no. (or a new one); a member customer takes the member's name. */
+export async function createMigratedCustomer(
+  tx: Tx,
+  input: { customerNo: string | null; memberId: string | null; lastName: string | null; firstName: string | null; middleName: string | null; businessName: string | null; address: string; mobile: string | null; date: BusinessDate },
+  actorId: string,
+): Promise<WaterCustomer> {
+  let { lastName, firstName, middleName } = input;
+  if (input.memberId) {
+    const [m] = await tx.select().from(members).where(eq(members.id, input.memberId));
+    if (!m) throw new WaterError("Member not found");
+    lastName = m.lastName;
+    firstName = m.firstName;
+    middleName = m.middleName;
+  }
+  const businessName = input.memberId ? null : input.businessName;
+  if (!businessName && !(lastName && firstName)) throw new WaterError("Enter the customer's last and first name, or a business name");
+  const customerNo = input.customerNo ?? (await nextNumber("WC", tx, input.date));
+  const displayName = businessName ?? `${lastName} ${firstName}`;
+  const at = now();
+  const [c] = await tx
+    .insert(waterCustomers)
+    .values({
+      customerNo,
+      type: input.memberId ? "MEMBER" : "NON_MEMBER",
+      memberId: input.memberId,
+      lastName,
+      firstName,
+      middleName,
+      businessName,
+      nameKey: `${normalizeName(displayName)}|${normalizeName(input.address)}`,
+      searchText: normalizeName([customerNo, businessName, lastName, firstName, middleName].filter(Boolean).join(" ")),
+      address: input.address,
+      mobile: input.mobile,
+      remarks: "Migrated from the old records",
+      createdBy: actorId,
+      createdAt: at,
+      updatedAt: at,
+    })
+    .returning();
+  if (!c) throw new Error("customer insert returned no row");
+  await audit(tx, { action: "water.customer_migrate", entity: "water_customer", entityId: c.id, after: { customerNo, type: c.type }, userId: actorId });
+  return c;
+}
+
+export type MigratedAccountInput = {
+  accountNo: string;
+  customerId: string;
+  classification: Classification;
+  routeId: string;
+  sequenceNo: number | null;
+  serviceAddress: string;
+  status: "ACTIVE" | "DISCONNECTED";
+  connectedAt: BusinessDate;
+  deposit: Money;
+  meterSerial: string;
+  meterDigits: number;
+  lastReading: number;
+  /** m³ billed 1, 2, 3 months before the cut-off (null = unknown). */
+  consumption: Array<number | null>;
+  /** Unpaid bills migrated with the account (for a disconnected account's notice). */
+  arrears: { amount: Money; bills: number };
+  cutoff: BusinessDate;
+  ref: string;
+};
+
+/**
+ * A service connection brought in at the cut-off: the account, its meter installed at the cut-off
+ * with the last actual reading as its initial reading (the previous reading of the first period),
+ * the consumption history for the high-consumption check, and a disconnection record if it is
+ * disconnected (so the reconnection flow works).
+ */
+export async function createMigratedAccount(tx: Tx, input: MigratedAccountInput, actorId: string): Promise<WaterAccount> {
+  let sequenceNo = input.sequenceNo;
+  if (sequenceNo === null) {
+    const [seq] = await tx.select({ n: max(waterAccounts.sequenceNo) }).from(waterAccounts).where(eq(waterAccounts.routeId, input.routeId));
+    sequenceNo = (seq?.n ?? 0) + 1;
+  }
+  const [account] = await tx
+    .insert(waterAccounts)
+    .values({
+      accountNo: input.accountNo,
+      customerId: input.customerId,
+      classification: input.classification,
+      routeId: input.routeId,
+      sequenceNo,
+      serviceAddress: input.serviceAddress,
+      status: input.status,
+      connectedAt: input.connectedAt,
+      depositAmount: input.deposit,
+      createdBy: actorId,
+    })
+    .returning();
+  if (!account) throw new Error("account insert returned no row");
+  const [meter] = await tx.insert(waterMeters).values({ serialNo: input.meterSerial, digits: input.meterDigits, status: "INSTALLED", createdBy: actorId }).returning();
+  if (!meter) throw new Error("meter insert returned no row");
+  await tx.insert(waterMeterInstallations).values({ accountId: account.id, meterId: meter.id, installedAt: input.cutoff, initialReading: input.lastReading, createdBy: actorId });
+  const months = input.consumption.flatMap((c, i) => (c === null ? [] : [{ accountId: account.id, period: addMonths(input.cutoff, -i).slice(0, 7), consumption: c, createdBy: actorId }]));
+  if (months.length) await tx.insert(waterConsumptionHistory).values(months);
+  await history(tx, account.id, "MIGRATED", null, input.status, `${input.ref} · meter ${input.meterSerial} at ${input.lastReading}`, actorId);
+  if (input.status === "DISCONNECTED") {
+    await tx.insert(waterDisconnections).values({
+      accountId: account.id,
+      noticeNo: await nextNumber("DN", tx, input.cutoff),
+      noticeDate: input.cutoff,
+      scheduledDate: input.cutoff,
+      noticeAmount: input.arrears.amount,
+      noticeBills: input.arrears.bills,
+      disconnectedAt: input.cutoff,
+      disconnectReading: input.lastReading,
+      disconnectedBy: actorId,
+      status: "DISCONNECTED",
+      by: actorId,
+      createdBy: actorId,
+    });
+  }
+  await audit(tx, { action: "water.account_migrate", entity: "water_account", entityId: account.id, after: { accountNo: input.accountNo, status: input.status, meter: input.meterSerial, lastReading: input.lastReading }, userId: actorId });
+  return account;
+}
+
+/**
+ * An unpaid bill brought in at the cut-off: its amount is what is still unpaid (penalties already
+ * charged included). It goes in the zone's (closed) billing period for its month, has no reading in
+ * the MIS, and keeps whether the old system already charged the penalty (the penalty job skips it).
+ */
+export async function createMigratedBill(
+  tx: Tx,
+  input: {
+    account: WaterAccount;
+    customer: WaterCustomer;
+    zoneId: number;
+    period: string;
+    billNo: string | null;
+    billDate: BusinessDate;
+    dueDate: BusinessDate;
+    consumption: number | null;
+    amount: Money;
+    penaltyAssessed: boolean;
+    jeId: string;
+  },
+  actorId: string,
+): Promise<{ id: string; billNo: string }> {
+  if (input.amount <= 0n) throw new WaterError("The unpaid amount must be more than zero");
+  let [period] = await tx.select().from(waterBillingPeriods).where(and(eq(waterBillingPeriods.period, input.period), eq(waterBillingPeriods.zoneId, input.zoneId)));
+  if (!period) {
+    [period] = await tx
+      .insert(waterBillingPeriods)
+      .values({ period: input.period, zoneId: input.zoneId, readingFrom: input.billDate, readingTo: input.billDate, billDate: input.billDate, dueDate: input.dueDate, status: "CLOSED", createdBy: actorId })
+      .returning();
+  }
+  if (!period) throw new Error("billing period insert returned no row");
+  const billNo = input.billNo ?? (await nextNumber("WB", tx, `${input.period}-01`));
+  const [bill] = await tx
+    .insert(waterBills)
+    .values({
+      billNo,
+      accountId: input.account.id,
+      customerId: input.customer.id,
+      periodId: period.id,
+      readingId: null,
+      customerType: input.customer.type,
+      classification: input.account.classification,
+      consumption: input.consumption ?? 0,
+      basicCharge: input.amount,
+      seniorDiscount: 0n,
+      otherCharges: 0n,
+      advanceApplied: 0n,
+      currentAmount: input.amount,
+      previousBalance: 0n,
+      totalAmountDue: input.amount,
+      billDate: input.billDate,
+      dueDate: input.dueDate,
+      migrated: true,
+      penaltyAssessed: input.penaltyAssessed,
+      jeId: input.jeId,
+      createdBy: actorId,
+    })
+    .returning();
+  if (!bill) throw new Error("bill insert returned no row");
+  await tx.insert(waterBillLines).values({ billId: bill.id, lineNo: 1, kind: "ADJUSTMENT", description: "Unpaid balance migrated from the old system", amount: input.amount, createdBy: actorId });
+  return { id: bill.id, billNo };
 }
